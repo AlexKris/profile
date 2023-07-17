@@ -1,0 +1,90 @@
+#!name=Bilibili AdBlock
+#!desc=哔哩哔哩去广告
+#!upadteTime=2023-06-29
+
+[MITM]
+hostname = %APPEND% -broadcast.chat.bilibili.com,-*cdn*.biliapi.net,-*tracker*.biliapi.net,app.bilibili.com,api.live.bilibili.com,*.bilibili.com,*.bilibili.*,grpc.biliapi.net,*biliapi.net
+
+[Map Local]
+# BiliJson 播放页处理
+# BiliBili_哔哩哔哩_屏蔽广告浮窗
+^https?:\/\/api\.bilibili\.com\/pgc\/activity\/deliver\/material\/receive data="https://raw.githubusercontent.com/AlexKris/rule/main/surge/blank/blank_dict.json"
+# BiliBili_哔哩哔哩_Material_Ad
+^https?:\/\/api\.bilibili\.com\/x\/vip\/ads\/material\/report data="https://raw.githubusercontent.com/AlexKris/rule/main/surge/blank/blank_dict.json"
+# BiliBili_哔哩哔哩_小卡片广告
+^https://api.bilibili.com/pgc/season/player/cards data="https://raw.githubusercontent.com/AlexKris/rule/main/surge/blank/blank_dict.json"
+
+# BiliJson 开屏及隐私
+# BiliBili_哔哩哔哩_应用开屏去广告@bm7
+^https://app.bilibili.com/x/v2/splash/show data="https://raw.githubusercontent.com/AlexKris/rule/main/surge/blank/blank_dict.json"
+
+# BiliJson Tab页处理
+# BiliBili_哔哩哔哩_漫画去广告
+^https?:\/\/manga\.bilibili\.com\/twirp\/comic\.v\d\.Comic\/(Flash|ListFlash|GetActivityTab) data="https://raw.githubusercontent.com/AlexKris/rule/main/surge/blank/blank_dict.json"
+
+[URL Rewrite]
+# BiliBili_哔哩哔哩_屏蔽IP请求
+^https?:\/\/app\.bilibili\.com\/x\/resource\/ip - reject
+
+# BiliProto 处理
+# BiliBili_哔哩哔哩_屏蔽DefaultWord
+^https?:\/\/(app\.bilibili\.com|grpc\.biliapi\.net)\/bilibili\.app\.interface\.v1\.Search\/Default - reject
+
+[Script]
+# BiliJson 播放页处理
+# BiliBili_哔哩哔哩_视频播放下方商品推广
+bili.json.v1 = type=http-response,pattern=^https?:\/\/api\.bili(api|bili)\.(net|com)\/pgc\/season\/app\/related\/recommend\?,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+
+# BiliJson 直播间处理
+# BiliBili_哔哩哔哩_屏蔽直播间商品广告浮窗[还有一个域名]
+bili.json.v2 = type=http-response,pattern=^https?:\/\/api\.live\.bilibili\.com\/xlive\/e-commerce-interface\/v\d\/ecommerce-user\/get_shopping_info\?,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_直播去广告@bm7
+bili.json.v3 = type=http-response,pattern=^https?:\/\/api\.live\.bilibili\.com\/xlive\/app-room\/v1\/index\/getInfoByRoom,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+
+# BiliJson 开屏及隐私
+# BiliBili_哔哩哔哩_应用开屏广告预加载@yjqiang
+bili.json.v4 = type=http-response,pattern=^https:\/\/app\.bilibili\.com\/x\/v2\/splash\/list,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+
+# BiliJson 高码率仅粉版
+# BiliBili_哔哩哔哩_1080P高码率+4K画质[番剧和影视除外]
+bili.json.v5 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/v2\/account\/myinfo\?,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+
+# BiliJson Tab页处理
+# BiliBili_哔哩哔哩_屏蔽直播页顶部轮播图
+bili.json.v6 = type=http-response,pattern=^https?:\/\/api\.live\.bilibili\.com\/xlive\/app-interface\/v2\/index\/feed,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_推荐去广告
+bili.json.v7 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/v2\/feed\/index,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_追番去广告
+bili.json.v8 = type=http-response,pattern=^https?:\/\/api\.(bilibili|biliapi)\.(com|net)\/pgc\/page\/bangumi,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_观影页面去广告
+bili.json.v9 = type=http-response,pattern=^https?:\/\/api\.(bilibili|biliapi)\.(com|net)\/pgc\/page\/cinema\/tab\?,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+
+# BiliJson 外观处理
+# BiliBili_哔哩哔哩_标签页处理
+bili.json.v10 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/resource\/show\/tab,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_我的页面处理
+bili.json.v11 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/v2\/account\/mine,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_屏蔽首页右上活动
+bili.json.v12 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/resource\/top\/activity,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+# BiliBili_哔哩哔哩_热搜发现
+bili.json.v13 = type=http-response,pattern=^https://app.bilibili.com/x/v2/search/square,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
+
+# BiliProto 处理
+# BiliBili_哔哩哔哩_搜索去广告
+bili.ad.v1 = type=http-response,pattern=^https?:\/\/(grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.polymer\.app\.search\.v1\.Search\/SearchAll$,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://raw.githubusercontent.com/BiliUniverse/ADBlock/main/js/BiliBili.ADBlock.response.js
+# BiliBili_哔哩哔哩_交互点赞投票弹幕
+# bili.ad.v2 = type=http-response,pattern=^https:\/\/grpc\.biliapi\.net\/bilibili\.community\.service\.dm\.v1\.DM\/DmView,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://raw.githubusercontent.com/Maasea/sgmodule/master/Script/Bilibili/dist/bilibili.helper.beta.js
+# BiliBili_哔哩哔哩_青少年弹窗
+bili.ad.v3 = type=http-response,pattern=^https:\/\/(grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.app\.interface\.v1\.Teenagers\/ModeStatus,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://raw.githubusercontent.com/BiliUniverse/ADBlock/main/js/BiliBili.ADBlock.response.js
+# BiliBili_哔哩哔哩_UP主推荐广告[适配ipad端]@app2smile
+bili.ad.v4 = type=http-response,pattern=^https?:\/\/(app\.bilibili\.com|grpc\.biliapi\.net)\/bilibili\.app\.view\.v1\.View\/View$,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_proto.js
+# BiliBili_哔哩哔哩_动态页面去广告@app2smile@kokoryh
+bili.ad.v5 = type=http-response,pattern=^https?:\/\/(app\.bilibili\.com|grpc\.biliapi\.net)\/bilibili\.app\.dynamic\.v2\.Dynamic\/DynAll$,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_proto.js
+
+# BiliNotAdded
+# BiliBili_哔哩哔哩_启动时开启直连模式[自行启用]
+# bili.other.v1 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/resource\/domain,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_startup_direct.js
+# BiliBili_哔哩哔哩_繁体CC字幕转中文简体[自行启用hostname=aisubtitle.hdslb.com,i0.hdslb.com]
+# bili.other.v2 = type=http-response,pattern=^https?:\/\/.*\.hdslb\.com\/bfs\/subtitle\/.+\.json,requires-body=1,binary-body-mode=1,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_cc.js
+# BiliBili_哔哩哔哩_去除统一设置的皮肤[注释留存]
+# bili.other.v3 = type=http-response,pattern=^https?:\/\/app\.bilibili\.com\/x\/resource\/show\/skin\?,requires-body=1,binary-body-mode=0,max-size=0,script-path=https://github.com/ddgksf2013/Scripts/raw/master/bilibili_json.js
