@@ -1,5 +1,5 @@
-name: "Bilibili"
-desc: "Bilibili"
+name: Bilibili AdBlock
+desc: 哔哩哔哩去广告
 
 http:
   rewrite:

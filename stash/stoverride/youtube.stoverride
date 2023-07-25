@@ -1,5 +1,5 @@
-name: "YoutubeAds"
-desc: "YoutubeAds"
+name: Youtube AdBlock
+desc: Youtube去广告
 
 http:
   rewrite:

@@ -1,5 +1,5 @@
-name: "Weibo"
-desc: "Weibo"
+name: Weibo AdBlock
+desc: 微博去广告
 
 http:
   rewrite:
