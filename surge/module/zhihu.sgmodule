@@ -1,6 +1,5 @@
 #!name=Zhihu AdBlock
 #!desc=知乎去广告
-#!upadteTime=2023-06-29
 
 [Rule]
 # 拦截开屏广告

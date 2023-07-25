@@ -1,6 +1,5 @@
 #!name=Bilibili AdBlock
 #!desc=哔哩哔哩去广告
-#!upadteTime=2023-06-29
 
 [MITM]
 hostname = %APPEND% -broadcast.chat.bilibili.com,-*cdn*.biliapi.net,-*tracker*.biliapi.net,app.bilibili.com,api.live.bilibili.com,*.bilibili.com,*.bilibili.*,grpc.biliapi.net,*biliapi.net

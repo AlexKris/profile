@@ -1,6 +1,5 @@
 #!name=Weibo AdBlock
 #!desc=微博去广告
-#!upadteTime=2023-06-29
 
 [MITM]
 hostname = %APPEND% api.weibo.*,*.api.weibo.*,mapi.weibo.*,*.uve.weibo.com,new.vip.weibo.cn,boot.biz.weibo.com
