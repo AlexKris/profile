@@ -1,0 +1,225 @@
+port: 7890
+socks-port: 7891
+redir-port: 7892
+mixed-port: 7893
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+
+dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:53
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - localhost.ptlogin2.qq.com
+    - +.srv.nintendo.net
+    - +.stun.playstation.net
+    - +.msftconnecttest.com
+    - +.msftncsi.com
+    - +.xboxlive.com
+    - msftconnecttest.com
+    - xbox.*.microsoft.com
+    - "*.battlenet.com.cn"
+    - "*.battlenet.com"
+    - "*.blzstatic.cn"
+    - "*.battle.net"
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+    - https://dns.google/dns-query
+    - https://dns.alidns.com/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+
+proxy-providers:
+  sub:
+    type: http
+    url: 
+    interval: 86400
+    path: ./proxy_providers/sub.yaml
+    health-check:
+      enable: true
+      interval: 1800
+      url: http://www.gstatic.com/generate_204
+
+proxy-groups:
+  # 功能分组
+  - name: 选择代理
+    type: select
+    proxies: &proxies
+      - 自动选择
+      - 手动选择
+      - HK 香港
+      - TW 台湾
+      - SG 新加坡
+      - JP 日本
+      - US 美国
+      - DIRECT
+  - name: Bilibili
+    type: select
+    proxies:
+      - DIRECT
+      - HK 香港
+      - TW 台湾
+  - name: Bahamut
+    type: select
+    proxies:
+      - TW 台湾
+  - name: Netflix
+    type: select
+    proxies: *proxies
+  - name: Disney+
+    type: select
+    proxies: *proxies
+  - name: Spotify
+    type: select
+    proxies: *proxies
+  - name: YouTube
+    type: select
+    proxies: *proxies
+  - name: Speedtest
+    type: select
+    proxies: *proxies
+  - name: 默认
+    type: select
+    proxies:
+      - 选择代理
+      - DIRECT
+  # 基于地区分组
+  - name: HK 香港
+    filter: "澳门|🇲🇴|港|🇭🇰|HK|(?i)Hong"
+    type: select
+    use:
+      - sub
+  - name: TW 台湾
+    filter: "台|🇹🇼|湾|TW|(?i)Taiwan"
+    interval: 120
+    lazy: true
+    type: url-test
+    url: http://cp.cloudflare.com/generate_204
+    use:
+      - sub
+  - name: SG 新加坡
+    filter: "新加坡|坡|狮城|🇸🇬|SG|(?i)Singapore"
+    interval: 120
+    lazy: true
+    type: url-test
+    url: http://cp.cloudflare.com/generate_204
+    use:
+      - sub
+  - name: JP 日本
+    filter: "日|🇯🇵|东京|JP|(?i)Japan"
+    interval: 120
+    lazy: true
+    type: url-test
+    url: http://cp.cloudflare.com/generate_204
+    use:
+      - sub
+  - name: US 美国
+    filter: "美|🇺🇲|US|(?i)States|America"
+    type: select
+    use:
+      - sub
+  - name: 自动选择
+    interval: 120
+    lazy: true
+    type: url-test
+    url: http://cp.cloudflare.com/generate_204
+    use:
+      - sub
+  - name: 手动选择
+    type: select
+    proxies:
+      - Sub
+  - name: Sub
+    type: select
+    use:
+      - sub
+
+rules:
+  # Nexitally
+  - DOMAIN-SUFFIX,myguyo.xyz,DIRECT
+  # Bilibili
+  - GEOSITE,bilibili,Bilibili
+  # Bahamut
+  - GEOSITE,bahamut,Bahamut
+  # - SCRIPT,quic,REJECT
+  # Netflix
+  - GEOSITE,netflix,Netflix
+  # Disney+
+  - GEOSITE,disney,Disney+
+  # Spotify
+  - GEOSITE,spotify,Spotify
+  # Speedtest
+  - GEOSITE,speedtest,Speedtest
+  # GitHub
+  - GEOSITE,github,选择代理
+  # Telegram
+  # - IP-ASN,62014,选择代理,no-resolve
+  # - IP-ASN,59930,选择代理,no-resolve
+  # - IP-ASN,44907,选择代理,no-resolve
+  # - IP-ASN,211157,选择代理,no-resolve
+  - PROCESS-NAME,Telegram.exe,选择代理
+  - PROCESS-NAME,Telegram,选择代理
+  - GEOSITE,telegram,选择代理
+  # YouTube
+  - GEOSITE,youtube,YouTube
+  # OpenAI
+  - GEOSITE,openai,US 美国
+  # Google
+  - GEOSITE,google,US 美国
+  # Twitter
+  - GEOSITE,twitter,选择代理
+  - DOMAIN-SUFFIX,tapbots.com,选择代理
+  # Instagram
+  - GEOSITE,instagram,选择代理
+  # Facebook
+  - GEOSITE,facebook,选择代理
+  # Steam
+  - GEOSITE,steam@cn,DIRECT
+  - GEOSITE,steam,选择代理
+  # Apple LBS
+  - DOMAIN-SUFFIX,iphone-ld.apple.com,DIRECT
+  - DOMAIN-SUFFIX,lcdn-locator.apple.com,DIRECT
+  - DOMAIN-SUFFIX,lcdn-registration.apple.com,DIRECT
+  - DOMAIN-SUFFIX,push.apple.com,DIRECT
+  # Apple OCSP
+  - PROCESS-NAME,trustd,选择代理
+  # Microsoft
+  - GEOSITE,microsoft@cn,DIRECT
+  - GEOSITE,microsoft,选择代理
+  - GEOSITE,xbox,选择代理
+  # common proxy utils
+  - PROCESS-NAME,v2ray,DIRECT
+  - PROCESS-NAME,Surge,DIRECT
+  - PROCESS-NAME,ss-local,DIRECT
+  - PROCESS-NAME,privoxy,DIRECT
+  - PROCESS-NAME,trojan,DIRECT
+  - PROCESS-NAME,trojan-go,DIRECT
+  - PROCESS-NAME,naive,DIRECT
+  - PROCESS-NAME,CloudflareWARP,DIRECT
+  - PROCESS-NAME,Cloudflare WARP,DIRECT
+  - IP-CIDR,162.159.193.0/24,DIRECT,no-resolve
+  - PROCESS-NAME,p4pclient,DIRECT
+  - PROCESS-NAME,Thunder,DIRECT
+  - PROCESS-NAME,DownloadService,DIRECT
+  - PROCESS-NAME,qbittorrent,DIRECT
+  - PROCESS-NAME,Transmission,DIRECT
+  - PROCESS-NAME,fdm,DIRECT
+  - PROCESS-NAME,aria2c,DIRECT
+  - PROCESS-NAME,Folx,DIRECT
+  - PROCESS-NAME,NetTransport,DIRECT
+  - PROCESS-NAME,uTorrent,DIRECT
+  - PROCESS-NAME,WebTorrent,DIRECT
+  - GEOIP,LAN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,默认
