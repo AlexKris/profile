@@ -1,7 +1,0 @@
-#!name=UDP Switch
-#!desc=udp-priority 开关
-
-[General]
-# 游戏优化
-# 开启后将在系统负载非常高，数据包处理出现延迟时，优先处理 UDP 数据包。
-udp-priority = true
