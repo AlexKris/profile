@@ -1,165 +1,125 @@
+mode: rule
+log-level: info
+http:
+  ca: ''
+  ca-passphrase: ''
+script:
+  shortcuts:
+    quic: network == 'udp' and dst_port == 443
+dns:
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://dns.alidns.com/dns-query
+  skip-cert-verify: true
+  fake-ip-filter: 
+    - '+.lan'
+    - 'localhost.ptlogin2.qq.com'
+    - '*.battle.net'
+    - '*.blzstatic.cn'
+    - '*.battlenet.com'
+    - '*.battlenet.com.cn'
+    - 'lens.l.google.com'
+    - '+.srv.nintendo.net'
+    - '+.stun.playstation.net'
+    - '+.msftncsi.com'
+    - '+.xboxlive.com'
+    - 'msftconnecttest.com'
+    - 'xbox.*.*.microsoft.com'
+    - 'xbox.*.microsoft.com'
+    - '+.msftconnecttest.com'
+    - '*.msftncsi.com'
+    - '*.msftconnecttest.com'
+    - '*.mcdn.bilivideo.cn'
+# 提供者引用
+pp: &a1 {interval: 3600, benchmark-timeout: 5, benchmark-url: http://1.1.1.1/generate_204}
+gm: &a2 {type: select,   proxies: [Proxy, HK, JP, AUTO, DIRECT]}
+st: &a3 {type: select,   proxies: [Proxy, HK, TW, SG, JP, US, AUTO, DIRECT]}
+gp: &a4 {type: select,   use: [sub1, sub2], lazy: true}
+pr: &a5 {type: select,   proxies: [DIRECT, Sub1, Sub2], lazy: true}
+ut: &a6 {type: url-test, use: [sub1, sub2], lazy: true, tolerance: 50}
 proxy-providers:
-  sub:
-    url: 
-    interval: 600
-    benchmark-timeout: 5
-    benchmark-url: http://cp.cloudflare.com/generate_204
-
+  sub1:
+    url: http://sub1.info
+    <<: *a1
+    filter: ^(?!.*Premium)
+  sub2:
+    url: http://sub2.info
+    <<: *a1
 proxy-groups:
   # 功能分组
-  - name: 选择代理
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Proxy.png
-    type: select
-    proxies: &proxies
-      - 自动选择
-      - 手动选择
-      - HK 香港
-      - TW 台湾
-      - SG 新加坡
-      - JP 日本
-      - US 美国
-      - DIRECT
-  - name: Netflix
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Netflix.png
-    type: select
-    proxies: *proxies
-  - name: Disney+
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Disney%2B.png
-    type: select
-    proxies: *proxies
-  - name: Spotify
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Spotify.png
-    type: select
-    proxies: *proxies
-  - name: YouTube
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/YouTube.png
-    type: select
-    proxies: *proxies
-  - name: Speedtest
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Speedtest.png
-    type: select
-    proxies: *proxies
-  - name: 默认
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Final.png
-    type: select
-    proxies:
-      - 选择代理
-      - DIRECT
+  - {name: Proxy,       <<: *a5, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Proxy.png}
+  - {name: Bilibili,    type: select, proxies: [DIRECT, HK, TW], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/bilibili_3.png}
+  - {name: Bahamut,     type: select, proxies: [TW], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Bahamut.png}
+  - {name: GlobalMedia, <<: *a2, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/StreamingSE.png}
+  - {name: Speedtest,   <<: *a3, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Speedtest.png}
+  - {name: Final,       type: select, proxies: [Proxy, DIRECT], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Final.png}
   # 基于地区分组
-  - name: HK 香港
-    filter: "澳门|🇲🇴|港|🇭🇰|HK|(?i)Hong"
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Hong_Kong.png
-    interval: 120
-    lazy: true
-    tolerance: 50
-    type: select
-    include-all: true
-    use: null
-  - name: TW 台湾
-    filter: "台|🇹🇼|湾|TW|(?i)Taiwan"
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Taiwan.png
-    interval: 120
-    lazy: true
-    tolerance: 50
-    type: url-test
-    include-all: true
-    use: null
-  - name: SG 新加坡
-    filter: "新加坡|坡|狮城|🇸🇬|SG|(?i)Singapore"
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Singapore.png
-    interval: 120
-    lazy: true
-    tolerance: 50
-    type: url-test
-    include-all: true
-    use: null
-  - name: JP 日本
-    filter: "日|🇯🇵|东京|JP|(?i)Japan"
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Japan.png
-    interval: 120
-    lazy: true
-    tolerance: 50
-    type: url-test
-    include-all: true
-    use: null
-  - name: US 美国
-    filter: "美|🇺🇲|US|(?i)States|America"
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/United_States.png
-    interval: 120
-    lazy: true
-    tolerance: 50
-    type: select
-    include-all: true
-    use: null
-  - name: 自动选择
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Auto.png
-    interval: 120
-    lazy: true
-    tolerance: 50
-    type: url-test
-    include-all: true
-    use: null
-  - name: 手动选择
-    icon: https://fastly.jsdelivr.net/gh/Koolson/Qure/IconSet/Color/Static.png
-    interval: 120
-    lazy: true
-    type: select
-    include-all: null
-    use: null
-    proxies:
-      - Sub
-  - name: Sub
-    type: select
-    use:
-      - sub
-    icon: 
-
+  - {name: HK,   <<: *a4, filter: "港|🇭🇰|HK|(?i)Hong", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Hong_Kong.png}
+  - {name: TW,   <<: *a4, filter: "台|🇹🇼|湾|TW|(?i)Taiwan", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Taiwan.png}
+  - {name: SG,   <<: *a4, filter: "新加坡|坡|狮城|🇸🇬|SG|(?i)Singapore", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Singapore.png}
+  - {name: JP,   <<: *a4, filter: "日|🇯🇵|东京|JP|(?i)Japan", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Japan.png}
+  - {name: US,   <<: *a4, filter: "美|🇺🇲|US|(?i)States|America", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/United_States.png}
+  - {name: AUTO, <<: *a6, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Auto.png}
+  # 提供者
+  - {name: Sub1, type: select, use: [sub1], icon: https://icon1.png}
+  - {name: Sub2, type: select, use: [sub2], icon: https://icon2.png}
 rules:
-  - DOMAIN-SUFFIX,myguyo.xyz,DIRECT
+  # MT5
+  - DOMAIN-SUFFIX,mql5.com,DIRECT
+  # Quic
   - SCRIPT,quic,REJECT
+  # Bilibili
+  - GEOSITE,bilibili,Bilibili
+  # Bahamut
+  - GEOSITE,bahamut,Bahamut
   # Netflix
-  - GEOSITE,netflix,Netflix
+  - GEOSITE,netflix,GlobalMedia
   # Disney+
-  - GEOSITE,disney,Disney+
+  - GEOSITE,disney,GlobalMedia
   # Spotify
-  - GEOSITE,spotify,Spotify
+  - GEOSITE,spotify,GlobalMedia
+  # Youtube
+  - GEOSITE,youtube,GlobalMedia
   # Speedtest
   - GEOSITE,speedtest,Speedtest
   # GitHub
-  - GEOSITE,github,选择代理
+  - GEOSITE,github,Proxy
   # Telegram
-  - IP-ASN,62014,选择代理,no-resolve
-  - IP-ASN,59930,选择代理,no-resolve
-  - IP-ASN,44907,选择代理,no-resolve
-  - IP-ASN,211157,选择代理,no-resolve
-  - PROCESS-NAME,Telegram.exe,选择代理
-  - PROCESS-NAME,Telegram,选择代理
-  - GEOSITE,telegram,选择代理
+  - IP-ASN,62014,Proxy,no-resolve
+  - IP-ASN,59930,Proxy,no-resolve
+  - IP-ASN,44907,Proxy,no-resolve
+  - IP-ASN,211157,Proxy,no-resolve
+  - PROCESS-NAME,Telegram.exe,Proxy
+  - PROCESS-NAME,Telegram,Proxy
+  - GEOSITE,telegram,Proxy
   # OpenAI
-  - GEOSITE,openai,US 美国
+  - GEOSITE,openai,US
   # Google
-  - GEOSITE,google,US 美国
+  - GEOSITE,google,US
   # Twitter
-  - GEOSITE,twitter,选择代理
-  - DOMAIN-SUFFIX,tapbots.com,选择代理
+  - GEOSITE,twitter,Proxy
+  - DOMAIN-SUFFIX,tapbots.com,Proxy
   # Instagram
-  - GEOSITE,instagram,选择代理
+  - GEOSITE,instagram,Proxy
   # Facebook
-  - GEOSITE,facebook,选择代理
+  - GEOSITE,facebook,Proxy
   # Steam
   - GEOSITE,steam@cn,DIRECT
-  - GEOSITE,steam,选择代理
+  - GEOSITE,steam,HK
   # Apple LBS
   - DOMAIN-SUFFIX,iphone-ld.apple.com,DIRECT
   - DOMAIN-SUFFIX,lcdn-locator.apple.com,DIRECT
   - DOMAIN-SUFFIX,lcdn-registration.apple.com,DIRECT
   - DOMAIN-SUFFIX,push.apple.com,DIRECT
   # Apple OCSP
-  - PROCESS-NAME,trustd,选择代理
+  - PROCESS-NAME,trustd,Proxy
   # Microsoft
   - GEOSITE,microsoft@cn,DIRECT
-  - GEOSITE,microsoft,选择代理
-  - GEOSITE,xbox,选择代理
+  - GEOSITE,onedirve,Proxy
+  - GEOSITE,microsoft,Proxy
+  - GEOSITE,xbox,HK
   # common proxy utils
   - PROCESS-NAME,v2ray,DIRECT
   - PROCESS-NAME,Surge,DIRECT
@@ -184,25 +144,4 @@ rules:
   - PROCESS-NAME,WebTorrent,DIRECT
   - GEOIP,LAN,DIRECT
   - GEOIP,CN,DIRECT
-  - MATCH,默认
-
-script:
-  shortcuts:
-    quic: network == 'udp' and dst_port == 443
-
-dns:
-  default-nameserver:
-    - 114.114.115.115
-    - 119.28.28.28
-    - 223.6.6.6
-    - system
-  nameserver:
-    - https://dns.alidns.com/dns-query
-    - https://doh.pub/dns-query
-
-log-level: warning
-mode: rule
-
-http:
-  ca: ''
-  ca-passphrase: ''
+  - MATCH,Final
