@@ -1,3 +1,14 @@
+# ==UserScript==
+# @ConfigName     QuantumultX配置文件
+# @Author         Chris
+# @UpdateTime     2023-07-17 18:00:00
+# @Version        1.0
+# @ConfigURL      https://raw.githubusercontent.com/AlexKris/profile/main/stash/Stash.yaml
+# ==/UserScript==
+
+# Changelog
+# [+]2023-07-17 1.初始化配置文件
+
 mode: rule
 log-level: info
 http:
@@ -13,7 +24,7 @@ dns:
   nameserver:
     - https://dns.alidns.com/dns-query
   skip-cert-verify: true
-  fake-ip-filter: 
+  fake-ip-filter:
     - '+.lan'
     - 'localhost.ptlogin2.qq.com'
     - '*.battle.net'
@@ -32,42 +43,85 @@ dns:
     - '*.msftncsi.com'
     - '*.msftconnecttest.com'
     - '*.mcdn.bilivideo.cn'
-# 提供者引用
 pp: &a1 {interval: 3600, benchmark-timeout: 5, benchmark-url: http://1.1.1.1/generate_204}
-gm: &a2 {type: select,   proxies: [Proxy, HK, JP, AUTO, DIRECT]}
-st: &a3 {type: select,   proxies: [Proxy, HK, TW, SG, JP, US, AUTO, DIRECT]}
-gp: &a4 {type: select,   use: [sub1, sub2], lazy: true}
-pr: &a5 {type: select,   proxies: [DIRECT, Sub1, Sub2], lazy: true}
-ut: &a6 {type: url-test, use: [sub1, sub2], lazy: true, tolerance: 50}
+gm: &a2 {type: select,   proxies: [Proxy, HK, JP, Flower]}
+st: &a3 {type: select,   proxies: [Proxy, HK, US, AUTO, DIRECT]}
+gp: &a4 {type: select,   use: [nexitally, dler, tag, flower, mesl], lazy: true}
+pr: &a5 {type: select,   proxies: [DIRECT, Nexitally, Dler, Tag, Flower, Atomlantis, MESL], lazy: true}
+ut: &a6 {type: url-test, use: [nexitally, dler, tag, flower, mesl], lazy: true, tolerance: 50}
 proxy-providers:
-  sub1:
-    url: http://sub1.info
+  sub:
+    url: http://sub/list
     <<: *a1
-    filter: ^(?!.*Premium)
-  sub2:
-    url: http://sub2.info
-    <<: *a1
+proxies: []
 proxy-groups:
-  # 功能分组
+  # group
   - {name: Proxy,       <<: *a5, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Proxy.png}
-  - {name: Bilibili,    type: select, proxies: [DIRECT, HK, TW], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/bilibili_3.png}
-  - {name: Bahamut,     type: select, proxies: [TW], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Bahamut.png}
   - {name: GlobalMedia, <<: *a2, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/StreamingSE.png}
+  - {name: Bahamut,     type: select, proxies: [TW], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Bahamut.png}
+  - {name: Bilibili,    type: select, proxies: [DIRECT, HK, TW], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/bilibili_3.png}
+  - {name: Apple,       type: select, proxies: [DIRECT, Proxy], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Apple_1.png}
+  - {name: OpenAI,      type: select, proxies: [US], icon: https://raw.githubusercontent.com/Orz-3/mini/master/Color/OpenAI.png}
+  - {name: Google,      type: select, proxies: [US], icon: https://raw.githubusercontent.com/Orz-3/mini/master/Color/Google.png}
+  - {name: Telegram,    type: select, proxies: [Proxy], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Telegram.png}
+  - {name: Spotify,     type: select, proxies: [DIRECT, GlobalMedia], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Spotify.png}
+  - {name: Game,        type: select, proxies: [Proxy, HK, Atomlantis], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Game.png}
   - {name: Speedtest,   <<: *a3, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Speedtest.png}
   - {name: Final,       type: select, proxies: [Proxy, DIRECT], icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Final.png}
-  # 基于地区分组
+  # area
   - {name: HK,   <<: *a4, filter: "港|🇭🇰|HK|(?i)Hong", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Hong_Kong.png}
-  - {name: TW,   <<: *a4, filter: "台|🇹🇼|湾|TW|(?i)Taiwan", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Taiwan.png}
-  - {name: SG,   <<: *a4, filter: "新加坡|坡|狮城|🇸🇬|SG|(?i)Singapore", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Singapore.png}
-  - {name: JP,   <<: *a4, filter: "日|🇯🇵|东京|JP|(?i)Japan", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Japan.png}
   - {name: US,   <<: *a4, filter: "美|🇺🇲|US|(?i)States|America", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/United_States.png}
+  - {name: JP,   <<: *a4, filter: "日|🇯🇵|东京|JP|(?i)Japan", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Japan.png}
+  # - {name: KR,   <<: *a4, filter: "韩|🇰🇷|东京|KR|(?i)Korea", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Korea.png}
+  - {name: TW,   <<: *a4, filter: "台|🇹🇼|湾|TW|(?i)Taiwan", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Taiwan.png}
+  # - {name: DE,   <<: *a4, filter: "德|🇩🇪|DE|(?i)Germany", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Germany.png}
+  # - {name: SG,   <<: *a4, filter: "新加坡|坡|狮城|🇸🇬|SG|(?i)Singapore", icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Singapore.png}
   - {name: AUTO, <<: *a6, icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Auto.png}
-  # 提供者
-  - {name: Sub1, type: select, use: [sub1], icon: https://icon1.png}
-  - {name: Sub2, type: select, use: [sub2], icon: https://icon2.png}
+  # provider
+  - {name: Sub,  type: select, use: [sub], icon: }
 rules:
+  # Proxy
+  - PROCESS-NAME,v2ray,DIRECT
+  - PROCESS-NAME,Surge,DIRECT
+  - PROCESS-NAME,ss-local,DIRECT
+  - PROCESS-NAME,privoxy,DIRECT
+  - PROCESS-NAME,trojan,DIRECT
+  - PROCESS-NAME,trojan-go,DIRECT
+  - PROCESS-NAME,naive,DIRECT
+  - PROCESS-NAME,CloudflareWARP,DIRECT
+  - PROCESS-NAME,Cloudflare WARP,DIRECT
+  - PROCESS-NAME,UUBooster,DIRECT
+  # Download
+  - PROCESS-NAME,aria2c,DIRECT
+  - PROCESS-NAME,fdm,DIRECT
+  - PROCESS-NAME,Folx,DIRECT
+  - PROCESS-NAME,NetTransport,DIRECT
+  - PROCESS-NAME,p4pclient,DIRECT
+  - PROCESS-NAME,Thunder,DIRECT
+  - PROCESS-NAME,DownloadService,DIRECT
+  - PROCESS-NAME,qbittorrent,DIRECT
+  - PROCESS-NAME,Transmission,DIRECT
+  - PROCESS-NAME,uTorrent,DIRECT
+  - PROCESS-NAME,WebTorrent,DIRECT
+  - PROCESS-NAME,WebTorrent Helper,DIRECT
+  # BestTrace
+  - PROCESS-NAME,BestTrace,DIRECT
+  # SecureCRT
+  - PROCESS-NAME,SecureCRT,DIRECT
+  # SecureFX
+  - PROCESS-NAME,SecureFX,DIRECT
+  # Citrix Viewer
+  - PROCESS-NAME,Citrix Viewer,DIRECT
+  # common proxy utils
+  - IP-CIDR,162.159.193.0/24,DIRECT,no-resolve
+  # Ali Cloud US No Proxy
+  - IP-CIDR,47.252.6.126/32,DIRECT,no-resolve
+  # NovaXNS
+  - DOMAIN-SUFFIX,xns.one,DIRECT
   # MT5
   - DOMAIN-SUFFIX,mql5.com,DIRECT
+  # 源仓库
+  - DOMAIN-SUFFIX,yckceo.com,Proxy
   # Quic
   - SCRIPT,quic,REJECT
   # Bilibili
@@ -79,7 +133,7 @@ rules:
   # Disney+
   - GEOSITE,disney,GlobalMedia
   # Spotify
-  - GEOSITE,spotify,GlobalMedia
+  - GEOSITE,spotify,Spotify
   # Youtube
   - GEOSITE,youtube,GlobalMedia
   # Speedtest
@@ -87,17 +141,17 @@ rules:
   # GitHub
   - GEOSITE,github,Proxy
   # Telegram
-  - IP-ASN,62014,Proxy,no-resolve
-  - IP-ASN,59930,Proxy,no-resolve
-  - IP-ASN,44907,Proxy,no-resolve
-  - IP-ASN,211157,Proxy,no-resolve
-  - PROCESS-NAME,Telegram.exe,Proxy
-  - PROCESS-NAME,Telegram,Proxy
-  - GEOSITE,telegram,Proxy
+  - IP-ASN,62014,Telegram,no-resolve
+  - IP-ASN,59930,Telegram,no-resolve
+  - IP-ASN,44907,Telegram,no-resolve
+  - IP-ASN,211157,Telegram,no-resolve
+  - PROCESS-NAME,Telegram.exe,Telegram
+  - PROCESS-NAME,Telegram,Telegram
+  - GEOSITE,telegram,Telegram
   # OpenAI
-  - GEOSITE,openai,US
+  - GEOSITE,openai,OpenAI
   # Google
-  - GEOSITE,google,US
+  - GEOSITE,google,Google
   # Twitter
   - GEOSITE,twitter,Proxy
   - DOMAIN-SUFFIX,tapbots.com,Proxy
@@ -107,41 +161,20 @@ rules:
   - GEOSITE,facebook,Proxy
   # Steam
   - GEOSITE,steam@cn,DIRECT
-  - GEOSITE,steam,HK
+  - GEOSITE,steam,Game
   # Apple LBS
-  - DOMAIN-SUFFIX,iphone-ld.apple.com,DIRECT
-  - DOMAIN-SUFFIX,lcdn-locator.apple.com,DIRECT
-  - DOMAIN-SUFFIX,lcdn-registration.apple.com,DIRECT
-  - DOMAIN-SUFFIX,push.apple.com,DIRECT
+  - DOMAIN-SUFFIX,iphone-ld.apple.com,Apple
+  - DOMAIN-SUFFIX,lcdn-locator.apple.com,Apple
+  - DOMAIN-SUFFIX,lcdn-registration.apple.com,Apple
+  - DOMAIN-SUFFIX,push.apple.com,Apple
   # Apple OCSP
   - PROCESS-NAME,trustd,Proxy
   # Microsoft
   - GEOSITE,microsoft@cn,DIRECT
   - GEOSITE,onedirve,Proxy
   - GEOSITE,microsoft,Proxy
-  - GEOSITE,xbox,HK
-  # common proxy utils
-  - PROCESS-NAME,v2ray,DIRECT
-  - PROCESS-NAME,Surge,DIRECT
-  - PROCESS-NAME,ss-local,DIRECT
-  - PROCESS-NAME,privoxy,DIRECT
-  - PROCESS-NAME,trojan,DIRECT
-  - PROCESS-NAME,trojan-go,DIRECT
-  - PROCESS-NAME,naive,DIRECT
-  - PROCESS-NAME,CloudflareWARP,DIRECT
-  - PROCESS-NAME,Cloudflare WARP,DIRECT
-  - IP-CIDR,162.159.193.0/24,DIRECT,no-resolve
-  - PROCESS-NAME,p4pclient,DIRECT
-  - PROCESS-NAME,Thunder,DIRECT
-  - PROCESS-NAME,DownloadService,DIRECT
-  - PROCESS-NAME,qbittorrent,DIRECT
-  - PROCESS-NAME,Transmission,DIRECT
-  - PROCESS-NAME,fdm,DIRECT
-  - PROCESS-NAME,aria2c,DIRECT
-  - PROCESS-NAME,Folx,DIRECT
-  - PROCESS-NAME,NetTransport,DIRECT
-  - PROCESS-NAME,uTorrent,DIRECT
-  - PROCESS-NAME,WebTorrent,DIRECT
+  - GEOSITE,xbox,Game
+  # Lan And CN
   - GEOIP,LAN,DIRECT
   - GEOIP,CN,DIRECT
   - MATCH,Final
