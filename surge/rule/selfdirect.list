@@ -1,0 +1,39 @@
+# > MT5
+DOMAIN-SUFFIX,mql5.com
+# > Nexitally
+DOMAIN-SUFFIX,myguyo.xyz
+# > Tag
+DOMAIN,tagcdnsub.work
+DOMAIN,dy.tagsub.net
+DOMAIN,support.tagsssubscribe.com
+# > Flower
+DOMAIN,api.huacloud.xyz
+# > Kuromis
+DOMAIN,kuromisubs.shop
+# > MESL
+DOMAIN,in.mesl.cloud
+# > Proxy
+PROCESS-NAME,Stash
+PROCESS-NAME,v2ray
+PROCESS-NAME,ss-local
+PROCESS-NAME,UUBooster
+# > Download
+PROCESS-NAME,aria2c
+PROCESS-NAME,fdm
+PROCESS-NAME,Folx
+PROCESS-NAME,NetTransport
+PROCESS-NAME,Thunder
+PROCESS-NAME,Transmission
+PROCESS-NAME,uTorrent
+PROCESS-NAME,WebTorrent
+PROCESS-NAME,WebTorrent Helper
+# > BestTrace
+PROCESS-NAME,BestTrace
+# > SecureCRT
+PROCESS-NAME,SecureCRT
+# > SecureFX
+PROCESS-NAME,SecureFX
+# > Nutstore
+PROCESS-NAME,Nutstore
+# > Citrix Viewer
+PROCESS-NAME,Citrix Viewer
