@@ -173,6 +173,8 @@ ${Green_font_prefix}0.${Font_color_suffix} 升级脚本
 ${Green_font_prefix}1.${Font_color_suffix} TCP窗口调优
 ${Green_font_prefix}2.${Font_color_suffix} 开启内核转发
 ${Green_font_prefix}3.${Font_color_suffix} 系统资源限制调优
+${Green_font_prefix}4.${Font_color_suffix} 执行所有优化
+${Green_font_prefix}5.${Font_color_suffix} 退出脚本
 "
 get_system_info
 echo -e "当前系统信息: ${Font_color_suffix}$opsy ${Green_font_prefix}$virtual${Font_color_suffix} $arch ${Green_font_prefix}$kern${Font_color_suffix}
@@ -191,6 +193,14 @@ echo -e "当前系统信息: ${Font_color_suffix}$opsy ${Green_font_prefix}$virt
     ;;
   3)
     ulimit_tune
+    ;;
+  4)
+    tcp_tune
+    enable_forwarding
+    ulimit_tune
+    ;;
+  5)
+    exit 0
     ;;
   *)
   clear
