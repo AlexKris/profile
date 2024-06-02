@@ -82,7 +82,7 @@ sysctl -p && sysctl --system
 }
 
 Update_Shell(){
-  wget -N "https://github.com/AlexKris/profile/blob/main/tool/tools.sh" -O tools.sh && chmod +x tools.sh && ./tools.sh
+  wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/tools.sh" -O tools.sh && chmod +x tools.sh && ./tools.sh
 }
 
 get_opsy() {
