@@ -18,48 +18,6 @@ Linux网络优化脚本
 }
 
 tcp_tune(){ # 调整系统TCP参数，优化网络性能
-sed -i '/net.ipv4.tcp_no_metrics_save/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_ecn/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_frto/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_mtu_probing/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_rfc1337/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_sack/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_fack/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_window_scaling/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_adv_win_scale/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_moderate_rcvbuf/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_rmem/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_wmem/d' /etc/sysctl.conf
-sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
-sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
-sed -i '/net.ipv4.udp_rmem_min/d' /etc/sysctl.conf
-sed -i '/net.ipv4.udp_wmem_min/d' /etc/sysctl.conf
-sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
-cat >> /etc/sysctl.conf << EOF
-net.ipv4.tcp_no_metrics_save=1
-net.ipv4.tcp_ecn=0
-net.ipv4.tcp_frto=0
-net.ipv4.tcp_mtu_probing=0
-net.ipv4.tcp_rfc1337=0
-net.ipv4.tcp_sack=1
-net.ipv4.tcp_fack=1
-net.ipv4.tcp_window_scaling=1
-net.ipv4.tcp_adv_win_scale=1
-net.ipv4.tcp_moderate_rcvbuf=1
-net.core.rmem_max=3686400
-net.core.wmem_max=3686400
-net.ipv4.tcp_rmem=4096 87380 3686400
-net.ipv4.tcp_wmem=4096 87380 3686400
-net.ipv4.udp_rmem_min=8192
-net.ipv4.udp_wmem_min=8192
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-EOF
-sysctl -p && sysctl --system
-}
-
-tcp_tune_new(){ # 调整系统TCP参数，优化网络性能
 sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_no_metrics_save/d' /etc/sysctl.conf
@@ -69,89 +27,49 @@ sed -i '/net.ipv4.tcp_mtu_probing/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_rfc1337/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_sack/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_fack/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_dsack/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_window_scaling/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_adv_win_scale/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_moderate_rcvbuf/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_rmem/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_wmem/d' /etc/sysctl.conf
-sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
-sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
-sed -i '/net.ipv4.udp_rmem_min/d' /etc/sysctl.conf
-sed -i '/net.ipv4.udp_wmem_min/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_timestamps/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_syn_retries/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_synack_retries/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_retries2/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_keepalive_time/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_keepalive_probes/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_keepalive_intvl/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_adv_win_scale/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_moderate_rcvbuf/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_slow_start_after_idle/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_fin_timeout/d' /etc/sysctl.conf
+sed -i '/net.ipv4.netdev_max_backlog/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_tw_reuse/d' /etc/sysctl.conf
-sed -i '/net.core.somaxconn/d' /etc/sysctl.conf
-sed -i '/net.core.netdev_max_backlog/d' /etc/sysctl.conf
-sed -i '/net.core.wmem_default/d' /etc/sysctl.conf
-sed -i '/net.core.rmem_default/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_syncookies/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.log_martians/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.log_martians/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.accept_source_route/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.accept_source_route/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.arp_announce/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.lo.arp_announce/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.arp_announce/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_rmem/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_wmem/d' /etc/sysctl.conf
+sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
+sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
+sed -i '/net.ipv4.udp_rmem_min/d' /etc/sysctl.conf
+sed -i '/net.ipv4.udp_wmem_min/d' /etc/sysctl.conf
 cat >> /etc/sysctl.conf << EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 net.ipv4.tcp_no_metrics_save=1
-net.ipv4.tcp_ecn=0
+net.ipv4.tcp_ecn=1
 net.ipv4.tcp_frto=0
-net.ipv4.tcp_mtu_probing=0
-# net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_mtu_probing=1
 net.ipv4.tcp_rfc1337=0
 net.ipv4.tcp_sack=1
 net.ipv4.tcp_fack=1
+net.ipv4.tcp_dsack=1
 net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_timestamps=1
 net.ipv4.tcp_adv_win_scale=1
-# net.ipv4.tcp_adv_win_scale=-2
 net.ipv4.tcp_moderate_rcvbuf=1
-net.core.rmem_max=3686400
-net.core.wmem_max=3686400
-net.ipv4.tcp_rmem=4096 87380 3686400
-net.ipv4.tcp_wmem=4096 87380 3686400
+net.ipv4.tcp_slow_start_after_idle=0
+net.core.netdev_max_backlog=2500
+net.ipv4.tcp_tw_reuse=1
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
 net.ipv4.udp_rmem_min=8192
 net.ipv4.udp_wmem_min=8192
-net.ipv4.tcp_timestamps=1
-net.ipv4.tcp_syn_retries=3
-net.ipv4.tcp_synack_retries=3
-net.ipv4.tcp_retries2=5
-net.ipv4.tcp_keepalive_time=300
-net.ipv4.tcp_keepalive_probes=2
-net.ipv4.tcp_keepalive_intvl=2
-net.ipv4.tcp_slow_start_after_idle=0
-net.ipv4.tcp_fin_timeout=30
-net.ipv4.tcp_tw_reuse=1
-net.core.somaxconn=32768
-net.core.netdev_max_backlog=32768
-net.core.wmem_default=3686400
-net.core.rmem_default=3686400
-net.ipv4.tcp_syncookies=1
-net.ipv4.conf.default.rp_filter=2
-net.ipv4.conf.all.rp_filter=2
-net.ipv4.conf.all.log_martians=1
-net.ipv4.conf.default.log_martians=1
-net.ipv4.conf.all.accept_source_route=0
-net.ipv4.conf.default.accept_source_route=0
-net.ipv4.conf.default.arp_announce=2
-net.ipv4.conf.lo.arp_announce=2
-net.ipv4.conf.all.arp_announce=2
 EOF
 sysctl -p && sysctl --system
 }
 
-tcp_tune_new_nat(){ # 调整系统TCP参数，优化网络性能
+tcp_tune_nat(){ # 调整系统TCP参数，优化网络性能
 sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_no_metrics_save/d' /etc/sysctl.conf
@@ -161,82 +79,44 @@ sed -i '/net.ipv4.tcp_mtu_probing/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_rfc1337/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_sack/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_fack/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_dsack/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_window_scaling/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_timestamps/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_adv_win_scale/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_moderate_rcvbuf/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_slow_start_after_idle/d' /etc/sysctl.conf
+sed -i '/net.ipv4.netdev_max_backlog/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_tw_reuse/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_rmem/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_wmem/d' /etc/sysctl.conf
 sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
 sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
 sed -i '/net.ipv4.udp_rmem_min/d' /etc/sysctl.conf
 sed -i '/net.ipv4.udp_wmem_min/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_timestamps/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_syn_retries/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_synack_retries/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_retries2/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_keepalive_time/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_keepalive_probes/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_keepalive_intvl/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_slow_start_after_idle/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_fin_timeout/d' /etc/sysctl.conf
-sed -i '/net.core.somaxconn/d' /etc/sysctl.conf
-sed -i '/net.core.netdev_max_backlog/d' /etc/sysctl.conf
-sed -i '/net.core.wmem_default/d' /etc/sysctl.conf
-sed -i '/net.core.rmem_default/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_syncookies/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.log_martians/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.log_martians/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.accept_source_route/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.accept_source_route/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.arp_announce/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.lo.arp_announce/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.arp_announce/d' /etc/sysctl.conf
 cat >> /etc/sysctl.conf << EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 net.ipv4.tcp_no_metrics_save=1
-net.ipv4.tcp_ecn=0
+net.ipv4.tcp_ecn=1
 net.ipv4.tcp_frto=0
-net.ipv4.tcp_mtu_probing=0
-# net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_mtu_probing=1
 net.ipv4.tcp_rfc1337=0
 net.ipv4.tcp_sack=1
 net.ipv4.tcp_fack=1
+net.ipv4.tcp_dsack=1
 net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_timestamps=1
 net.ipv4.tcp_adv_win_scale=1
-# net.ipv4.tcp_adv_win_scale=-2
 net.ipv4.tcp_moderate_rcvbuf=1
-net.core.rmem_max=33554432
-net.core.wmem_max=33554432
-net.ipv4.tcp_rmem=4096 87380 33554432
-net.ipv4.tcp_wmem=4096 16384 33554432
+net.ipv4.tcp_slow_start_after_idle=0
+net.core.netdev_max_backlog=2500
+net.ipv4.tcp_tw_reuse=0
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
 net.ipv4.udp_rmem_min=8192
 net.ipv4.udp_wmem_min=8192
-net.ipv4.tcp_timestamps=1
-net.ipv4.tcp_syn_retries=3
-net.ipv4.tcp_synack_retries=3
-net.ipv4.tcp_retries2=5
-net.ipv4.tcp_keepalive_time=300
-net.ipv4.tcp_keepalive_probes=2
-net.ipv4.tcp_keepalive_intvl=2
-net.ipv4.tcp_slow_start_after_idle=0
-net.ipv4.tcp_fin_timeout=30
-net.core.somaxconn=32768
-net.core.netdev_max_backlog=32768
-net.core.wmem_default=33554432
-net.core.rmem_default=33554432
-net.ipv4.tcp_syncookies=1
-net.ipv4.conf.default.rp_filter=2
-net.ipv4.conf.all.rp_filter=2
-net.ipv4.conf.all.log_martians=1
-net.ipv4.conf.default.log_martians=1
-net.ipv4.conf.all.accept_source_route=0
-net.ipv4.conf.default.accept_source_route=0
-net.ipv4.conf.default.arp_announce=2
-net.ipv4.conf.lo.arp_announce=2
-net.ipv4.conf.all.arp_announce=2
 EOF
 sysctl -p && sysctl --system
 }
@@ -259,43 +139,7 @@ ulimit_tune(){
 echo "1000000" > /proc/sys/fs/file-max
 sed -i '/fs.file-max/d' /etc/sysctl.conf
 cat >> '/etc/sysctl.conf' << EOF
-fs.file-max=1000000
-EOF
-sysctl -p && sysctl --system
-}
-
-ulimit_tune_new(){
-echo "1000000" > /proc/sys/fs/file-max
-sed -i '/fs.file-max/d' /etc/sysctl.conf
-sed -i '/fs.inotify.max_user_instances/d' /etc/sysctl.conf
-sed -i '/net.ipv4.route.gc_timeout/d' /etc/sysctl.conf
-sed -i '/kernel.panic/d' /etc/sysctl.conf
-sed -i '/kernel.core_pattern/d' /etc/sysctl.conf
-sed -i '/kernel.panic_on_oom/d' /etc/sysctl.conf
-sed -i '/vm.panic_on_oom/d' /etc/sysctl.conf
-sed -i '/vm.overcommit_memory/d' /etc/sysctl.conf
-sed -i '/vm.swappiness/d' /etc/sysctl.conf
-sed -i '/vm.dirty_ratio/d' /etc/sysctl.conf
-sed -i '/vm.vfs_cache_pressure/d' /etc/sysctl.conf
-sed -i '/kernel.shmmax/d' /etc/sysctl.conf
-sed -i '/kernel.shmall/d' /etc/sysctl.conf
-sed -i '/kernel.sysrq/d' /etc/sysctl.conf
-sed -i '/vm.zone_reclaim_mode/d' /etc/sysctl.conf
-cat >> '/etc/sysctl.conf' << EOF
 fs.file-max=1048575
-fs.inotify.max_user_instances=8192
-net.ipv4.route.gc_timeout=100
-kernel.panic=1
-kernel.core_pattern=core_%e
-vm.panic_on_oom=1
-vm.overcommit_memory=1
-vm.swappiness=10
-vm.dirty_ratio=10
-vm.vfs_cache_pressure=250
-kernel.shmmax=4294967296
-kernel.shmall=1073741824
-kernel.sysrq=1
-vm.zone_reclaim_mode=0
 EOF
 sysctl -p && sysctl --system
 }
@@ -390,14 +234,11 @@ menu() {
   echo -e "\
 ${Green_font_prefix}1.${Font_color_suffix} 升级脚本
 ${Green_font_prefix}2.${Font_color_suffix} TCP窗口调优
-${Green_font_prefix}3.${Font_color_suffix} TCP窗口调优(新版)
-${Green_font_prefix}4.${Font_color_suffix} TCP窗口调优(新版)(NAT)
-${Green_font_prefix}5.${Font_color_suffix} 开启内核转发
-${Green_font_prefix}6.${Font_color_suffix} 系统资源限制调优
-${Green_font_prefix}7.${Font_color_suffix} 系统资源限制调优(新版)
-${Green_font_prefix}8.${Font_color_suffix} 执行所有优化
-${Green_font_prefix}9.${Font_color_suffix} 执行所有优化(新版)
-${Green_font_prefix}10.${Font_color_suffix} 执行所有优化(新版)(NAT)
+${Green_font_prefix}3.${Font_color_suffix} TCP窗口调优(NAT)
+${Green_font_prefix}4.${Font_color_suffix} 开启内核转发
+${Green_font_prefix}5.${Font_color_suffix} 系统资源限制调优
+${Green_font_prefix}6.${Font_color_suffix} 执行所有优化
+${Green_font_prefix}7.${Font_color_suffix} 执行所有优化(NAT)
 ${Green_font_prefix}0.${Font_color_suffix} 退出脚本
 "
 get_system_info
@@ -416,32 +257,21 @@ echo -e "当前系统信息: ${Font_color_suffix}$opsy ${Green_font_prefix}$virt
     tcp_tune
     ;;
   3)
-    tcp_tune_new
+    tcp_tune_nat
     ;;
   4)
-    tcp_tune_new_nat
-    ;;
-  5)
     enable_forwarding
     ;;
-  6)
+  5)
     ulimit_tune
     ;;
-  7)
-    ulimit_tune_new
-    ;;
-  8)
+  6)
     tcp_tune
     enable_forwarding
     ulimit_tune
     ;;
-  9)
-    tcp_tune_new
-    enable_forwarding
-    ulimit_tune
-    ;;
-  10)
-    tcp_tune_new_nat
+  7)
+    tcp_tune_nat
     enable_forwarding
     ulimit_tune
     ;;
