@@ -1,0 +1,581 @@
+{
+    "log": {
+        "disabled": false,
+        "level": "warn",
+        "timestamp": true
+    },
+    "experimental": {
+        "clash_api": {
+            "external_controller": "127.0.0.1:9090",
+            "external_ui": "ui",
+            "external_ui_download_url": "https://github.com/haishanh/yacd/archive/gh-pages.zip",
+            "external_ui_download_detour": "✈️ Proxy",
+            "default_mode": "rule"
+        },
+        "cache_file": {
+            "enabled": true
+        }
+    },
+    "dns": {
+        "servers": [
+            {
+                "tag": "google",
+                "address": "tls://8.8.4.4"
+            },
+            {
+                "tag": "local",
+                "address": "https://223.5.5.5/dns-query",
+                "detour": "direct"
+            },
+            {
+                "tag": "dns-block",
+                "address": "rcode://success"
+            }
+        ],
+        "rules": [
+            {
+                "type": "logical",
+                "mode": "or",
+                "rules": [
+                    {
+                        "rule_set": "geosite-category-ads-all"
+                    },
+                    {
+                        "domain_suffix": [
+                            "appcenter.ms",
+                            "app-measurement.com",
+                            "firebase.io",
+                            "crashlytics.com",
+                            "google-analytics.com"
+                        ]
+                    }
+                ],
+                "disable_cache": true,
+                "server": "dns-block"
+            },
+            {
+                "outbound": "any",
+                "server": "local"
+            },
+            {
+                "clash_mode": "Direct",
+                "server": "local"
+            },
+            {
+                "clash_mode": "Global",
+                "server": "google"
+            },
+            {
+                "rule_set": "geosite-cn",
+                "server": "local"
+            },
+            {
+                "rule_set": "geoip-cn",
+                "server": "google",
+                "client_subnet": "223.5.5.5"
+            }
+        ],
+        "independent_cache": true,
+        "final": "google"
+    },
+    "inbounds": [
+        {
+            "type": "tun",
+            "stack": "system",
+            "inet4_address": "172.19.0.1/30",
+            "auto_route": true,
+            "strict_route": true,
+            "sniff": true
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "selector",
+            "tag": "✈️ Proxy",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "📱 Telegram",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🖥 YouTube",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🎥 NETFLIX",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🤖 OpenAI",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🤖 Copilot",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🤖 BingAI",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🤖 Claude",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🍎 Apple",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2",
+                "direct"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "📢 Google",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "Ⓜ️ Microsoft",
+            "outbounds": [
+                "Shadowsocks-Padding",
+                "Trojan-TLS+Padding",
+                "Hysteria2",
+                "direct"
+            ]
+        },
+        {
+            "type": "selector",
+            "tag": "🎯 direct",
+            "outbounds": [
+                "direct",
+                "block",
+                "✈️ Proxy"
+            ],
+            "default": "direct"
+        },
+        {
+            "type": "selector",
+            "tag": "🛑 block",
+            "outbounds": [
+                "block",
+                "direct",
+                "✈️ Proxy"
+            ],
+            "default": "block"
+        },
+        {
+            "tag": "direct",
+            "type": "direct"
+        },
+        {
+            "tag": "block",
+            "type": "block"
+        },
+        {
+            "tag": "dns",
+            "type": "dns"
+        },
+        {
+            "type": "shadowsocks",
+            "tag": "Shadowsocks-Padding",
+            "server": "VPS IP",
+            "server_port": 123,
+            "method": "2022-blake3-aes-128-gcm",
+            "password": "password",
+            "multiplex": {
+                "enabled": true,
+                "protocol": "h2mux",
+                "max_connections": 16,
+                "padding": true
+            }
+        },
+        {
+            "type": "trojan",
+            "tag": "Trojan-TLS+Padding",
+            "server": "VPS IP",
+            "server_port": 123,
+            "password": "password",
+            "tls": {
+                "enabled": true,
+                "server_name": "域名",
+                "certificate": [
+                    "-----BEGIN CERTIFICATE-----",
+                    "Ls0dIFuOMOQMsCGjLvNNxmgwHwYDVR0jBBgwFoAUCux1NUkqP0gY4TKr1IVXFb8k",
+                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                    "ewq1J6PocMJ5yUQb+9ZvZ957ExoMkK8EXKfCAfqkn/J4FbFXeIEuneDROwGqoNpc",
+                    "Tts9ms7AUdLF3khi",
+                    "-----END CERTIFICATE-----"
+                ],
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            },
+            "multiplex": {
+                "enabled": true,
+                "protocol": "h2mux",
+                "max_connections": 16,
+                "padding": true
+            }
+        },
+        {
+            "type": "hysteria2",
+            "tag": "Hysteria2",
+            "server": "VPS IP",
+            "server_port": 123,
+            "up_mbps": 50,
+            "down_mbps": 300,
+            "obfs": {
+                "type": "salamander",
+                "password": "password"
+            },
+            "password": "password",
+            "tls": {
+                "enabled": true,
+                "server_name": "域名",
+                "certificate": [
+                    "-----BEGIN CERTIFICATE-----",
+                    "Ls0dIFuOMOQMsCGjLvNNxmgwHwYDVR0jBBgwFoAUCux1NUkqP0gY4TKr1IVXFb8k",
+                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                    "ewq1J6PocMJ5yUQb+9ZvZ957ExoMkK8EXKfCAfqkn/J4FbFXeIEuneDROwGqoNpc",
+                    "Tts9ms7AUdLF3khi",
+                    "-----END CERTIFICATE-----"
+                ],
+                "alpn": [
+                    "h3"
+                ]
+            }
+        }
+    ],
+    "route": {
+        "rule_set": [
+            {
+                "tag": "geosite-category-ads-all",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-telegram",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-youtube",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-netflix",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-openai@ads",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai@ads.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-apple",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-google",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-microsoft",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-geolocation-!cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-geolocation-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-tld-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tld-cn.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geoip-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+                "download_detour": "✈️ Proxy",
+                "update_interval": "1d"
+            }
+        ],
+        "rules": [
+            {
+                "clash_mode": "global",
+                "outbound": "✈️ Proxy"
+            },
+            {
+                "clash_mode": "direct",
+                "outbound": "🎯 direct"
+            },
+            {
+                "protocol": "dns",
+                "outbound": "dns"
+            },
+            {
+                "type": "logical",
+                "mode": "or",
+                "rules": [
+                    {
+                        "rule_set": "geosite-category-ads-all"
+                    },
+                    {
+                        "domain_regex": "^stun\\..+"
+                    },
+                    {
+                        "domain_keyword": [
+                            "stun",
+                            "httpdns"
+                        ]
+                    },
+                    {
+                        "protocol": "stun"
+                    }
+                ],
+                "outbound": "block"
+            },
+            {
+                "domain_suffix": [
+                    "appcenter.ms",
+                    "app-measurement.com",
+                    "firebase.io",
+                    "crashlytics.com",
+                    "google-analytics.com"
+                ],
+                "outbound": "🛑 block"
+            },
+            {
+                "rule_set": "geosite-telegram",
+                "outbound": "📱 Telegram"
+            },
+            {
+                "rule_set": "geosite-youtube",
+                "outbound": "🖥 YouTube"
+            },
+            {
+                "rule_set": "geosite-netflix",
+                "outbound": "🎥 NETFLIX"
+            },
+            {
+                "rule_set": "geosite-openai@ads",
+                "outbound": "block"
+            },
+            {
+                "domain": [
+                    "api.statsig.com",
+                    "browser-intake-datadoghq.com",
+                    "cdn.openai.com",
+                    "chat.openai.com",
+                    "chat.openai.com.cdn.cloudflare.net",
+                    "ios.chat.openai.com",
+                    "o33249.ingest.sentry.io",
+                    "openai-api.arkoselabs.com",
+                    "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+                    "openaicomproductionae4b.blob.core.windows.net",
+                    "production-openaicom-storage.azureedge.net",
+                    "static.cloudflareinsights.com"
+                ],
+                "domain_suffix": [
+                    ".algolia.net",
+                    ".auth0.com",
+                    ".chatgpt.com",
+                    ".challenges.cloudflare.com",
+                    ".client-api.arkoselabs.com",
+                    ".events.statsigapi.net",
+                    ".featuregates.org",
+                    ".identrust.com",
+                    ".intercom.io",
+                    ".intercomcdn.com",
+                    ".launchdarkly.com",
+                    ".oaistatic.com",
+                    ".oaiusercontent.com",
+                    ".observeit.net",
+                    ".openai.com",
+                    ".openaiapi-site.azureedge.net",
+                    ".openaicom.imgix.net",
+                    ".segment.io",
+                    ".sentry.io",
+                    ".stripe.com"
+                ],
+                "domain_keyword": [
+                    "openaicom-api"
+                ],
+                "outbound": "🤖 OpenAI"
+            },
+            {
+                "domain": [
+                    "api.githubcopilot.com",
+                    "bat.bing.com",
+                    "browser.events.data.microsoft.com",
+                    "config.edge.skype.com",
+                    "content.lifecycle.office.net",
+                    "copilot-proxy.githubusercontent.com",
+                    "copilot.microsoft.com",
+                    "edge.microsoft.com",
+                    "edgeservices.bing.com",
+                    "functional.events.data.microsoft.com",
+                    "login.live.com",
+                    "services.bingapis.com",
+                    "storage.live.com",
+                    "strict.bing.com",
+                    "sydney.bing.com",
+                    "www.bing.com",
+                    "www.bingapis.com"
+                ],
+                "domain_suffix": [
+                    ".bing.com"
+                ],
+                "outbound": "🤖 Copilot"
+            },
+            {
+                "domain_suffix": [
+                    ".bing.com",
+                    ".bing.com.cn",
+                    ".bing.net",
+                    ".bingagencyawards.com",
+                    ".bingapistatistics.com",
+                    ".bingsandbox.com",
+                    ".bingvisualsearch.com",
+                    ".bingworld.com"
+                ],
+                "outbound": "🤖 BingAI"
+            },
+            {
+                "domain": [
+                    "aistudio.google.com",
+                    "bard.google.com",
+                    "gemini.google.com",
+                    "generativelanguage.googleapis.com"
+                ],
+                "outbound": "🤖 Gemini"
+            },
+            {
+                "domain_suffix": [
+                    ".anthropic.com",
+                    ".claude.ai"
+                ],
+                "outbound": "🤖 Claude"
+            },
+            {
+                "rule_set": "geosite-apple",
+                "outbound": "🍎 Apple"
+            },
+            {
+                "rule_set": "geosite-google",
+                "outbound": "📢 Google"
+            },
+            {
+                "rule_set": "geosite-microsoft",
+                "outbound": "Ⓜ️ Microsoft"
+            },
+            {
+                "rule_set": "geosite-geolocation-!cn",
+                "outbound": "✈️ Proxy"
+            },
+            {
+                "rule_set": [
+                    "geosite-geolocation-cn",
+                    "geosite-tld-cn",
+                    "geoip-cn"
+                ],
+                "outbound": "🎯 direct"
+            }
+        ],
+        "final": "✈️ Proxy",
+        "auto_detect_interface": true
+    }
+}
