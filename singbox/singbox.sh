@@ -10,12 +10,13 @@ install_docker() {
     echo "正在检查 Docker 是否已安装..."
     if ! command -v docker &> /dev/null; then
         echo "Docker 未安装，开始安装 Docker..."
-        curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -
-        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
-        sudo apt update
-        sudo apt install -y docker-ce docker-ce-cli containerd.io
-        sudo systemctl start docker
-        sudo systemctl enable docker
+        # curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -
+        # sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
+        # sudo apt update
+        # sudo apt install -y docker-ce docker-ce-cli containerd.io
+        # sudo systemctl start docker
+        # sudo systemctl enable docker
+        sudo apt install docker.io -y
     else
         echo "Docker 已安装."
     fi
@@ -26,8 +27,9 @@ install_docker_compose() {
     echo "正在检查 Docker Compose 是否已安装..."
     if ! command -v docker-compose &> /dev/null; then
         echo "Docker Compose 未安装，开始安装 Docker Compose..."
-        sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
+        # sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        # sudo chmod +x /usr/local/bin/docker-compose
+        sudo apt install docker-compose -y
     else
         echo "Docker Compose 已安装."
     fi
