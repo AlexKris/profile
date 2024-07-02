@@ -48,7 +48,7 @@ configure_and_start_singbox() {
     cat > /root/sing-box/conf/config.json << EOF
 {
     "log": {
-        "level": "info",
+        "level": "error",
         "timestamp": true
     },
     "inbounds": [
