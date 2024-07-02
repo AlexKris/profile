@@ -3,7 +3,7 @@
 # 更新系统包并安装必要的软件
 echo "更新系统包..."
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+# sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
 
 # 安装 Docker
 install_docker() {
