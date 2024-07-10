@@ -83,7 +83,7 @@ EOF
     # 启动 Sing-box 服务
     echo "正在启动 Sing-box 服务..."
     cd /root/sing-box/docker
-    docker-compose up -d
+    docker-compose down && docker-compose up -d
     echo "Sing-box 配置并启动完成."
 }
 
