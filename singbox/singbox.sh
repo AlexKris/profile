@@ -3,19 +3,12 @@
 # 更新系统包并安装必要的软件
 echo "更新系统包..."
 sudo apt update && sudo apt upgrade -y
-# sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
 
 # 安装 Docker
 install_docker() {
     echo "正在检查 Docker 是否已安装..."
     if ! command -v docker &> /dev/null; then
         echo "Docker 未安装，开始安装 Docker..."
-        # curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -
-        # sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
-        # sudo apt update
-        # sudo apt install -y docker-ce docker-ce-cli containerd.io
-        # sudo systemctl start docker
-        # sudo systemctl enable docker
         sudo apt install docker.io -y
     else
         echo "Docker 已安装."
@@ -27,8 +20,6 @@ install_docker_compose() {
     echo "正在检查 Docker Compose 是否已安装..."
     if ! command -v docker-compose &> /dev/null; then
         echo "Docker Compose 未安装，开始安装 Docker Compose..."
-        # sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        # sudo chmod +x /usr/local/bin/docker-compose
         sudo apt install docker-compose -y
     else
         echo "Docker Compose 已安装."
@@ -43,6 +34,7 @@ configure_and_start_singbox() {
 
     read -p "请输入 Shadowsocks 监听端口: " port
     read -p "请输入 Shadowsocks 密码: " password
+    read -p "请输入 docker-compose 版本: " docker_compose_version
 
     # 创建 Sing-box 配置文件
     cat > /root/sing-box/conf/config.json << EOF
@@ -58,9 +50,7 @@ configure_and_start_singbox() {
             "listen_port": $port,
             "method": "aes-256-gcm",
             "password": "$password",
-            "multiplex": {
-                "enabled": true
-            }
+            "udp": true
         }
     ],
     "outbounds": [
@@ -74,7 +64,7 @@ EOF
 
     # 创建 Docker Compose 文件
     cat > /root/sing-box/docker/docker-compose.yml << EOF
-version: "3.8"
+version: "$docker_compose_version"
 services:
   sing-box:
     image: ghcr.io/sagernet/sing-box
@@ -82,6 +72,7 @@ services:
     restart: always
     ports:
       - "$port:$port"
+      - "$port:$port/udp"
     volumes:
       - /root/sing-box/conf:/etc/sing-box/
     command: -D /var/lib/sing-box -C /etc/sing-box/ run
@@ -94,7 +85,49 @@ EOF
     echo "Sing-box 配置并启动完成."
 }
 
+# 卸载 Docker 和 Docker Compose
+uninstall_docker_and_compose() {
+    echo "卸载 Docker 和 Docker Compose..."
+    sudo apt-get remove --auto-remove docker docker-engine docker.io containerd runc docker-compose -y
+    echo "Docker 和 Docker Compose 卸载完成."
+}
+
+# 清理 Sing-box 配置
+cleanup_singbox() {
+    echo "清理 Sing-box 配置..."
+    rm -rf /root/sing-box
+    echo "Sing-box 配置已清理."
+}
+
 # 主逻辑
-install_docker
-install_docker_compose
-configure_and_start_singbox
+echo "1. 安装 Docker 和 Docker Compose, 配置和启动 Sing-box"
+echo "2. 安装 Docker 和 Docker Compose"
+echo "3. 配置和启动 Sing-box"
+echo "4. 卸载 Docker 和 Docker Compose"
+echo "5. 清理 Sing-box 配置"
+read -p "请选择一个操作: " action
+
+case $action in
+    1)
+        install_docker
+        install_docker_compose
+        configure_and_start_singbox
+        ;;
+    2)
+        install_docker
+        install_docker_compose
+        ;;
+    3)
+        configure_and_start_singbox
+        ;;
+    4)
+        uninstall_docker_and_compose
+        ;;
+    5)
+        cleanup_singbox
+        ;;
+    *)
+        echo "无效的输入，退出..."
+        exit 1
+        ;;
+esac
