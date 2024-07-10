@@ -50,7 +50,9 @@ configure_and_start_singbox() {
             "listen_port": $port,
             "method": "aes-256-gcm",
             "password": "$password",
-            "udp": true
+            "multiplex": {
+                "enabled": true
+            }
         }
     ],
     "outbounds": [
