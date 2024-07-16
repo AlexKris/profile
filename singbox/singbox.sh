@@ -2,7 +2,11 @@
 
 # 更新系统包并安装必要的软件
 echo "更新系统包..."
-sudo apt update && sudo apt upgrade -y
+sudo apt update && sudo apt upgrade -y && apt full-upgrade -y && apt autoclean -y && apt autoremove -y
+
+Update_Shell(){
+  wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/singbox/singbox.sh" -O singbox.sh && bash singbox.sh
+}
 
 # 安装 Docker
 install_docker() {
