@@ -101,6 +101,12 @@ cleanup_singbox() {
     echo "Sing-box 配置已清理."
 }
 
+start_snell() {
+    echo "开始启动 Snell..."
+    systemctl start snell && systemctl enable snell
+    echo "Snell 启动完成."
+}
+
 # 主逻辑
 echo "1. 安装 Docker 和 Docker Compose, 配置和启动 Sing-box"
 echo "2. 安装 Docker 和 Docker Compose"
@@ -127,6 +133,7 @@ case $action in
         ;;
     5)
         cleanup_singbox
+        start_snell
         ;;
     *)
         echo "无效的输入，退出..."
