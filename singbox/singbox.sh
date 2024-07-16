@@ -113,6 +113,7 @@ echo "2. 安装 Docker 和 Docker Compose"
 echo "3. 配置和启动 Sing-box"
 echo "4. 卸载 Docker 和 Docker Compose"
 echo "5. 清理 Sing-box 配置"
+echo "5. 启动 Snell"
 read -p "请选择一个操作: " action
 
 case $action in
@@ -133,6 +134,8 @@ case $action in
         ;;
     5)
         cleanup_singbox
+        ;;
+    6)
         start_snell
         ;;
     *)
