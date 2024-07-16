@@ -119,6 +119,12 @@ start_snell() {
     echo "Snell 启动完成."
 }
 
+stop_snell() {
+    echo "开始停止 Snell..."
+    systemctl stop snell && systemctl disable snell
+    echo "Snell 停止完成."
+}
+
 # 主逻辑
 echo "1. 更新脚本"
 echo "2. 安装 Docker 和 Docker Compose, 配置和启动 Sing-box"
@@ -128,6 +134,7 @@ echo "5. 停止 Sing-box"
 echo "6. 卸载 Docker 和 Docker Compose"
 echo "7. 清理 Sing-box 配置"
 echo "8. 启动 Snell"
+echo "9. 停止 Snell"
 read -p "请选择一个操作: " action
 
 case $action in
@@ -157,6 +164,10 @@ case $action in
         ;;
     8)
         start_snell
+        ;;
+        ;;
+    9)
+        stop_snell
         ;;
     *)
         echo "无效的输入，退出..."
