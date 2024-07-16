@@ -165,7 +165,6 @@ case $action in
     8)
         start_snell
         ;;
-        ;;
     9)
         stop_snell
         ;;
