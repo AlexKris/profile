@@ -91,6 +91,14 @@ EOF
     echo "Sing-box 配置并启动完成."
 }
 
+# 停止 Sing-box
+stop_singbox() {
+    echo "停止 Sing-box..."
+    cd /root/sing-box/docker
+    docker-compose down
+    echo "Sing-box 已停止."
+}
+
 # 卸载 Docker 和 Docker Compose
 uninstall_docker_and_compose() {
     echo "卸载 Docker 和 Docker Compose..."
@@ -112,34 +120,42 @@ start_snell() {
 }
 
 # 主逻辑
-echo "1. 安装 Docker 和 Docker Compose, 配置和启动 Sing-box"
-echo "2. 安装 Docker 和 Docker Compose"
-echo "3. 配置和启动 Sing-box"
-echo "4. 卸载 Docker 和 Docker Compose"
-echo "5. 清理 Sing-box 配置"
-echo "6. 启动 Snell"
+echo "1. 更新脚本"
+echo "2. 安装 Docker 和 Docker Compose, 配置和启动 Sing-box"
+echo "3. 安装 Docker 和 Docker Compose"
+echo "4. 配置和启动 Sing-box"
+echo "5. 停止 Sing-box"
+echo "6. 卸载 Docker 和 Docker Compose"
+echo "7. 清理 Sing-box 配置"
+echo "8. 启动 Snell"
 read -p "请选择一个操作: " action
 
 case $action in
     1)
-        install_docker
-        install_docker_compose
-        configure_and_start_singbox
+        Update_Shell
         ;;
     2)
         install_docker
         install_docker_compose
-        ;;
-    3)
         configure_and_start_singbox
         ;;
+    3)
+        install_docker
+        install_docker_compose
+        ;;
     4)
-        uninstall_docker_and_compose
+        configure_and_start_singbox
         ;;
     5)
-        cleanup_singbox
+        stop_singbox
         ;;
     6)
+        uninstall_docker_and_compose
+        ;;
+    7)
+        cleanup_singbox
+        ;;
+    8)
         start_snell
         ;;
     *)
