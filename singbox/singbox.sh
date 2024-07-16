@@ -103,7 +103,7 @@ cleanup_singbox() {
 
 start_snell() {
     echo "开始启动 Snell..."
-    systemctl start snell && systemctl enable snell
+    systemctl start snell && systemctl enable snell && systemctl restart snell
     echo "Snell 启动完成."
 }
 
