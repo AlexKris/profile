@@ -9,7 +9,7 @@
             "external_controller": "127.0.0.1:9090",
             "external_ui": "ui",
             "external_ui_download_url": "https://github.com/haishanh/yacd/archive/gh-pages.zip",
-            "external_ui_download_detour": "✈️ Proxy",
+            "external_ui_download_detour": "Proxy",
             "default_mode": "rule"
         },
         "cache_file": {
@@ -91,122 +91,81 @@
     "outbounds": [
         {
             "type": "selector",
-            "tag": "✈️ Proxy",
+            "tag": "Proxy",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
+                "direct",
+                "RelayVPS"
             ]
         },
         {
             "type": "selector",
-            "tag": "📱 Telegram",
+            "tag": "Telegram",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
+                "Proxy",
+                "HK HKT",
+                "HK Nube",
+                "HK Eyeball"
             ]
         },
         {
             "type": "selector",
-            "tag": "🖥 YouTube",
+            "tag": "YouTube",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
+                "MediaVPS"
             ]
         },
         {
             "type": "selector",
-            "tag": "🎥 NETFLIX",
+            "tag": "Netflix",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
+                "MediaVPS"
             ]
         },
         {
             "type": "selector",
-            "tag": "🤖 OpenAI",
+            "tag": "AIGC",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
+                "SG ByteVirt"
             ]
         },
         {
             "type": "selector",
-            "tag": "🤖 Copilot",
+            "tag": "Apple",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
-            ]
-        },
-        {
-            "type": "selector",
-            "tag": "🤖 BingAI",
-            "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
-            ]
-        },
-        {
-            "type": "selector",
-            "tag": "🤖 Claude",
-            "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
-            ]
-        },
-        {
-            "type": "selector",
-            "tag": "🍎 Apple",
-            "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2",
+                "Proxy",
                 "direct"
             ]
         },
         {
             "type": "selector",
-            "tag": "📢 Google",
-            "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2"
-            ]
+            "tag": "Google",
+            "outbounds": []
         },
         {
             "type": "selector",
-            "tag": "Ⓜ️ Microsoft",
+            "tag": "Microsoft",
             "outbounds": [
-                "Shadowsocks-Padding",
-                "Trojan-TLS+Padding",
-                "Hysteria2",
+                "Proxy",
                 "direct"
             ]
         },
         {
             "type": "selector",
-            "tag": "🎯 direct",
+            "tag": "Direct",
             "outbounds": [
                 "direct",
                 "block",
-                "✈️ Proxy"
+                "Proxy"
             ],
             "default": "direct"
         },
         {
             "type": "selector",
-            "tag": "🛑 block",
+            "tag": "Block",
             "outbounds": [
                 "block",
                 "direct",
-                "✈️ Proxy"
+                "Proxy"
             ],
             "default": "block"
         },
@@ -223,75 +182,72 @@
             "type": "dns"
         },
         {
-            "type": "shadowsocks",
-            "tag": "Shadowsocks-Padding",
-            "server": "VPS IP",
-            "server_port": 123,
-            "method": "2022-blake3-aes-128-gcm",
-            "password": "password",
-            "multiplex": {
-                "enabled": true,
-                "protocol": "h2mux",
-                "max_connections": 16,
-                "padding": true
-            }
+            "type": "selector",
+            "tag": "RelayVPS",
+            "outbounds": [
+                "HK HKT",
+                "HK HKT GZ",
+                "HK Nube",
+                "HK Eyeball",
+                "HK Volume"
+            ]
         },
         {
-            "type": "trojan",
-            "tag": "Trojan-TLS+Padding",
-            "server": "VPS IP",
-            "server_port": 123,
-            "password": "password",
-            "tls": {
-                "enabled": true,
-                "server_name": "域名",
-                "certificate": [
-                    "-----BEGIN CERTIFICATE-----",
-                    "Ls0dIFuOMOQMsCGjLvNNxmgwHwYDVR0jBBgwFoAUCux1NUkqP0gY4TKr1IVXFb8k",
-                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                    "ewq1J6PocMJ5yUQb+9ZvZ957ExoMkK8EXKfCAfqkn/J4FbFXeIEuneDROwGqoNpc",
-                    "Tts9ms7AUdLF3khi",
-                    "-----END CERTIFICATE-----"
-                ],
-                "utls": {
-                    "enabled": true,
-                    "fingerprint": "chrome"
-                }
-            },
-            "multiplex": {
-                "enabled": true,
-                "protocol": "h2mux",
-                "max_connections": 16,
-                "padding": true
-            }
+            "type": "selector",
+            "tag": "MediaVPS",
+            "outbounds": [
+                "HK HKT",
+                "HK HKT GZ",
+                "HK BestVM",
+                "TW Hinet",
+                "JP BageVM",
+                "SG ByteVirt"
+            ]
         },
         {
-            "type": "hysteria2",
-            "tag": "Hysteria2",
-            "server": "VPS IP",
-            "server_port": 123,
-            "up_mbps": 50,
-            "down_mbps": 300,
-            "obfs": {
-                "type": "salamander",
-                "password": "password"
-            },
-            "password": "password",
-            "tls": {
-                "enabled": true,
-                "server_name": "域名",
-                "certificate": [
-                    "-----BEGIN CERTIFICATE-----",
-                    "Ls0dIFuOMOQMsCGjLvNNxmgwHwYDVR0jBBgwFoAUCux1NUkqP0gY4TKr1IVXFb8k",
-                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                    "ewq1J6PocMJ5yUQb+9ZvZ957ExoMkK8EXKfCAfqkn/J4FbFXeIEuneDROwGqoNpc",
-                    "Tts9ms7AUdLF3khi",
-                    "-----END CERTIFICATE-----"
-                ],
-                "alpn": [
-                    "h3"
-                ]
-            }
+            "type": "selector",
+            "tag": "HK HKT",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "HK HKT GZ",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "HK Nube",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "HK Eyeball",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "HK Volume",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "HK BestVM",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "TW Hinet",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "JP BageVM",
+            "outbounds": []
+        },
+        {
+            "type": "selector",
+            "tag": "SG ByteVirt",
+            "outbounds": []
         }
     ],
     "route": {
@@ -301,7 +257,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -309,7 +265,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -317,7 +273,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -325,7 +281,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -333,7 +289,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai@ads.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -341,7 +297,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -349,7 +305,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -357,7 +313,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -365,7 +321,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -373,7 +329,15 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
+                "update_interval": "1d"
+            },
+            {
+                "tag": "geosite-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -381,7 +345,7 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tld-cn.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             },
             {
@@ -389,18 +353,18 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-                "download_detour": "✈️ Proxy",
+                "download_detour": "Proxy",
                 "update_interval": "1d"
             }
         ],
         "rules": [
             {
                 "clash_mode": "global",
-                "outbound": "✈️ Proxy"
+                "outbound": "Proxy"
             },
             {
                 "clash_mode": "direct",
-                "outbound": "🎯 direct"
+                "outbound": "Direct"
             },
             {
                 "protocol": "dns",
@@ -436,19 +400,19 @@
                     "crashlytics.com",
                     "google-analytics.com"
                 ],
-                "outbound": "🛑 block"
+                "outbound": "Block"
             },
             {
                 "rule_set": "geosite-telegram",
-                "outbound": "📱 Telegram"
+                "outbound": "Telegram"
             },
             {
                 "rule_set": "geosite-youtube",
-                "outbound": "🖥 YouTube"
+                "outbound": "YouTube"
             },
             {
                 "rule_set": "geosite-netflix",
-                "outbound": "🎥 NETFLIX"
+                "outbound": "Netflix"
             },
             {
                 "rule_set": "geosite-openai@ads",
@@ -494,7 +458,7 @@
                 "domain_keyword": [
                     "openaicom-api"
                 ],
-                "outbound": "🤖 OpenAI"
+                "outbound": "AIGC"
             },
             {
                 "domain": [
@@ -519,7 +483,7 @@
                 "domain_suffix": [
                     ".bing.com"
                 ],
-                "outbound": "🤖 Copilot"
+                "outbound": "AIGC"
             },
             {
                 "domain_suffix": [
@@ -532,7 +496,7 @@
                     ".bingvisualsearch.com",
                     ".bingworld.com"
                 ],
-                "outbound": "🤖 BingAI"
+                "outbound": "AIGC"
             },
             {
                 "domain": [
@@ -541,30 +505,30 @@
                     "gemini.google.com",
                     "generativelanguage.googleapis.com"
                 ],
-                "outbound": "🤖 Gemini"
+                "outbound": "AIGC"
             },
             {
                 "domain_suffix": [
                     ".anthropic.com",
                     ".claude.ai"
                 ],
-                "outbound": "🤖 Claude"
+                "outbound": "AIGC"
             },
             {
                 "rule_set": "geosite-apple",
-                "outbound": "🍎 Apple"
+                "outbound": "Apple"
             },
             {
                 "rule_set": "geosite-google",
-                "outbound": "📢 Google"
+                "outbound": "Google"
             },
             {
                 "rule_set": "geosite-microsoft",
-                "outbound": "Ⓜ️ Microsoft"
+                "outbound": "Microsoft"
             },
             {
                 "rule_set": "geosite-geolocation-!cn",
-                "outbound": "✈️ Proxy"
+                "outbound": "Proxy"
             },
             {
                 "rule_set": [
@@ -572,10 +536,10 @@
                     "geosite-tld-cn",
                     "geoip-cn"
                 ],
-                "outbound": "🎯 direct"
+                "outbound": "Direct"
             }
         ],
-        "final": "✈️ Proxy",
+        "final": "Proxy",
         "auto_detect_interface": true
     }
 }
