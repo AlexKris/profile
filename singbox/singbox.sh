@@ -102,7 +102,9 @@ stop_singbox() {
 # 卸载 Docker 和 Docker Compose
 uninstall_docker_and_compose() {
     echo "卸载 Docker 和 Docker Compose..."
-    sudo apt-get remove --auto-remove docker docker-engine docker.io containerd runc docker-compose -y
+    # sudo apt-get remove --auto-remove docker docker-engine docker.io containerd runc docker-compose -y
+    sudo apt purge docker-compose -y && sudo apt autoremove --purge docker-compose -y
+    sudo sudo apt purge docker.io -y && sudo apt autoremove --purge docker.io -y
     echo "Docker 和 Docker Compose 卸载完成."
 }
 
