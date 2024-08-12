@@ -144,6 +144,16 @@ EOF
 sysctl -p && sysctl --system
 }
 
+open_bbr(){ # 开启BBR
+sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+cat >> /etc/sysctl.conf << EOF
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF
+sysctl -p && sysctl --system
+}
+
 Update_Shell(){
   wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/tools.sh" -O tools.sh && chmod +x tools.sh && ./tools.sh
 }
@@ -239,6 +249,7 @@ ${Green_font_prefix}4.${Font_color_suffix} 开启内核转发
 ${Green_font_prefix}5.${Font_color_suffix} 系统资源限制调优
 ${Green_font_prefix}6.${Font_color_suffix} 执行所有优化
 ${Green_font_prefix}7.${Font_color_suffix} 执行所有优化(NAT)
+${Green_font_prefix}8.${Font_color_suffix} 开启BBR
 ${Green_font_prefix}0.${Font_color_suffix} 退出脚本
 "
 get_system_info
@@ -274,6 +285,9 @@ echo -e "当前系统信息: ${Font_color_suffix}$opsy ${Green_font_prefix}$virt
     tcp_tune_nat
     enable_forwarding
     ulimit_tune
+    ;;
+  8)
+    open_bbr
     ;;
   *)
   clear
