@@ -71,7 +71,7 @@ services:
       - "$port:$port"
       - "$port:$port/udp"
     volumes:
-      - ../config:/etc/shadowsocks-rust
+      - ../conf:/etc/shadowsocks-rust
 EOF
 
     # 启动 shadowsocks-rust 服务
