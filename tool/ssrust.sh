@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # 更新系统包并安装必要的软件
-echo "更新系统包..."
+echo "正在更新系统包..."
 sudo apt update && sudo apt upgrade -y && apt full-upgrade -y && apt autoclean -y && apt autoremove -y
 
 Update_Shell(){
-  wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/ssrust.sh" -O ssrust.sh && bash ssrust.sh
+    wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/ssrust.sh" -O ssrust.sh && bash ssrust.sh
 }
 
 # 安装 Docker
@@ -14,8 +14,12 @@ install_docker() {
     if ! command -v docker &> /dev/null; then
         echo "Docker 未安装，开始安装 Docker..."
         sudo apt install docker.io -y
+        if [ $? -ne 0 ]; then
+            echo "Docker 安装失败，退出..."
+            exit 1
+        fi
     else
-        echo "Docker 已安装."
+        echo "Docker 已经安装."
     fi
 }
 
@@ -25,8 +29,12 @@ install_docker_compose() {
     if ! command -v docker-compose &> /dev/null; then
         echo "Docker Compose 未安装，开始安装 Docker Compose..."
         sudo apt install docker-compose -y
+        if [ $? -ne 0 ]; then
+            echo "Docker Compose 安装失败，退出..."
+            exit 1
+        fi
     else
-        echo "Docker Compose 已安装."
+        echo "Docker Compose 已经安装."
     fi
 }
 
@@ -37,11 +45,19 @@ configure_and_start_ssrust() {
     mkdir -p /root/ssrust/docker
 
     read -p "请输入 Shadowsocks 监听端口: " port
-    read -p "请输入 Shadowsocks 密码: " password
+    read -sp "请输入 Shadowsocks 密码: " password
+    echo # 新行
     read -p "请输入 docker-compose 版本: " docker_compose_version
+    echo "请选择网络模式：1) bridge（默认） 2) host"
+    read -p "输入选择（默认为 1）: " network_mode_choice
+
+    network_mode="bridge"
+    if [ "$network_mode_choice" == "2" ]; then
+        network_mode="host"
+    fi
 
     # 创建 shadowsocks-rust 配置文件
-    cat > /root/ssrust/conf/config.json << EOF
+    cat > /root/ssrust/conf/config.json <<EOF
 {
     "servers": [
         {
@@ -59,7 +75,20 @@ configure_and_start_ssrust() {
 EOF
 
     # 创建 Docker Compose 文件
-    cat > /root/ssrust/docker/docker-compose.yml << EOF
+    if [ "$network_mode" == "host" ]; then
+        cat > /root/ssrust/docker/docker-compose.yml <<EOF
+version: "$docker_compose_version"
+services:
+  shadowsocks:
+    image: teddysun/shadowsocks-rust:latest
+    container_name: ss-rust
+    restart: always
+    network_mode: host
+    volumes:
+      - /root/ssrust/conf:/etc/shadowsocks-rust
+EOF
+    else
+        cat > /root/ssrust/docker/docker-compose.yml <<EOF
 version: "$docker_compose_version"
 services:
   shadowsocks:
@@ -71,19 +100,24 @@ services:
       - "$port:$port"
       - "$port:$port/udp"
     volumes:
-      - ../conf:/etc/shadowsocks-rust
+      - /root/ssrust/conf:/etc/shadowsocks-rust
 EOF
+    fi
 
     # 启动 shadowsocks-rust 服务
     echo "正在启动 shadowsocks-rust 服务"
     cd /root/ssrust/docker
     docker-compose down && docker-compose up -d
-    echo "shadowsocks-rust 配置并启动完成."
+    if [ $? -eq 0 ]; then
+        echo "shadowsocks-rust 配置并启动完成."
+    else
+        echo "服务启动失败，请检查日志."
+    fi
 }
 
 # 停止 shadowsocks-rust
 stop_ssrust() {
-    echo "停止 shadowsocks-rust"
+    echo "正在停止 shadowsocks-rust"
     cd /root/ssrust/docker
     docker-compose down
     echo "shadowsocks-rust 已停止."
@@ -91,18 +125,17 @@ stop_ssrust() {
 
 # 卸载 Docker 和 Docker Compose
 uninstall_docker_and_compose() {
-    echo "卸载 Docker 和 Docker Compose..."
-    # sudo apt-get remove --auto-remove docker docker-engine docker.io containerd runc docker-compose -y
+    echo "正在卸载 Docker 和 Docker Compose..."
     sudo apt purge docker-compose -y && sudo apt autoremove --purge docker-compose -y
-    sudo sudo apt purge docker.io -y && sudo apt autoremove --purge docker.io -y
-    echo "Docker 和 Docker Compose 卸载完成."
+    sudo apt purge docker.io -y && sudo apt autoremove --purge docker.io -y
+    echo "Docker 和 Docker Compose 已卸载完成."
 }
 
 # 清理 shadowsocks-rust 配置
 cleanup_ssrust() {
-    echo "清理 shadowsocks-rust 配置..."
+    echo "正在清理 shadowsocks-rust 配置..."
     rm -rf /root/ssrust
-    echo "shadowsocks-rust 配置已清理."
+    echo "shadowsocks-rust 配置已清理完成."
 }
 
 # 主逻辑
@@ -141,7 +174,7 @@ case $action in
         cleanup_ssrust
         ;;
     *)
-        echo "无效的输入，退出..."
+        echo "输入无效，退出..."
         exit 1
         ;;
 esac
