@@ -1,10 +1,17 @@
 #!/bin/bash
 
+# 定义常用路径和变量
+SSRUST_BASE_DIR="/root/ssrust"
+SSRUST_CONFIG_DIR="/root/ssrust/conf"
+SSRUST_DOCKER_DIR="/root/ssrust/docker"
+DOCKER_IMAGE="ghcr.io/shadowsocks/ssserver-rust:latest"
+DOCKER_COMPOSE_VERSION="3.0"
+
 # 更新系统包并安装必要的软件
 echo "正在更新系统包..."
 sudo apt update && sudo apt upgrade -y && apt full-upgrade -y && apt autoclean -y && apt autoremove -y
 
-Update_Shell(){
+update_shell(){
     wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/ssrust.sh" -O ssrust.sh && bash ssrust.sh
 }
 
@@ -38,16 +45,27 @@ install_docker_compose() {
     fi
 }
 
+# 启用服务端 tcp_fastopen
+enable_tcp_fastopen() {
+    echo "正在启用服务端 tcp_fastopen..."
+    sed -i '/net.ipv4.tcp_fastopen/d' /etc/sysctl.conf
+    cat >> /etc/sysctl.conf << EOF
+net.ipv4.tcp_fastopen=3
+EOF
+    sysctl -p && sysctl --system
+    echo "服务端 tcp_fastopen 已启用."
+}
+
 # 配置和启动 shadowsocks-rust
 configure_and_start_ssrust() {
     echo "开始配置 shadowsocks-rust"
-    mkdir -p /root/ssrust/conf
-    mkdir -p /root/ssrust/docker
+    mkdir -p $SSRUST_CONFIG_DIR
+    mkdir -p $SSRUST_DOCKER_DIR
 
     read -p "请输入 Shadowsocks 监听端口: " port
     read -sp "请输入 Shadowsocks 密码: " password
     echo # 新行
-    read -p "请输入 docker-compose 版本: " docker_compose_version
+    # read -p "请输入 docker-compose 版本: " docker_compose_version
     echo "请选择网络模式：1) bridge（默认） 2) host"
     read -p "输入选择（默认为 1）: " network_mode_choice
 
@@ -57,7 +75,7 @@ configure_and_start_ssrust() {
     fi
 
     # 创建 shadowsocks-rust 配置文件
-    cat > /root/ssrust/conf/config.json <<EOF
+    cat > $SSRUST_CONFIG_DIR/config.json <<EOF
 {
     "servers": [
         {
@@ -66,7 +84,6 @@ configure_and_start_ssrust() {
             "method": "aes-128-gcm",
             "password": "$password",
             "timeout": 300,
-            "nameserver": "8.8.8.8,1.1.1.1",
             "mode": "tcp_and_udp",
             "fast_open": true
         }
@@ -74,39 +91,55 @@ configure_and_start_ssrust() {
 }
 EOF
 
-    # 创建 Docker Compose 文件
+# 创建 Docker Compose 文件
     if [ "$network_mode" == "host" ]; then
-        cat > /root/ssrust/docker/docker-compose.yml <<EOF
-version: "$docker_compose_version"
+        cat > $SSRUST_DOCKER_DIR/docker-compose.yml <<EOF
+version: "$DOCKER_COMPOSE_VERSION"
 services:
   shadowsocks:
-    image: teddysun/shadowsocks-rust:latest
+    image: $DOCKER_IMAGE
     container_name: ss-rust
     restart: always
     network_mode: host
     volumes:
-      - /root/ssrust/conf:/etc/shadowsocks-rust
+      - $SSRUST_CONFIG_DIR:/etc/shadowsocks-rust
 EOF
     else
-        cat > /root/ssrust/docker/docker-compose.yml <<EOF
-version: "$docker_compose_version"
+        cat > $SSRUST_DOCKER_DIR/docker-compose.yml <<EOF
+version: "$DOCKER_COMPOSE_VERSION"
 services:
   shadowsocks:
-    image: teddysun/shadowsocks-rust:latest
+    image: $DOCKER_IMAGE
     container_name: ss-rust
     restart: always
-    network_mode: bridge
+    network_mode: $network_mode
+    volumes:
+      - $SSRUST_CONFIG_DIR:/etc/shadowsocks-rust
     ports:
       - "$port:$port"
       - "$port:$port/udp"
-    volumes:
-      - /root/ssrust/conf:/etc/shadowsocks-rust
 EOF
     fi
 
+    # 创建 Docker Compose 文件
+    cat > $SSRUST_DOCKER_DIR/docker-compose.yml <<EOF
+version: "$DOCKER_COMPOSE_VERSION"
+services:
+  shadowsocks:
+    image: $DOCKER_IMAGE
+    container_name: ss-rust
+    restart: always
+    network_mode: $network_mode
+    volumes:
+      - $SSRUST_CONFIG_DIR:/etc/shadowsocks-rust
+    ports:
+      - "$port:$port"
+      - "$port:$port/udp"
+EOF
+
     # 启动 shadowsocks-rust 服务
     echo "正在启动 shadowsocks-rust 服务"
-    cd /root/ssrust/docker
+    cd $SSRUST_DOCKER_DIR
     docker-compose down && docker-compose up -d
     if [ $? -eq 0 ]; then
         echo "shadowsocks-rust 配置并启动完成."
@@ -118,7 +151,7 @@ EOF
 # 停止 shadowsocks-rust
 stop_ssrust() {
     echo "正在停止 shadowsocks-rust"
-    cd /root/ssrust/docker
+    cd $SSRUST_DOCKER_DIR
     docker-compose down
     echo "shadowsocks-rust 已停止."
 }
@@ -134,23 +167,24 @@ uninstall_docker_and_compose() {
 # 清理 shadowsocks-rust 配置
 cleanup_ssrust() {
     echo "正在清理 shadowsocks-rust 配置..."
-    rm -rf /root/ssrust
+    rm -rf $SSRUST_BASE_DIR
     echo "shadowsocks-rust 配置已清理完成."
 }
 
 # 主逻辑
 echo "1. 更新脚本"
-echo "2. 安装 Docker 和 Docker Compose, 配置和启动 shadowsocks-rust"
+echo "2. 安装 Docker 和 Docker Compose, 启用服务端 TCP FASTOPEN, 配置和启动 shadowsocks-rust"
 echo "3. 安装 Docker 和 Docker Compose"
-echo "4. 配置和启动 shadowsocks-rust"
-echo "5. 停止 shadowsocks-rust"
-echo "6. 卸载 Docker 和 Docker Compose"
-echo "7. 清理 shadowsocks-rust 配置"
+echo "4. 启用服务端 TCP FASTOPEN"
+echo "5. 配置和启动 shadowsocks-rust"
+echo "6. 停止 shadowsocks-rust"
+echo "7. 卸载 Docker 和 Docker Compose"
+echo "8. 清理 shadowsocks-rust 配置"
 read -p "请选择一个操作: " action
 
 case $action in
     1)
-        Update_Shell
+        update_shell
         ;;
     2)
         install_docker
@@ -162,15 +196,18 @@ case $action in
         install_docker_compose
         ;;
     4)
-        configure_and_start_ssrust
+        enable_tcp_fastopen
         ;;
     5)
-        stop_ssrust
+        configure_and_start_ssrust
         ;;
     6)
-        uninstall_docker_and_compose
+        stop_ssrust
         ;;
     7)
+        uninstall_docker_and_compose
+        ;;
+    8)
         cleanup_ssrust
         ;;
     *)
