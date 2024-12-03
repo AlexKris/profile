@@ -139,8 +139,11 @@ configure_bbr(){
         return
     fi
 
+    # 获取当前的 TCP 拥塞控制算法
+    CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+
     # 检查是否已启用 BBR
-    if sysctl net.ipv4.tcp_congestion_control | grep -q "bbr"; then
+    if [ "$CURRENT_CC" = "bbr" ]; then
         echo -e "${Info} BBR 已启用"
     else
         echo -e "${Info} BBR 未启用，正在启用..."
@@ -154,7 +157,9 @@ net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
         sudo sysctl -p
-        if sysctl net.ipv4.tcp_congestion_control | grep -q "bbr"; then
+        # 再次获取当前的 TCP 拥塞控制算法
+        CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+        if [ "$CURRENT_CC" = "bbr" ]; then
             echo -e "${Info} BBR 已成功启用"
         else
             echo -e "${Error} BBR 启用失败，请手动检查"
