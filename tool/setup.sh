@@ -3,10 +3,11 @@
 # 定义颜色和提示信息
 Green_font_prefix="\033[32m"
 Red_font_prefix="\033[31m"
+Yellow_font_prefix="\033[33m"
 Font_color_suffix="\033[0m"
 Info="${Green_font_prefix}[信息]${Font_color_suffix}"
 Error="${Red_font_prefix}[错误]${Font_color_suffix}"
-Tip="${Green_font_prefix}[提示]${Font_color_suffix}"
+Tip="${Yellow_font_prefix}[提示]${Font_color_suffix}"
 
 # 更新系统包并安装必要的软件
 echo -e "${Info} 正在更新系统包..."
@@ -80,14 +81,24 @@ configure_ssh_keys(){
 enable_ssh_pubkey_auth(){
     SSH_CONFIG="/etc/ssh/sshd_config"
 
+    # 检查是否已启用 PubkeyAuthentication
     if grep -E "^\s*PubkeyAuthentication\s+yes" "$SSH_CONFIG" > /dev/null; then
         echo -e "${Info} SSH 已启用公钥认证"
     else
         echo -e "${Info} SSH 未启用公钥认证，正在启用..."
-        sudo sed -i 's/^#\s*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSH_CONFIG"
-        if ! grep -E "^\s*PubkeyAuthentication\s+yes" "$SSH_CONFIG" > /dev/null; then
+
+        # 如果存在 'PubkeyAuthentication no'，将其替换为 'PubkeyAuthentication yes'
+        if grep -E "^\s*PubkeyAuthentication\s+no" "$SSH_CONFIG" > /dev/null; then
+            sudo sed -i 's/^\s*PubkeyAuthentication\s\+no/PubkeyAuthentication yes/' "$SSH_CONFIG"
+        elif grep -E "^\s*#\s*PubkeyAuthentication" "$SSH_CONFIG" > /dev/null; then
+            # 如果存在被注释的 'PubkeyAuthentication' 行，去掉注释并设置为 'yes'
+            sudo sed -i 's/^\s*#\s*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSH_CONFIG"
+        else
+            # 如果配置文件中没有 'PubkeyAuthentication' 这一行，添加到文件末尾
             echo "PubkeyAuthentication yes" | sudo tee -a "$SSH_CONFIG"
         fi
+
+        # 重启 SSH 服务
         sudo systemctl restart ssh
         echo -e "${Info} SSH 公钥认证已启用，并重启了 SSH 服务"
     fi
@@ -167,7 +178,7 @@ EOF
     fi
 }
 
-# 主逻辑
+# 主菜单
 echo -e "\
 ${Green_font_prefix}1.${Font_color_suffix} 更新脚本
 ${Green_font_prefix}2.${Font_color_suffix} 修复 sudo 问题
