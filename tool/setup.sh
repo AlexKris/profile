@@ -34,8 +34,8 @@ fix_sudo_issue(){
     fi
 }
 
-# 安装必要的工具
-install_tools(){
+# 安装必要的工具（函数重命名为 setup_dependencies）
+setup_dependencies(){
     echo -e "${Info} 安装必要的工具..."
     sudo apt install -y sudo wget unzip zip curl vim iperf3 fail2ban rsyslog
 }
@@ -202,7 +202,7 @@ case $action in
         fix_sudo_issue
         ;;
     3)
-        install_tools
+        setup_dependencies
         ;;
     4)
         configure_ssh_keys
@@ -221,7 +221,7 @@ case $action in
         ;;
     9)
         fix_sudo_issue
-        install_tools
+        setup_dependencies
         configure_ssh_keys
         enable_ssh_pubkey_auth
         configure_fail2ban
