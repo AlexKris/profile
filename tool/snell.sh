@@ -1,14 +1,5 @@
 #!/bin/bash
 
-# 定义颜色和提示信息
-Green_font_prefix="\033[32m"
-Red_font_prefix="\033[31m"
-Yellow_font_prefix="\033[33m"
-Font_color_suffix="\033[0m"
-Info="${Green_font_prefix}[信息]${Font_color_suffix}"
-Error="${Red_font_prefix}[错误]${Font_color_suffix}"
-Tip="${Yellow_font_prefix}[提示]${Font_color_suffix}"
-
 # 更新脚本函数
 update_shell(){
     wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/snell.sh" -O snell.sh && bash snell.sh
@@ -16,17 +7,17 @@ update_shell(){
 
 # 更新系统包
 update_system(){
-    echo -e "${Info} 正在更新系统包..."
+    echo -e "[信息] 正在更新系统包..."
     sudo apt update && sudo apt upgrade -y
     if [ $? -ne 0 ]; then
-        echo -e "${Error} 系统更新失败，请检查网络连接。"
+        echo -e "[错误] 系统更新失败，请检查网络连接。"
         exit 1
     fi
 }
 
 # 安装 Snell 服务
 install_snell(){
-    echo -e "${Info} 正在下载并安装 Snell 服务..."
+    echo -e "[信息] 正在下载并安装 Snell 服务..."
     SNELL_VERSION="v4.1.1"
     SNELL_ARCH="amd64"  # 根据您的系统架构修改
 
@@ -35,24 +26,24 @@ install_snell(){
     cd /tmp
     wget -O snell-server.zip "${SNELL_URL}"
     if [ $? -ne 0 ]; then
-        echo -e "${Error} 下载 Snell 失败，请检查网络连接。"
+        echo -e "[错误] 下载 Snell 失败，请检查网络连接。"
         exit 1
     fi
 
     unzip snell-server.zip
     if [ $? -ne 0 ]; then
-        echo -e "${Error} 解压 Snell 失败。"
+        echo -e "[错误] 解压 Snell 失败。"
         exit 1
     fi
 
     sudo mv snell-server /usr/local/bin/
     sudo chmod +x /usr/local/bin/snell-server
-    echo -e "${Info} Snell 服务已安装。"
+    echo -e "[信息] Snell 服务已安装。"
 }
 
 # 配置 systemd 服务
 configure_systemd_service(){
-    echo -e "${Info} 正在配置 Snell 的 systemd 服务..."
+    echo -e "[信息] 正在配置 Snell 的 systemd 服务..."
     sudo bash -c 'cat > /etc/systemd/system/snell.service <<EOF
 [Unit]
 Description=Snell Proxy Service
@@ -73,12 +64,12 @@ WantedBy=multi-user.target
 EOF
 '
     sudo systemctl daemon-reload
-    echo -e "${Info} Snell 的 systemd 服务已配置。"
+    echo -e "[信息] Snell 的 systemd 服务已配置。"
 }
 
 # 配置 Snell 服务
 configure_snell(){
-    echo -e "${Info} 正在配置 Snell 服务..."
+    echo -e "[信息] 正在配置 Snell 服务..."
 
     sudo mkdir -p /etc/snell
 
@@ -88,7 +79,7 @@ configure_snell(){
     read -p "请输入 Snell 密钥 (PSK) [默认随机生成]: " SNELL_PSK
     if [ -z "$SNELL_PSK" ]; then
         SNELL_PSK=$(head -c 16 /dev/urandom | md5sum | cut -d ' ' -f1)
-        echo -e "${Tip} 已生成随机 PSK：$SNELL_PSK"
+        echo -e "[提示] 已生成随机 PSK：$SNELL_PSK"
     fi
 
     sudo bash -c "cat > /etc/snell/snell-server.conf <<EOF
@@ -98,12 +89,12 @@ psk = ${SNELL_PSK}
 ipv6 = false
 EOF
 "
-    echo -e "${Info} Snell 配置文件已生成。"
+    echo -e "[信息] Snell 配置文件已生成。"
 }
 
 # 启动 Snell 服务
 start_snell(){
-    echo -e "${Info} 正在启动 Snell 服务..."
+    echo -e "[信息] 正在启动 Snell 服务..."
     sudo systemctl start snell
     sleep 2
     sudo systemctl status snell --no-pager
@@ -111,13 +102,13 @@ start_snell(){
 
 # 停止 Snell 服务
 stop_snell(){
-    echo -e "${Info} 停止 Snell 服务..."
+    echo -e "[信息] 停止 Snell 服务..."
     sudo systemctl stop snell
 }
 
 # 重启 Snell 服务
 restart_snell(){
-    echo -e "${Info} 重启 Snell 服务..."
+    echo -e "[信息] 重启 Snell 服务..."
     sudo systemctl restart snell
     sleep 2
     sudo systemctl status snell --no-pager
@@ -125,38 +116,38 @@ restart_snell(){
 
 # 查看 Snell 服务状态
 status_snell(){
-    echo -e "${Info} 获取 Snell 服务状态..."
+    echo -e "[信息] 获取 Snell 服务状态..."
     sudo systemctl status snell --no-pager
 }
 
 # 设置 Snell 服务开机自启
 enable_snell(){
-    echo -e "${Info} 设置 Snell 服务开机自启动..."
+    echo -e "[信息] 设置 Snell 服务开机自启动..."
     sudo systemctl enable snell
 }
 
 # 卸载 Snell 服务
 uninstall_snell(){
-    echo -e "${Info} 卸载 Snell 服务..."
+    echo -e "[信息] 卸载 Snell 服务..."
     sudo systemctl stop snell
     sudo systemctl disable snell
     sudo rm -f /usr/local/bin/snell-server
     sudo rm -f /etc/systemd/system/snell.service
     sudo rm -rf /etc/snell
     sudo systemctl daemon-reload
-    echo -e "${Info} Snell 服务已卸载。"
+    echo -e "[信息] Snell 服务已卸载。"
 }
 
 # 主菜单
-echo "${Green_font_prefix}1.${Font_color_suffix} 更新脚本"
-echo "${Green_font_prefix}2.${Font_color_suffix} 安装 Snell 服务"
-echo "${Green_font_prefix}3.${Font_color_suffix} 配置 Snell 服务"
-echo "${Green_font_prefix}4.${Font_color_suffix} 启动 Snell 服务"
-echo "${Green_font_prefix}5.${Font_color_suffix} 停止 Snell 服务"
-echo "${Green_font_prefix}6.${Font_color_suffix} 重启 Snell 服务"
-echo "${Green_font_prefix}7.${Font_color_suffix} 查看 Snell 服务状态"
-echo "${Green_font_prefix}8.${Font_color_suffix} 卸载 Snell 服务"
-echo "${Green_font_prefix}0.${Font_color_suffix} 退出脚本"
+echo "1. 更新脚本"
+echo "2. 安装 Snell 服务"
+echo "3. 配置 Snell 服务"
+echo "4. 启动 Snell 服务"
+echo "5. 停止 Snell 服务"
+echo "6. 重启 Snell 服务"
+echo "7. 查看 Snell 服务状态"
+echo "8. 卸载 Snell 服务"
+echo "0. 退出脚本"
 
 read -p "请选择一个操作: " action
 
@@ -192,11 +183,11 @@ case $action in
         uninstall_snell
         ;;
     0)
-        echo -e "${Info} 退出脚本..."
+        echo -e "[信息] 退出脚本..."
         exit 0
         ;;
     *)
-        echo -e "${Error} 输入无效，退出..."
+        echo -e "[错误] 输入无效，退出..."
         exit 1
         ;;
 esac
