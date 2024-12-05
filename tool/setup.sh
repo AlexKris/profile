@@ -179,18 +179,16 @@ EOF
 }
 
 # 主菜单
-echo -e "\
-${Green_font_prefix}1.${Font_color_suffix} 更新脚本
-${Green_font_prefix}2.${Font_color_suffix} 修复 sudo 问题
-${Green_font_prefix}3.${Font_color_suffix} 安装必要的工具
-${Green_font_prefix}4.${Font_color_suffix} 配置 SSH 公钥认证
-${Green_font_prefix}5.${Font_color_suffix} 检查并启用 SSH 公钥认证
-${Green_font_prefix}6.${Font_color_suffix} 配置 fail2ban 和 rsyslog
-${Green_font_prefix}7.${Font_color_suffix} 检查并设置时区为香港
-${Green_font_prefix}8.${Font_color_suffix} 检查并启用 BBR
-${Green_font_prefix}9.${Font_color_suffix} 执行所有操作
-${Green_font_prefix}0.${Font_color_suffix} 退出脚本
-"
+echo "${Green_font_prefix}1.${Font_color_suffix} 更新脚本"
+echo "${Green_font_prefix}2.${Font_color_suffix} 修复 sudo 问题"
+echo "${Green_font_prefix}3.${Font_color_suffix} 安装必要的工具"
+echo "${Green_font_prefix}4.${Font_color_suffix} 配置 SSH 公钥认证"
+echo "${Green_font_prefix}5.${Font_color_suffix} 检查并启用 SSH 公钥认证"
+echo "${Green_font_prefix}6.${Font_color_suffix} 配置 fail2ban 和 rsyslog"
+echo "${Green_font_prefix}7.${Font_color_suffix} 检查并设置时区为香港"
+echo "${Green_font_prefix}8.${Font_color_suffix} 检查并启用 BBR"
+echo "${Green_font_prefix}9.${Font_color_suffix} 执行所有操作"
+echo "${Green_font_prefix}0.${Font_color_suffix} 退出脚本"
 
 read -p "请选择一个操作: " action
 

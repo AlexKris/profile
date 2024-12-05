@@ -148,17 +148,15 @@ uninstall_snell(){
 }
 
 # 主菜单
-echo -e "\
-${Green_font_prefix}1.${Font_color_suffix} 更新脚本
-${Green_font_prefix}2.${Font_color_suffix} 安装 Snell 服务
-${Green_font_prefix}3.${Font_color_suffix} 配置 Snell 服务
-${Green_font_prefix}4.${Font_color_suffix} 启动 Snell 服务
-${Green_font_prefix}5.${Font_color_suffix} 停止 Snell 服务
-${Green_font_prefix}6.${Font_color_suffix} 重启 Snell 服务
-${Green_font_prefix}7.${Font_color_suffix} 查看 Snell 服务状态
-${Green_font_prefix}8.${Font_color_suffix} 卸载 Snell 服务
-${Green_font_prefix}0.${Font_color_suffix} 退出脚本
-"
+echo "${Green_font_prefix}1.${Font_color_suffix} 更新脚本"
+echo "${Green_font_prefix}2.${Font_color_suffix} 安装 Snell 服务"
+echo "${Green_font_prefix}3.${Font_color_suffix} 配置 Snell 服务"
+echo "${Green_font_prefix}4.${Font_color_suffix} 启动 Snell 服务"
+echo "${Green_font_prefix}5.${Font_color_suffix} 停止 Snell 服务"
+echo "${Green_font_prefix}6.${Font_color_suffix} 重启 Snell 服务"
+echo "${Green_font_prefix}7.${Font_color_suffix} 查看 Snell 服务状态"
+echo "${Green_font_prefix}8.${Font_color_suffix} 卸载 Snell 服务"
+echo "${Green_font_prefix}0.${Font_color_suffix} 退出脚本"
 
 read -p "请选择一个操作: " action
 
