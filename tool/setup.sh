@@ -141,30 +141,57 @@ configure_bbr(){
         return
     fi
 
-    # 获取当前的 TCP 拥塞控制算法
-    CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
-
-    # 检查是否已启用 BBR
+    # 检查当前的 TCP 拥塞控制算法
+    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
     if [ "$CURRENT_CC" = "bbr" ]; then
         echo -e "[信息] BBR 已启用"
     else
-        echo -e "[信息] BBR 未启用，正在启用..."
-        sudo modprobe tcp_bbr
-        if ! lsmod | grep -q "tcp_bbr"; then
-            echo -e "[错误] 无法加载 tcp_bbr 模块"
-            return
-        fi
-        sudo tee -a /etc/sysctl.conf > /dev/null << EOF
+        echo -e "[信息] 当前 TCP 拥塞控制算法为 $CURRENT_CC，未启用 BBR，正在启用..."
+    fi
+
+    # 尝试加载 tcp_bbr 模块
+    sudo modprobe tcp_bbr
+    if ! lsmod | grep -q "tcp_bbr"; then
+        echo -e "[错误] 无法加载 tcp_bbr 模块，请检查内核模块配置"
+        return 1
+    fi
+
+    # 配置 BBR
+    sudo tee -a /etc/sysctl.conf > /dev/null << EOF
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
+    sudo sysctl -p > /dev/null 2>&1
+
+    # 再次检查是否成功启用 BBR
+    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    if [ "$CURRENT_CC" = "bbr" ]; then
+        echo -e "[信息] BBR 已成功启用"
+    else
+        echo -e "[错误] BBR 启用失败，请手动检查配置"
+    fi
+}
+
+# 检查并启用内核 IP 转发
+configure_ip_forward(){
+    # 获取当前内核 IP 转发状态
+    CURRENT_CC=$(sysctl -n net.ipv4.ip_forward)
+
+    # 检查是否已启用内核 IP 转发
+    if [ "$CURRENT_CC" = "1" ]; then
+        echo -e "[信息] 内核 IP 转发 已启用"
+    else
+        echo -e "[信息] 内核 IP 转发 未启用，正在启用..."
+        sudo tee -a /etc/sysctl.conf > /dev/null << EOF
+net.ipv4.ip_forward = 1
+EOF
         sudo sysctl -p
-        # 再次获取当前的 TCP 拥塞控制算法
-        CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
-        if [ "$CURRENT_CC" = "bbr" ]; then
-            echo -e "[信息] BBR 已成功启用"
+        # 再次获取当前的内核 IP 转发状态
+        CURRENT_CC=$(sysctl -n net.ipv4.ip_forward)
+        if [ "$CURRENT_CC" = "1" ]; then
+            echo -e "[信息] 内核 IP 转发 已成功启用"
         else
-            echo -e "[错误] BBR 启用失败，请手动检查"
+            echo -e "[错误] 内核 IP 转发 启用失败，请手动检查"
         fi
     fi
 }
@@ -178,37 +205,23 @@ echo "5. 检查并启用 SSH 公钥认证"
 echo "6. 配置 fail2ban 和 rsyslog"
 echo "7. 检查并设置时区为香港"
 echo "8. 检查并启用 BBR"
-echo "9. 执行所有操作"
+echo "9. 检查并启用内核 IP 转发"
+echo "10. 执行所有操作"
 echo "0. 退出脚本"
 
 read -p "请选择一个操作: " action
 
 case $action in
-    1)
-        update_shell
-        ;;
-    2)
-        fix_sudo_issue
-        ;;
-    3)
-        setup_dependencies
-        ;;
-    4)
-        configure_ssh_keys
-        ;;
-    5)
-        enable_ssh_pubkey_auth
-        ;;
-    6)
-        configure_fail2ban
-        ;;
-    7)
-        configure_timezone
-        ;;
-    8)
-        configure_bbr
-        ;;
-    9)
+    1) update_shell ;;
+    2) fix_sudo_issue ;;
+    3) setup_dependencies ;;
+    4) configure_ssh_keys ;;
+    5) enable_ssh_pubkey_auth ;;
+    6) configure_fail2ban ;;
+    7) configure_timezone ;;
+    8) configure_bbr ;;
+    9) configure_ip_forward ;;
+    10)
         fix_sudo_issue
         setup_dependencies
         configure_ssh_keys
@@ -216,13 +229,8 @@ case $action in
         configure_fail2ban
         configure_timezone
         configure_bbr
+        configure_ip_forward
         ;;
-    0)
-        echo -e "[信息] 退出脚本..."
-        exit 0
-        ;;
-    *)
-        echo -e "[错误] 输入无效，退出..."
-        exit 1
-        ;;
+    0) echo -e "[信息] 退出脚本..."; exit 0 ;;
+    *) echo -e "[错误] 输入无效，退出..."; exit 1 ;;
 esac
