@@ -141,34 +141,31 @@ configure_bbr(){
         return
     fi
 
-    # 检查当前的 TCP 拥塞控制算法
-    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    # 获取当前的 TCP 拥塞控制算法
+    CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+
+    # 检查是否已启用 BBR
     if [ "$CURRENT_CC" = "bbr" ]; then
         echo -e "[信息] BBR 已启用"
     else
-        echo -e "[信息] 当前 TCP 拥塞控制算法为 $CURRENT_CC，未启用 BBR，正在启用..."
-    fi
-
-    # 尝试加载 tcp_bbr 模块
-    sudo modprobe tcp_bbr
-    if ! lsmod | grep -q "tcp_bbr"; then
-        echo -e "[错误] 无法加载 tcp_bbr 模块，请检查内核模块配置"
-        return 1
-    fi
-
-    # 配置 BBR
-    sudo tee -a /etc/sysctl.conf > /dev/null << EOF
+        echo -e "[信息] BBR 未启用，正在启用..."
+        sudo modprobe tcp_bbr
+        if ! lsmod | grep -q "tcp_bbr"; then
+            echo -e "[错误] 无法加载 tcp_bbr 模块"
+            return
+        fi
+        sudo tee -a /etc/sysctl.conf > /dev/null << EOF
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
-    sudo sysctl -p > /dev/null 2>&1
-
-    # 再次检查是否成功启用 BBR
-    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
-    if [ "$CURRENT_CC" = "bbr" ]; then
-        echo -e "[信息] BBR 已成功启用"
-    else
-        echo -e "[错误] BBR 启用失败，请手动检查配置"
+        sudo sysctl -p
+        # 再次获取当前的 TCP 拥塞控制算法
+        CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+        if [ "$CURRENT_CC" = "bbr" ]; then
+            echo -e "[信息] BBR 已成功启用"
+        else
+            echo -e "[错误] BBR 启用失败，请手动检查"
+        fi
     fi
 }
 
