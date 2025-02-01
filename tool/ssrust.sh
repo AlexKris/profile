@@ -122,7 +122,7 @@ configure_and_start_ssrust() {
     mkdir -p "$SSRUST_DOCKER_DIR"
 
     read -p "请输入 Shadowsocks 监听端口: " port
-    read -sp "请输入 Shadowsocks 密码: " password
+    read -p "请输入 Shadowsocks 密码: " password
     echo  # 换行
 
     echo "请选择网络模式：1) bridge（默认） 2) host"
