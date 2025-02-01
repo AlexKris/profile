@@ -65,8 +65,6 @@ install_docker_compose() {
     echo "正在检查 Docker Compose 是否已安装..."
     if ! command -v "${DOCKER_COMPOSE_CMD}" &> /dev/null; then
         echo "Docker Compose 未安装，开始安装 Docker Compose..."
-        # 对于Ubuntu 20.04+可以尝试: sudo apt install docker-compose-plugin
-        # 这里仍使用旧方式:
         sudo apt install docker-compose -y
         if [ $? -ne 0 ]; then
             echo "Docker Compose 安装失败，退出..."
@@ -90,12 +88,15 @@ EOF
 
 # -- 选择加密方式函数（将提示输出到stderr，仅返回最终加密方式） --
 choose_encryption_method() {
-    # 将提示语 echo 到 stderr，避免被 $( ) 捕获
+    # 输出提示到 stderr
     echo "请选择加密方式:" >&2
     echo "1) aes-128-gcm (默认)" >&2
     echo "2) 2022-blake3-aes-128-gcm (ss2022)" >&2
-    read -p "输入数字选择 [1/2], 默认为 1: " method_choice
-
+    echo -n "输入数字选择 [1/2], 默认为 1: " >&2
+    
+    # 不使用 read -p ，而是先输出提示到 stderr，再单独 read
+    read method_choice
+    
     local method
     case "$method_choice" in
         2)
@@ -110,7 +111,7 @@ choose_encryption_method() {
             ;;
     esac
 
-    # 只 echo 最终结果到 stdout
+    # 最终只 echo 一行到 stdout
     echo "$method"
 }
 
@@ -246,7 +247,7 @@ install_ssrust_direct() {
             SSRUST_TARBALL="shadowsocks-${SSRUST_VERSION}.aarch64-unknown-linux-gnu.tar.xz"
             ;;
         *)
-            echo "未识别的架构: $ARCH, 将默认使用 x86_64-unknown-linux-gnu 包名."
+            echo "未识别的架构: $ARCH, 将默认使用 x86_64-unknown-linux-gnu 包名." >&2
             SSRUST_TARBALL="shadowsocks-${SSRUST_VERSION}.x86_64-unknown-linux-gnu.tar.xz"
             ;;
     esac
