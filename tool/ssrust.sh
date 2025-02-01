@@ -22,12 +22,11 @@ DOCKER_IMAGE="ghcr.io/shadowsocks/ssserver-rust:latest"
 DOCKER_COMPOSE_VERSION="3.0"
 
 # 直接部署相关
-SSRUST_DIRECT_DIR="/usr/local/bin"         # 放置 ssserver 的目录
+SSRUST_DIRECT_DIR="/usr/local/bin"  # 放置 ssserver 的目录
 SSRUST_DIRECT_CONFIG="/etc/shadowsocks-rust/config.json"
 SSRUST_SYSTEMD_FILE="/etc/systemd/system/shadowsocks-rust.service"
 
-# Docker Compose 命令名
-# 对于某些新版本系统，可能使用 docker-compose-plugin，可根据情况自行调整
+# Docker Compose 命令名（某些系统可能使用 docker-compose-plugin ）
 DOCKER_COMPOSE_CMD="docker-compose"
 
 echo "=============================="
@@ -89,18 +88,25 @@ EOF
     echo "服务端 TCP Fast Open 已启用."
 }
 
-# -- 提示用户选择加密方式: aes-128-gcm 或 2022-blake3-aes-128-gcm --
-choose_encryption_method(){
+# -- 选择加密方式函数（修正后仅输出最终加密方式） --
+choose_encryption_method() {
     echo "请选择加密方式:"
     echo "1) aes-128-gcm (默认)"
     echo "2) 2022-blake3-aes-128-gcm (ss2022)"
-    read -p "输入数字选择[1/2], 默认为 1: " method_choice
+    read -p "输入数字选择 [1/2], 默认为 1: " method_choice
 
-    enc_method="aes-128-gcm"
-    if [ "$method_choice" == "2" ]; then
-        enc_method="2022-blake3-aes-128-gcm"
-    fi
-    echo "$enc_method"
+    case "$method_choice" in
+        1|"")
+            echo "aes-128-gcm"
+            ;;
+        2)
+            echo "2022-blake3-aes-128-gcm"
+            ;;
+        *)
+            echo "输入无效，默认使用 aes-128-gcm"
+            echo "aes-128-gcm"
+            ;;
+    esac
 }
 
 # =============== Docker 方式部署 shadowsocks-rust ===============
@@ -123,6 +129,7 @@ configure_and_start_ssrust() {
 
     # 选择加密方式
     enc_method=$(choose_encryption_method)
+    echo "当前加密方式: $enc_method"
 
     # 生成 Docker 版 Shadowsocks 配置
     cat > "$SSRUST_CONFIG_DIR/config.json" <<EOF
@@ -179,7 +186,7 @@ EOF
 
     if [ $? -eq 0 ]; then
         echo "shadowsocks-rust (Docker) 配置并启动完成."
-        echo "当前加密方式: $enc_method"
+        echo "已写入配置文件: $SSRUST_CONFIG_DIR/config.json"
     else
         echo "服务启动失败，请检查日志."
     fi
@@ -208,7 +215,6 @@ cleanup_ssrust() {
     echo "shadowsocks-rust 配置已清理完成."
 }
 
-
 # =============== 直接部署(非 Docker)安装 Shadowsocks-rust ===============
 install_ssrust_direct() {
     echo "正在检查系统中是否已有 ssserver..."
@@ -227,7 +233,6 @@ install_ssrust_direct() {
 
     # 检测当前系统架构
     ARCH=$(uname -m)
-    # 根据常见架构匹配对应包名；可自行添加更多分支
     case "$ARCH" in
         x86_64)
             # 对 Debian/Ubuntu + x86_64，推荐 gnu 版
@@ -258,10 +263,11 @@ install_ssrust_direct() {
 
     # 解压
     tar -xvf "$SSRUST_TARBALL"
+
     # 将可执行文件放置到 /usr/local/bin
     if [ -f "ssserver" ]; then
-        mv ssserver $SSRUST_DIRECT_DIR
-        chmod +x $SSRUST_DIRECT_DIR/ssserver
+        mv ssserver "$SSRUST_DIRECT_DIR"
+        chmod +x "$SSRUST_DIRECT_DIR/ssserver"
         echo "Shadowsocks-rust (ssserver) 已安装到 $SSRUST_DIRECT_DIR."
     else
         echo "解压后未找到 ssserver 文件，可能下载包不匹配或版本不存在."
@@ -271,7 +277,6 @@ install_ssrust_direct() {
     # 清理临时文件
     rm -f "$SSRUST_TARBALL"
 }
-
 
 # 配置并启动 Shadowsocks-rust (直接部署)
 configure_and_start_ssrust_direct() {
@@ -290,6 +295,7 @@ configure_and_start_ssrust_direct() {
 
     # 选择加密方式
     enc_method=$(choose_encryption_method)
+    echo "当前加密方式: $enc_method"
 
     # 写入配置文件
     cat > "$SSRUST_DIRECT_CONFIG" <<EOF
@@ -330,7 +336,7 @@ EOF
 
     if systemctl status shadowsocks-rust --no-pager; then
         echo "Shadowsocks-rust 已启动 (直接部署)."
-        echo "当前加密方式: $enc_method"
+        echo "已写入配置文件: $SSRUST_DIRECT_CONFIG"
     else
         echo "服务启动失败，请检查日志: journalctl -u shadowsocks-rust"
     fi
@@ -355,7 +361,6 @@ uninstall_ssrust_direct() {
 
     echo "Shadowsocks-rust (直接部署) 已卸载."
 }
-
 
 # =============== 主菜单逻辑 ===============
 main_menu() {
@@ -427,7 +432,7 @@ main_menu() {
     esac
 }
 
-# 可选：先更新系统包 (如果不想默认更新，可注释或移动到选项里)
+# 可选：先更新系统包（如不需要可注释以下行）
 update_system
 
 # 进入主菜单循环
