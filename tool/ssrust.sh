@@ -88,25 +88,30 @@ EOF
     echo "服务端 TCP Fast Open 已启用."
 }
 
-# -- 选择加密方式函数（修正后仅输出最终加密方式） --
+# -- 选择加密方式函数（将提示输出到stderr，仅返回最终加密方式） --
 choose_encryption_method() {
-    echo "请选择加密方式:"
-    echo "1) aes-128-gcm (默认)"
-    echo "2) 2022-blake3-aes-128-gcm (ss2022)"
+    # 将提示语 echo 到 stderr，避免被 $( ) 捕获
+    echo "请选择加密方式:" >&2
+    echo "1) aes-128-gcm (默认)" >&2
+    echo "2) 2022-blake3-aes-128-gcm (ss2022)" >&2
     read -p "输入数字选择 [1/2], 默认为 1: " method_choice
 
+    local method
     case "$method_choice" in
-        1|"")
-            echo "aes-128-gcm"
-            ;;
         2)
-            echo "2022-blake3-aes-128-gcm"
+            method="2022-blake3-aes-128-gcm"
+            ;;
+        1|"")
+            method="aes-128-gcm"
             ;;
         *)
-            echo "输入无效，默认使用 aes-128-gcm"
-            echo "aes-128-gcm"
+            echo "输入无效，默认使用 aes-128-gcm" >&2
+            method="aes-128-gcm"
             ;;
     esac
+
+    # 只 echo 最终结果到 stdout
+    echo "$method"
 }
 
 # =============== Docker 方式部署 shadowsocks-rust ===============
@@ -235,11 +240,9 @@ install_ssrust_direct() {
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)
-            # 对 Debian/Ubuntu + x86_64，推荐 gnu 版
             SSRUST_TARBALL="shadowsocks-${SSRUST_VERSION}.x86_64-unknown-linux-gnu.tar.xz"
             ;;
         aarch64 | arm64)
-            # 对于 64 位 ARM
             SSRUST_TARBALL="shadowsocks-${SSRUST_VERSION}.aarch64-unknown-linux-gnu.tar.xz"
             ;;
         *)
@@ -250,8 +253,8 @@ install_ssrust_direct() {
 
     DOWNLOAD_URL="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${SSRUST_VERSION}/${SSRUST_TARBALL}"
 
-    echo "将下载 Shadowsocks-rust 包: $DOWNLOAD_URL"
-    echo "如果版本或架构不对，请 Ctrl+C 取消，然后手动修改脚本或换输入。"
+    echo "将下载 Shadowsocks-rust 包: $DOWNLOAD_URL" >&2
+    echo "如果版本或架构不对，请 Ctrl+C 取消，然后手动修改脚本或换输入。" >&2
 
     # 开始下载
     cd /tmp
