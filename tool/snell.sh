@@ -95,7 +95,7 @@ EOF
 # 启动 Snell 服务
 start_snell(){
     echo -e "[信息] 正在启动 Snell 服务..."
-    sudo systemctl start snell
+    sudo systemctl restart snell
     sleep 2
     sudo systemctl status snell --no-pager
 }
