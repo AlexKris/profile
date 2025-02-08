@@ -1,0 +1,15 @@
+#########################################
+# Surge Ruleset - Stream Services: Twitter/X
+# Last Updated: 2025-02-04 21:00:00
+# Size: 7
+#
+# - Twitter/X
+#########################################
+DOMAIN-SUFFIX,twitter.com
+DOMAIN-SUFFIX,x.com
+DOMAIN-SUFFIX,twimg.com
+DOMAIN-SUFFIX,vxtwitter.com
+DOMAIN-SUFFIX,fxtwitter.com
+DOMAIN-SUFFIX,twittpr.com
+DOMAIN-KEYWORD,twitter
+################## EOF ##################

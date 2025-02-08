@@ -1,0 +1,18 @@
+#########################################
+# Surge Ruleset - Stream Services: Netflix
+# Last Updated: 2025-02-04 21:00:00
+# Size: 10
+#
+# - Netflix
+#########################################
+DOMAIN-SUFFIX,netflix.ca
+DOMAIN-SUFFIX,netflix.com
+DOMAIN-SUFFIX,netflix.net
+DOMAIN-SUFFIX,nflxext.com
+DOMAIN-SUFFIX,nflximg.com
+DOMAIN-SUFFIX,nflxvideo.net
+DOMAIN-SUFFIX,nflxsearch.net
+DOMAIN-SUFFIX,netflix.com.edgesuite.net
+DOMAIN-KEYWORD,netflixdnstest
+PROCESS-NAME,com.netflix.mediaclient
+################## EOF ##################
