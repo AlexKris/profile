@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# 更新系统包并安装必要的软件
-echo -e "[信息] 正在更新系统包..."
-sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
-
 # 更新脚本函数
 update_shell(){
     wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/setup.sh" -O setup.sh && bash setup.sh
@@ -11,6 +7,7 @@ update_shell(){
 
 # 修复 sudo 的 'unable to resolve host' 问题
 fix_sudo_issue(){
+    apt update -y && apt install -y sudo
     if sudo -v 2>&1 | grep -q "unable to resolve host"; then
         echo -e "[信息] 修复 'sudo: unable to resolve host' 问题..."
         HOSTNAME=$(hostname)
@@ -25,10 +22,11 @@ fix_sudo_issue(){
     fi
 }
 
-# 安装必要的工具（函数重命名为 setup_dependencies）
-setup_dependencies(){
-    echo -e "[信息] 安装必要的工具..."
-    sudo apt install -y sudo wget unzip zip curl vim iperf3 fail2ban rsyslog
+# 更新系统包并安装必要的软件
+update_system_install_dependencies() {
+    echo -e "[信息] 正在更新系统包..."
+    sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
+    sudo apt install -y sudo wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
 }
 
 # 配置 SSH 公钥认证
@@ -211,7 +209,7 @@ read -p "请选择一个操作: " action
 case $action in
     1) update_shell ;;
     2) fix_sudo_issue ;;
-    3) setup_dependencies ;;
+    3) update_system_install_dependencies ;;
     4) configure_ssh_keys ;;
     5) enable_ssh_pubkey_auth ;;
     6) configure_fail2ban ;;
@@ -220,7 +218,7 @@ case $action in
     9) configure_ip_forward ;;
     10)
         fix_sudo_issue
-        setup_dependencies
+        update_system_install_dependencies
         configure_ssh_keys
         enable_ssh_pubkey_auth
         configure_fail2ban
