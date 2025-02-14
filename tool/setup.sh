@@ -191,41 +191,11 @@ EOF
     fi
 }
 
-# 主菜单
-echo "1. 更新脚本"
-echo "2. 修复 sudo 问题"
-echo "3. 安装必要的工具"
-echo "4. 配置 SSH 公钥认证"
-echo "5. 检查并启用 SSH 公钥认证"
-echo "6. 配置 fail2ban 和 rsyslog"
-echo "7. 检查并设置时区为香港"
-echo "8. 检查并启用 BBR"
-echo "9. 检查并启用内核 IP 转发"
-echo "10. 执行所有操作"
-echo "0. 退出脚本"
-
-read -p "请选择一个操作: " action
-
-case $action in
-    1) update_shell ;;
-    2) fix_sudo_issue ;;
-    3) update_system_install_dependencies ;;
-    4) configure_ssh_keys ;;
-    5) enable_ssh_pubkey_auth ;;
-    6) configure_fail2ban ;;
-    7) configure_timezone ;;
-    8) configure_bbr ;;
-    9) configure_ip_forward ;;
-    10)
-        fix_sudo_issue
-        update_system_install_dependencies
-        configure_ssh_keys
-        enable_ssh_pubkey_auth
-        configure_fail2ban
-        configure_timezone
-        configure_bbr
-        configure_ip_forward
-        ;;
-    0) echo -e "[信息] 退出脚本..."; exit 0 ;;
-    *) echo -e "[错误] 输入无效，退出..."; exit 1 ;;
-esac
+fix_sudo_issue
+update_system_install_dependencies
+configure_ssh_keys
+enable_ssh_pubkey_auth
+configure_fail2ban
+configure_timezone
+configure_bbr
+configure_ip_forward
