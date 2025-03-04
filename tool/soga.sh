@@ -9,6 +9,7 @@ fi
 # 参数赋值
 PANEL_URL="$1"
 PANEL_KEY="$2"
+CONTAINER_NAME="sogass"
 
 # 运行时输入 NODE_ID
 read -p "请输入 NODE_ID: " NODE_ID
@@ -31,10 +32,23 @@ install_docker(){
     echo -e "[信息] Docker 已经安装..."
 }
 
+# 检查并删除已存在的容器
+check_remove_container() {
+    echo -e "[信息] 检查是否存在旧的 $CONTAINER_NAME 容器..."
+    if docker ps -a | grep -q "$CONTAINER_NAME"; then
+        echo -e "[信息] 发现已存在的 $CONTAINER_NAME 容器，正在停止并删除..."
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+        echo -e "[信息] 已删除旧的 $CONTAINER_NAME 容器"
+    else
+        echo -e "[信息] 未发现已存在的 $CONTAINER_NAME 容器"
+    fi
+}
+
 # 配置并运行 soga
 config_run_soga(){
     echo -e "[信息] 正在安装 soga..."
-    docker run --restart=always --name sogass -d \
+    docker run --restart=always --name "$CONTAINER_NAME" -d \
     -v /etc/soga/:/etc/soga/ --network host \
     -e type=v2board \
     -e server_type=ss \
@@ -50,4 +64,5 @@ config_run_soga(){
 
 update_system
 install_docker
+check_remove_container
 config_run_soga

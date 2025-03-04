@@ -152,8 +152,14 @@ configure_bbr(){
             echo -e "[错误] 无法加载 tcp_bbr 模块"
             return
         fi
+        
+        # 先删除可能存在的旧配置
+        sudo sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+        sudo sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+        
+        # 添加新配置
         sudo tee -a /etc/sysctl.conf > /dev/null << EOF
-net.core.default_qdisc = fq
+net.core.default_qdisc = cake
 net.ipv4.tcp_congestion_control = bbr
 EOF
         sudo sysctl -p
