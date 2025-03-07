@@ -1,34 +1,47 @@
 #!/bin/bash
 
-# 判断是否传入足够的参数（现在只需传入 PANEL_URL 和 PANEL_KEY）
-if [ "$#" -ne 2 ]; then
-    echo "用法: $0 <PANEL_URL> <PANEL_KEY>"
-    exit 1
-fi
-
 # 参数赋值
-PANEL_URL="$1"
-PANEL_KEY="$2"
-CONTAINER_NAME="sogass"
+PANEL_URL="$2"
+PANEL_KEY="$3"
+CONTAINER_NAME="$4"
+NODE_ID="$5"
 
-# 运行时输入 NODE_ID
-read -p "请输入 NODE_ID: " NODE_ID
-
-# 更新系统包并安装必要的软件
-update_system() {
-    echo -e "[信息] 正在更新系统包..."
-    sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
+# 更新系统包
+update_system(){
+    if [ -f /etc/debian_version ]; then
+        echo -e "[信息] 正在更新系统包..."
+        sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
+    elif [ -f /etc/redhat-release ]; then
+        echo -e "[信息] 正在更新系统包..."
+        sudo yum update -y
+    else
+        echo -e "[错误] 不支持的操作系统，只支持Debian/Ubuntu和CentOS/RHEL。"
+        exit 1
+    fi
+    if [ $? -ne 0 ]; then
+        echo -e "[错误] 系统更新失败，请检查网络连接。"
+        exit 1
+    fi
+    echo -e "[信息] 系统更新完成。"
 }
 
 # 安装 Docker
 install_docker(){
+    if command -v docker &> /dev/null; then
+        echo -e "[信息] Docker 已经安装，跳过安装步骤..."
+        return
+    fi
     echo -e "[信息] 正在安装 Docker..."
     curl -fsSL https://get.docker.com | bash
+    if [ $? -ne 0 ]; then
+        echo -e "[错误] 安装 Docker 失败，请检查网络连接。"
+        exit 1
+    fi
     echo -e "[信息] Docker 已经安装..."
 }
 
 # 检查并删除已存在的容器
-check_remove_container() {
+check_remove_container(){
     echo -e "[信息] 检查是否存在旧的 $CONTAINER_NAME 容器..."
     if docker ps -a | grep -q "$CONTAINER_NAME"; then
         echo -e "[信息] 发现已存在的 $CONTAINER_NAME 容器，正在停止并删除..."
@@ -57,7 +70,49 @@ config_run_soga(){
     echo -e "[信息] soga 已经安装..."
 }
 
-update_system
-install_docker
-check_remove_container
-config_run_soga
+# 安装 soga
+install_soga(){
+    install_docker
+    check_remove_container
+    config_run_soga
+}
+
+# 重启 soga
+restart_soga(){
+    echo -e "[信息] 正在重启 soga..."
+    docker restart "$CONTAINER_NAME"
+    echo -e "[信息] soga 已经重启..."
+}
+
+# 根据命令行参数执行不同功能
+case "$1" in
+    update)
+        update_system
+        ;;
+    install)
+        if [ -z "$PANEL_URL" ] || [ -z "$PANEL_KEY" ] || [ -z "$CONTAINER_NAME" ] || [ -z "$NODE_ID" ]; then
+            echo "[错误] 安装soga需要提供所有参数: PANEL_URL, PANEL_KEY, CONTAINER_NAME, NODE_ID"
+            echo "用法: $0 install <PANEL_URL> <PANEL_KEY> <CONTAINER_NAME> <NODE_ID>"
+            exit 1
+        fi
+        install_soga
+        ;;
+    restart)
+        CONTAINER_NAME="$2"
+        if [ -z "$CONTAINER_NAME" ]; then
+            echo "[错误] 重启soga需要提供容器名"
+            echo "用法: $0 restart <CONTAINER_NAME>"
+            exit 1
+        fi
+        restart_soga
+        ;;
+    *)
+        echo "用法: $0 {update|install|restart}"
+        echo " - 更新系统 update"
+        echo " - 安装soga install <PANEL_URL> <PANEL_KEY> <CONTAINER_NAME> <NODE_ID>"
+        echo " - 重启soga restart <CONTAINER_NAME>"
+        exit 1
+        ;;
+esac
+
+exit 0
