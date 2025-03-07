@@ -14,11 +14,6 @@ CONTAINER_NAME="sogass"
 # 运行时输入 NODE_ID
 read -p "请输入 NODE_ID: " NODE_ID
 
-# 更新脚本函数
-update_shell(){
-    wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/soga.sh" -O soga.sh && bash soga.sh
-}
-
 # 更新系统包并安装必要的软件
 update_system() {
     echo -e "[信息] 正在更新系统包..."
