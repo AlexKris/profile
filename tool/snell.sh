@@ -9,17 +9,28 @@ SNELL_PSK="$5"
 # 更新系统包
 update_system(){
     if [ -f /etc/debian_version ]; then
-        echo -e "[信息] 正在更新系统包..."
+        echo -e "[信息] 检测到 Debian/Ubuntu 系统..."
         sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
         
         echo -e "[信息] 正在安装 wget 和 unzip..."
         sudo apt install -y wget unzip
     elif [ -f /etc/redhat-release ]; then
-        echo -e "[信息] 正在更新系统包..."
-        sudo yum update -y
+        echo -e "[信息] 检测到 RHEL/CentOS 系统..."
         
-        echo -e "[信息] 正在安装 wget 和 unzip..."
-        sudo yum install -y wget unzip
+        # 检查是否有 dnf（CentOS/RHEL 8+）
+        if command -v dnf &> /dev/null; then
+            echo -e "[信息] 使用 dnf 包管理器进行更新..."
+            sudo dnf update -y
+            
+            echo -e "[信息] 正在安装 wget unzip..."
+            sudo dnf install -y wget unzip
+        else
+            echo -e "[信息] 使用 yum 包管理器进行更新..."
+            sudo yum update -y
+            
+            echo -e "[信息] 正在安装 wget unzip..."
+            sudo yum install -y wget unzip
+        fi
     else
         echo -e "[错误] 不支持的操作系统，只支持Debian/Ubuntu和CentOS/RHEL。"
         exit 1

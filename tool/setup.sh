@@ -25,8 +25,35 @@ fix_sudo_issue(){
 # 更新系统包并安装必要的软件
 update_system_install_dependencies() {
     echo -e "[信息] 正在更新系统包..."
-    sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
-    sudo apt install -y sudo wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+    if [ -f /etc/debian_version ]; then
+        echo -e "[信息] 检测到 Debian/Ubuntu 系统..."
+        sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
+
+        echo -e "[信息] 正在安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr..."
+        sudo apt install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+    elif [ -f /etc/redhat-release ]; then
+        echo -e "[信息] 检测到 RHEL/CentOS 系统..."
+        
+        # 检查是否有 dnf（CentOS/RHEL 8+）
+        if command -v dnf &> /dev/null; then
+            echo -e "[信息] 使用 dnf 包管理器进行更新..."
+            sudo dnf update -y
+            
+            echo -e "[信息] 正在安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr..."
+            sudo dnf install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+        else
+            echo -e "[信息] 使用 yum 包管理器进行更新..."
+            sudo yum update -y
+            
+            echo -e "[信息] 正在安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr..."
+            sudo yum install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+        fi
+    else
+        echo -e "[错误] 不支持的操作系统，只支持Debian/Ubuntu和CentOS/RHEL。"
+        exit 1
+    fi
+    echo -e "[信息] 系统更新完成。"
+    echo -e "[信息] 安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr 完成。"
 }
 
 # 配置 SSH 公钥认证
@@ -125,6 +152,70 @@ configure_timezone(){
         echo -e "[信息] 时区已设置为 $TARGET_TIMEZONE"
     else
         echo -e "[信息] 时区已是 $TARGET_TIMEZONE，无需更改"
+    fi
+
+    # 配置时间同步
+    echo -e "[信息] 配置时间同步服务..."
+    if [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu 系统
+        echo -e "[信息] 检测到 Debian/Ubuntu 系统，使用 systemd-timesyncd 或 chrony 配置时间同步"
+        
+        # 检查是否有 chrony
+        if command -v chronyd &> /dev/null; then
+            echo -e "[信息] 使用 chrony 进行时间同步"
+            sudo apt install -y chrony
+            # 配置 chrony 使用亚洲时间服务器
+            sudo tee /etc/chrony/chrony.conf > /dev/null << EOF
+pool asia.pool.ntp.org iburst
+keyfile /etc/chrony/chrony.keys
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+maxupdateskew 100.0
+rtcsync
+makestep 1 3
+EOF
+            sudo systemctl restart chrony
+            sudo systemctl enable chrony
+            echo -e "[信息] chrony 服务已配置并启用"
+        else
+            # 使用 systemd-timesyncd
+            echo -e "[信息] 使用 systemd-timesyncd 进行时间同步"
+            sudo apt install -y systemd-timesyncd
+            sudo tee /etc/systemd/timesyncd.conf > /dev/null << EOF
+[Time]
+NTP=asia.pool.ntp.org
+FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
+EOF
+            sudo systemctl restart systemd-timesyncd
+            sudo systemctl enable systemd-timesyncd
+            echo -e "[信息] systemd-timesyncd 服务已配置并启用"
+        fi
+    elif [ -f /etc/redhat-release ]; then
+        # CentOS/RHEL 系统
+        echo -e "[信息] 检测到 CentOS/RHEL 系统，使用 chronyd 配置时间同步"
+        
+        # CentOS 7+ 使用 chronyd
+        sudo yum install -y chrony
+        # 配置 chrony 使用亚洲时间服务器
+        sudo tee /etc/chrony.conf > /dev/null << EOF
+server asia.pool.ntp.org iburst
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+logdir /var/log/chrony
+EOF
+        sudo systemctl start chronyd
+        sudo systemctl enable chronyd
+        echo -e "[信息] chronyd 服务已配置并启用"
+    else
+        echo -e "[错误] 不支持的操作系统，无法配置时间同步"
+    fi
+
+    # 检查时间同步状态
+    if systemctl is-active systemd-timesyncd &> /dev/null || systemctl is-active chrony &> /dev/null || systemctl is-active chronyd &> /dev/null; then
+        echo -e "[信息] 时间同步服务已成功启用"
+    else
+        echo -e "[警告] 时间同步服务可能未正确启用，请手动检查"
     fi
 }
 
