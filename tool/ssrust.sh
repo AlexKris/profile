@@ -64,7 +64,7 @@ check_remove_container(){
 # 配置并运行 ssrust
 config_run_ssrust(){
     echo -e "[信息] 正在安装 ssrust..."
-    docker run --restart=always --name "$CONTAINER_NAME" -d \
+    docker run --entrypoint ssserver --restart=always --name "$CONTAINER_NAME" -d \
     --net=host \
     --log-driver json-file \
     --log-opt max-size=10m \
