@@ -106,9 +106,9 @@ case "$1" in
         update_system
         ;;
     install)
-        if [ -z "$CONTAINER_NAME" ] || [ -z "$PANEL_URL" ] || [ -z "$PANEL_KEY" ] || [ -z "$NODE_ID" ]; then
-            echo "[错误] 安装ssrust需要提供所有参数: CONTAINER_NAME, PANEL_URL, PANEL_KEY, NODE_ID"
-            echo "用法: $0 install <CONTAINER_NAME> <PANEL_URL> <PANEL_KEY> <NODE_ID>"
+        if [ -z "$CONTAINER_NAME" ] || [ -z "$PORT" ] || [ -z "$PASSWORD" ] || [ -z "$ENC_METHOD" ]; then
+            echo "[错误] 安装ssrust需要提供所有参数: CONTAINER_NAME, PORT, PASSWORD, ENC_METHOD"
+            echo "用法: $0 install <CONTAINER_NAME> <PORT> <PASSWORD> <ENC_METHOD>"
             exit 1
         fi
         install_ssrust
@@ -134,7 +134,7 @@ case "$1" in
     *)
         echo "用法: $0 {update|install|restart|stop}"
         echo " - 更新系统 update"
-        echo " - 安装ssrust install <CONTAINER_NAME> <PANEL_URL> <PANEL_KEY> <NODE_ID>"
+        echo " - 安装ssrust install <CONTAINER_NAME> <PORT> <PASSWORD> <ENC_METHOD>"
         echo " - 重启ssrust restart <CONTAINER_NAME>"
         echo " - 停止ssrust stop <CONTAINER_NAME>"
         exit 1
