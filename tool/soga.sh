@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # 参数赋值
-PANEL_URL="$2"
-PANEL_KEY="$3"
-CONTAINER_NAME="$4"
+CONTAINER_NAME="$2"
+PANEL_URL="$3"
+PANEL_KEY="$4"
 NODE_ID="$5"
 
 # 更新系统包
@@ -92,15 +92,27 @@ restart_soga(){
     echo -e "[信息] soga 已经重启..."
 }
 
+stop_soga(){
+    echo -e "[信息] 检查是否存在 $CONTAINER_NAME 容器..."
+    if docker ps -a | grep -q "$CONTAINER_NAME"; then
+        echo -e "[信息] 发现已存在的 $CONTAINER_NAME 容器，正在停止并删除..."
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+        echo -e "[信息] 已删除旧的 $CONTAINER_NAME 容器"
+    else
+        echo -e "[信息] 未发现已存在的 $CONTAINER_NAME 容器"
+    fi
+}
+
 # 根据命令行参数执行不同功能
 case "$1" in
     update)
         update_system
         ;;
     install)
-        if [ -z "$PANEL_URL" ] || [ -z "$PANEL_KEY" ] || [ -z "$CONTAINER_NAME" ] || [ -z "$NODE_ID" ]; then
-            echo "[错误] 安装soga需要提供所有参数: PANEL_URL, PANEL_KEY, CONTAINER_NAME, NODE_ID"
-            echo "用法: $0 install <PANEL_URL> <PANEL_KEY> <CONTAINER_NAME> <NODE_ID>"
+        if [ -z "$CONTAINER_NAME" ] || [ -z "$PANEL_URL" ] || [ -z "$PANEL_KEY" ] || [ -z "$NODE_ID" ]; then
+            echo "[错误] 安装soga需要提供所有参数: CONTAINER_NAME, PANEL_URL, PANEL_KEY, NODE_ID"
+            echo "用法: $0 install <CONTAINER_NAME> <PANEL_URL> <PANEL_KEY> <NODE_ID>"
             exit 1
         fi
         install_soga
@@ -114,11 +126,21 @@ case "$1" in
         fi
         restart_soga
         ;;
+    stop)
+        CONTAINER_NAME="$2"
+        if [ -z "$CONTAINER_NAME" ]; then
+            echo "[错误] 停止soga需要提供容器名"
+            echo "用法: $0 stop <CONTAINER_NAME>"
+            exit 1
+        fi
+        stop_soga
+        ;;
     *)
-        echo "用法: $0 {update|install|restart}"
+        echo "用法: $0 {update|install|restart|stop}"
         echo " - 更新系统 update"
-        echo " - 安装soga install <PANEL_URL> <PANEL_KEY> <CONTAINER_NAME> <NODE_ID>"
+        echo " - 安装soga install <CONTAINER_NAME> <PANEL_URL> <PANEL_KEY> <NODE_ID>"
         echo " - 重启soga restart <CONTAINER_NAME>"
+        echo " - 停止soga stop <CONTAINER_NAME>"
         exit 1
         ;;
 esac
