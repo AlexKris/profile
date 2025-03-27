@@ -237,26 +237,26 @@ configure_bbr(){
 
     # 检查BBR和队列调度器的状态
     BBR_ENABLED=0
-    CAKE_ENABLED=0
+    FQ_ENABLED=0
     
     if [ "$CURRENT_CC" = "bbr" ]; then
         echo -e "[信息] BBR 已启用"
         BBR_ENABLED=1
     fi
     
-    if [ "$CURRENT_QDISC" = "cake" ]; then
-        echo -e "[信息] CAKE 队列调度器已启用"
-        CAKE_ENABLED=1
+    if [ "$CURRENT_QDISC" = "fq" ]; then
+        echo -e "[信息] FQ 队列调度器已启用"
+        FQ_ENABLED=1
     fi
     
     # 如果需要更新配置
-    if [ $BBR_ENABLED -eq 0 ] || [ $CAKE_ENABLED -eq 0 ]; then
+    if [ $BBR_ENABLED -eq 0 ] || [ $FQ_ENABLED -eq 0 ]; then
         if [ $BBR_ENABLED -eq 0 ]; then
             echo -e "[信息] BBR 未启用，正在启用..."
         fi
         
-        if [ $CAKE_ENABLED -eq 0 ]; then
-            echo -e "[信息] CAKE 队列调度器未启用，正在启用..."
+        if [ $FQ_ENABLED -eq 0 ]; then
+            echo -e "[信息] FQ 队列调度器未启用，正在启用..."
         fi
         
         sudo modprobe tcp_bbr
@@ -271,7 +271,7 @@ configure_bbr(){
         
         # 添加新配置
         sudo tee -a /etc/sysctl.conf > /dev/null << EOF
-net.core.default_qdisc = cake
+net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
         sudo sysctl -p
@@ -280,8 +280,8 @@ EOF
         CURRENT_CC=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
         CURRENT_QDISC=$(sysctl net.core.default_qdisc | awk '{print $3}')
         
-        if [ "$CURRENT_CC" = "bbr" ] && [ "$CURRENT_QDISC" = "cake" ]; then
-            echo -e "[信息] BBR 和 CAKE 队列调度器已成功启用"
+        if [ "$CURRENT_CC" = "bbr" ] && [ "$CURRENT_QDISC" = "fq" ]; then
+            echo -e "[信息] BBR 和 FQ 队列调度器已成功启用"
         else
             echo -e "[错误] 配置更新失败，请手动检查"
             echo -e "当前拥塞控制算法: $CURRENT_CC, 当前队列调度器: $CURRENT_QDISC"
