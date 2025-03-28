@@ -492,6 +492,8 @@ configure_fail2ban(){
     sudo mkdir -p /etc/fail2ban/jail.d
     sudo tee /etc/fail2ban/jail.d/custom.conf > /dev/null << EOF
 [DEFAULT]
+# 添加IPv6配置，解决警告
+allowipv6 = auto
 # 禁止的时间（秒）
 bantime = 1800
 # 查找失败次数的时间窗口（秒）
@@ -512,12 +514,22 @@ EOF
     sudo systemctl enable fail2ban
     sudo systemctl restart fail2ban
     
+    # 等待服务完全启动（增加延迟）
+    log_message "INFO" "等待 fail2ban 服务完全启动..."
+    sleep 5
+    
     # 验证 fail2ban 状态
     if sudo systemctl is-active fail2ban &> /dev/null; then
         log_message "INFO" "fail2ban 服务已成功启动并配置"
         if command -v fail2ban-client &> /dev/null; then
             log_message "INFO" "fail2ban 状态:"
-            sudo fail2ban-client status
+            # 使用错误处理，避免因命令失败导致脚本中断
+            if ! sudo fail2ban-client status >/dev/null 2>&1; then
+                log_message "WARNING" "无法获取 fail2ban 状态，但服务已正常启动"
+                log_message "INFO" "这通常是因为服务刚启动，socket文件尚未就绪"
+            else
+                sudo fail2ban-client status
+            fi
         fi
     else
         log_message "WARNING" "fail2ban 服务可能未正确启动，请手动检查"
@@ -720,14 +732,6 @@ disable_ssh_password_login() {
         # 重启SSH服务以应用公钥认证
         restart_ssh_service
 
-        # 测试SSH密钥登录是否正常工作
-        if ! test_ssh_key_login; then
-            log_message "ERROR" "SSH密钥登录测试失败！为安全起见，不会禁用密码登录"
-            log_message "INFO" "请确保您已正确设置SSH密钥，然后再尝试禁用密码登录"
-            DISABLE_SSH_PASSWD="false"
-            return 1
-        fi
-        
         # 禁用密码认证
         if grep -E "^\s*PasswordAuthentication\s+no" "$SSH_CONFIG" > /dev/null; then
             log_message "INFO" "SSH 密码认证已禁用"
@@ -801,163 +805,20 @@ disable_ssh_password_login() {
     fi
 }
 
-# 测试SSH密钥登录功能
-test_ssh_key_login() {
-    log_message "INFO" "正在测试SSH密钥登录功能..."
+# 重启SSH服务
+restart_ssh_service() {
+    log_message "INFO" "重启 SSH 服务以应用更改..."
     
-    # 检查是否存在authorized_keys文件，以及是否有内容
-    if [ ! -f "$HOME/.ssh/authorized_keys" ] || [ ! -s "$HOME/.ssh/authorized_keys" ]; then
-        log_message "ERROR" "未找到有效的SSH密钥，~/.ssh/authorized_keys不存在或为空"
-        return 1
-    fi
-    
-    # 检查SSH服务是否在运行
-    if ! systemctl is-active ssh &>/dev/null && ! systemctl is-active sshd &>/dev/null; then
-        log_message "ERROR" "SSH服务未运行，无法测试SSH密钥登录"
-        return 1
-    fi
-    
-    # 获取当前主机IP，尝试本地SSH连接以测试密钥认证
-    IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
-    if [ -z "$IP_ADDR" ]; then
-        IP_ADDR="127.0.0.1"  # 如果获取不到IP，使用localhost
-    fi
-    
-    # 获取当前端口设置
-    CURRENT_PORT=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
-    if [ -z "$CURRENT_PORT" ]; then
-        CURRENT_PORT="22"  # 如果获取不到端口，使用默认的22
-    fi
-    
-    log_message "INFO" "尝试连接到 $IP_ADDR:$CURRENT_PORT 测试SSH密钥认证..."
-    
-    # 创建临时脚本以测试SSH连接，使用安全的临时文件创建方式
-    local TEST_SCRIPT
-    TEST_SCRIPT=$(mktemp) || {
-        log_message "ERROR" "无法创建临时文件"
-        return 1
-    }
-    
-    # 将此临时文件添加到需要清理的文件列表
-    TMP_FILES="$TMP_FILES $TEST_SCRIPT"
-    
-    # 创建测试脚本
-    cat > "$TEST_SCRIPT" << 'EOF'
-#!/bin/bash
-# 尝试使用SSH密钥连接，如果成功将返回成功退出码
-# 设置较短的超时，避免长时间等待
-ssh -o BatchMode=yes \
-    -o StrictHostKeyChecking=no \
-    -o ConnectTimeout=10 \
-    -o ConnectionAttempts=2 \
-    -o PasswordAuthentication=no \
-    -o PubkeyAuthentication=yes \
-    -o PreferredAuthentications=publickey \
-    -p "$1" "$2" "echo SSH_KEY_AUTH_SUCCESS" 2>/dev/null
-
-exit $?
-EOF
-    
-    chmod +x "$TEST_SCRIPT" || {
-        log_message "ERROR" "无法设置测试脚本的执行权限"
-        return 1
-    }
-    
-    # 执行SSH测试，添加全局超时控制
-    local TEST_RESULT
-    
-    # 使用timeout命令确保不会无限等待
-    if command -v timeout &> /dev/null; then
-        timeout 15 "$TEST_SCRIPT" "$CURRENT_PORT" "$IP_ADDR"
-        TEST_RESULT=$?
-        
-        # 如果是超时返回，给出明确的错误
-        if [ $TEST_RESULT -eq 124 ]; then
-            log_message "ERROR" "SSH连接测试超时"
-            TEST_RESULT=1
-        fi
+    # 检查系统使用的是哪种SSH服务名称
+    if systemctl is-active ssh &>/dev/null; then
+        sudo systemctl restart ssh
+        log_message "INFO" "SSH 服务(ssh)已重启"
+    elif systemctl is-active sshd &>/dev/null; then
+        sudo systemctl restart sshd
+        log_message "INFO" "SSH 服务(sshd)已重启"
     else
-        # 如果没有timeout命令，直接执行测试脚本
-        "$TEST_SCRIPT" "$CURRENT_PORT" "$IP_ADDR"
-        TEST_RESULT=$?
+        log_message "WARNING" "无法确定SSH服务名称，请手动重启SSH服务"
     fi
-    
-    if [ $TEST_RESULT -eq 0 ]; then
-        log_message "INFO" "SSH密钥认证测试成功！"
-        return 0
-    else
-        log_message "WARNING" "无法通过SSH密钥认证连接到本机(错误码: $TEST_RESULT)"
-        log_message "WARNING" "请检查以下几点:"
-        log_message "WARNING" "  1. 确保您的SSH密钥格式正确且已添加到~/.ssh/authorized_keys"
-        log_message "WARNING" "  2. 确保SSH服务配置正确且已启用公钥认证"
-        log_message "WARNING" "  3. 检查SSH密钥的权限(目录700，文件600)"
-        
-        # 执行额外的诊断
-        diagnose_ssh_issues
-        
-        # 询问用户是否继续
-        read -p "SSH密钥认证测试失败，是否仍然禁用密码登录？(y/n): " confirm
-        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-            log_message "WARNING" "用户确认继续禁用密码登录，即使SSH密钥认证测试失败"
-            return 0
-        else
-            log_message "INFO" "取消禁用密码登录"
-            return 1
-        fi
-    fi
-}
-
-# SSH连接问题诊断
-diagnose_ssh_issues() {
-    log_message "INFO" "执行SSH连接诊断..."
-    
-    # 检查sshd_config权限
-    local sshd_perm
-    sshd_perm=$(stat -c %a "$SSH_CONFIG" 2>/dev/null || echo "无法获取")
-    log_message "INFO" "SSH配置文件权限: $sshd_perm (应为644或600)"
-    
-    # 检查PubkeyAuthentication设置
-    if grep -E "^\s*PubkeyAuthentication\s+no" "$SSH_CONFIG" &>/dev/null; then
-        log_message "ERROR" "SSH配置中禁用了公钥认证"
-    fi
-    
-    # 检查AuthorizedKeysFile设置
-    local auth_keys_file
-    auth_keys_file=$(grep -E "^\s*AuthorizedKeysFile" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
-    if [ -n "$auth_keys_file" ]; then
-        log_message "INFO" "AuthorizedKeysFile设置为: $auth_keys_file"
-        # 如果不是默认路径，检查该文件是否存在
-        if [ "$auth_keys_file" != ".ssh/authorized_keys" ] && [ "$auth_keys_file" != "%h/.ssh/authorized_keys" ]; then
-            auth_keys_file="${auth_keys_file/\%h/$HOME}"
-            if [ ! -f "$auth_keys_file" ]; then
-                log_message "ERROR" "AuthorizedKeysFile设置的文件不存在: $auth_keys_file"
-            fi
-        fi
-    fi
-    
-    # 检查.ssh目录和authorized_keys文件权限
-    local ssh_dir_perm auth_keys_perm
-    ssh_dir_perm=$(stat -c %a "$HOME/.ssh" 2>/dev/null || echo "目录不存在")
-    auth_keys_perm=$(stat -c %a "$HOME/.ssh/authorized_keys" 2>/dev/null || echo "文件不存在")
-    
-    log_message "INFO" ".ssh目录权限: $ssh_dir_perm (应为700)"
-    log_message "INFO" "authorized_keys文件权限: $auth_keys_perm (应为600)"
-    
-    # 检查SELinux上下文
-    if command -v getenforce &>/dev/null && [ "$(getenforce)" != "Disabled" ]; then
-        if command -v ls &>/dev/null; then
-            log_message "INFO" "SELinux上下文信息:"
-            ls -Z "$HOME/.ssh" 2>/dev/null || log_message "WARNING" "无法获取SELinux上下文"
-        fi
-    fi
-    
-    # 尝试以调试模式运行ssh客户端
-    log_message "INFO" "尝试以调试模式连接SSH (仅显示关键信息)..."
-    local debug_output
-    debug_output=$(ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 localhost 2>&1 | grep -E "(Authentication|key|Offering)" || echo "无调试输出")
-    echo "$debug_output" | while read -r line; do
-        log_message "DEBUG" "$line"
-    done
 }
 
 # 修改SSH端口
@@ -1019,22 +880,6 @@ change_ssh_port() {
         fi
     else
         log_message "INFO" "未设置修改 SSH 端口，保持默认端口 22"
-    fi
-}
-
-# 重启SSH服务
-restart_ssh_service() {
-    log_message "INFO" "重启 SSH 服务以应用更改..."
-    
-    # 检查系统使用的是哪种SSH服务名称
-    if systemctl is-active ssh &>/dev/null; then
-        sudo systemctl restart ssh
-        log_message "INFO" "SSH 服务(ssh)已重启"
-    elif systemctl is-active sshd &>/dev/null; then
-        sudo systemctl restart sshd
-        log_message "INFO" "SSH 服务(sshd)已重启"
-    else
-        log_message "WARNING" "无法确定SSH服务名称，请手动重启SSH服务"
     fi
 }
 

@@ -239,23 +239,13 @@ configure_snell() {
     # 创建配置目录
     execute_cmd "创建配置目录" sudo mkdir -p /etc/snell
 
-    # 备份现有配置
-    if [ -f /etc/snell/snell-server.conf ]; then
-        local backup_file="/etc/snell/snell-server.conf.bak.$(date +%Y%m%d%H%M%S)"
-        execute_cmd "备份原配置文件" sudo cp /etc/snell/snell-server.conf "$backup_file"
-        log_info "已备份原配置文件到 $backup_file"
-    fi
-
     # 创建临时配置文件并安装
-    cat > /tmp/snell-server.conf <<EOF
+    sudo bash -c "cat > /etc/snell/snell-server.conf <<EOF
 [snell-server]
 listen = 0.0.0.0:${SNELL_PORT}
 psk = ${SNELL_PSK}
 ipv6 = false
-EOF
-
-    execute_cmd "安装配置文件" sudo mv /tmp/snell-server.conf /etc/snell/snell-server.conf
-    execute_cmd "设置配置文件权限" sudo chmod 600 /etc/snell/snell-server.conf
+EOF"
     
     log_info "Snell 配置文件已生成。"
     log_info "请保存以下信息："
