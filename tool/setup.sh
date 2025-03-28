@@ -437,8 +437,6 @@ configure_ssh_keys(){
 
 # 检查并启用 SSH 公钥认证
 enable_ssh_pubkey_auth(){
-    SSH_CONFIG="/etc/ssh/sshd_config"
-
     # 检查是否已启用 PubkeyAuthentication
     if grep -E "^\s*PubkeyAuthentication\s+yes" "$SSH_CONFIG" > /dev/null; then
         log_message "INFO" "SSH 已启用公钥认证"
@@ -700,7 +698,8 @@ EOF
 
 # 禁用SSH密码登录
 disable_ssh_password_login() {
-    SSH_CONFIG="/etc/ssh/sshd_config"
+    # 删除局部变量赋值，使用全局的SSH_CONFIG变量
+    # SSH_CONFIG="/etc/ssh/sshd_config"
     
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         log_message "INFO" "正在禁用 SSH 密码登录..."
@@ -963,7 +962,8 @@ diagnose_ssh_issues() {
 
 # 修改SSH端口
 change_ssh_port() {
-    SSH_CONFIG="/etc/ssh/sshd_config"
+    # 删除局部变量赋值，使用全局的SSH_CONFIG变量
+    # SSH_CONFIG="/etc/ssh/sshd_config"
     
     # 检查是否需要修改SSH端口
     if [ "$SSH_PORT" != "22" ]; then
@@ -1043,7 +1043,8 @@ harden_system() {
     log_message "INFO" "正在执行系统安全加固..."
     
     # 1. 限制 root 登录
-    SSH_CONFIG="/etc/ssh/sshd_config"
+    # 删除局部变量赋值，使用全局的SSH_CONFIG变量
+    # SSH_CONFIG="/etc/ssh/sshd_config"
     if grep -E "^\s*PermitRootLogin\s+yes" "$SSH_CONFIG" > /dev/null; then
         log_message "INFO" "禁用 root 直接登录..."
         sudo sed -i 's/^\s*PermitRootLogin\s\+yes/PermitRootLogin no/' "$SSH_CONFIG"
