@@ -1352,29 +1352,37 @@ backup_ssh_config() {
             
             # 如果有读取权限，直接拷贝
             local backup_success=true
-            for conf_file in "$SSH_CONFIG_DIR"/*.conf 2>/dev/null; do
-                if [ -f "$conf_file" ]; then
-                    local file_name=$(basename "$conf_file")
-                    if [ -r "$conf_file" ]; then
-                        if ! cat "$conf_file" > "${config_d_backup}/${file_name}" 2>/dev/null; then
-                            log_message "WARNING" "无法备份 $file_name (写入失败)"
-                            backup_success=false
-                        fi
-                    else
-                        # 如果没有读取权限，尝试使用sudo
-                        if command -v sudo &>/dev/null; then
-                            if ! sudo cat "$conf_file" > "${config_d_backup}/${file_name}" 2>/dev/null; then
-                                log_message "WARNING" "无法备份 $file_name (即使使用sudo)"
+            
+            # 使用ls命令获取文件列表，避免通配符的问题
+            local conf_files
+            conf_files=$(ls "$SSH_CONFIG_DIR"/*.conf 2>/dev/null)
+            if [ $? -eq 0 ]; then
+                for conf_file in $conf_files; do
+                    if [ -f "$conf_file" ]; then
+                        local file_name=$(basename "$conf_file")
+                        if [ -r "$conf_file" ]; then
+                            if ! cat "$conf_file" > "${config_d_backup}/${file_name}" 2>/dev/null; then
+                                log_message "WARNING" "无法备份 $file_name (写入失败)"
                                 backup_success=false
                             fi
                         else
-                            log_message "WARNING" "无法备份 $file_name (没有足够权限)"
-                            backup_success=false
+                            # 如果没有读取权限，尝试使用sudo
+                            if command -v sudo &>/dev/null; then
+                                if ! sudo cat "$conf_file" > "${config_d_backup}/${file_name}" 2>/dev/null; then
+                                    log_message "WARNING" "无法备份 $file_name (即使使用sudo)"
+                                    backup_success=false
+                                fi
+                            else
+                                log_message "WARNING" "无法备份 $file_name (没有足够权限)"
+                                backup_success=false
+                            fi
                         fi
+                        chmod 400 "${config_d_backup}/${file_name}" 2>/dev/null || log_message "WARNING" "无法设置 $file_name 的备份权限"
                     fi
-                    chmod 400 "${config_d_backup}/${file_name}" 2>/dev/null || log_message "WARNING" "无法设置 $file_name 的备份权限"
-                fi
-            done
+                done
+            else
+                log_message "INFO" "$SSH_CONFIG_DIR 目录中没有找到.conf文件"
+            fi
             
             if $backup_success; then
                 log_message "INFO" "sshd_config.d 目录备份完成: $config_d_backup"
@@ -1395,12 +1403,21 @@ backup_ssh_config() {
     
     # 创建还原脚本
     local restore_script="${CONFIG_BACKUP_DIR}/restore_ssh_config.${timestamp}.sh"
-    cat > "$restore_script" << 'EOF'
+    
+    # 使用临时变量保存路径，避免在here-document中出现转义问题
+    local ssh_conf_path="/etc/ssh/sshd_config"
+    local ssh_conf_dir="/etc/ssh/sshd_config.d"
+    local backup_path="$backup_file"
+    local config_d_path=""
+    [ -n "${config_d_backup:-}" ] && config_d_path="$config_d_backup"
+    
+    # 创建还原脚本
+    cat > "$restore_script" << EOF
 #!/bin/bash
-# SSH配置还原脚本 - 由setup.sh自动生成
+# SSH配置还原脚本 - 由setup.sh于 $(date) 自动生成
 
 # 检查是否有足够权限
-if [ ! -w "/etc/ssh/sshd_config" ]; then
+if [ ! -w "$ssh_conf_path" ]; then
     echo "需要管理员权限来还原SSH配置"
     if command -v sudo &>/dev/null; then
         echo "将使用sudo执行还原操作"
@@ -1414,33 +1431,29 @@ else
 fi
 
 # 还原主配置文件
-$SUDO cp "BACKUP_FILE" "/etc/ssh/sshd_config" && echo "已还原 /etc/ssh/sshd_config"
+\$SUDO cp "$backup_path" "$ssh_conf_path" && echo "已还原 $ssh_conf_path"
 
 # 还原sshd_config.d目录
-if [ -d "CONFIG_BACKUP" ]; then
-    for conf_file in "CONFIG_BACKUP"/*.conf; do
-        if [ -f "$conf_file" ]; then
-            file_name=$(basename "$conf_file")
-            $SUDO cp "$conf_file" "/etc/ssh/sshd_config.d/$file_name" && echo "已还原 /etc/ssh/sshd_config.d/$file_name"
+if [ -d "$config_d_path" ]; then
+    for conf_file in "$config_d_path"/*.conf; do
+        if [ -f "\$conf_file" ]; then
+            file_name=\$(basename "\$conf_file")
+            \$SUDO cp "\$conf_file" "$ssh_conf_dir/\$file_name" && echo "已还原 $ssh_conf_dir/\$file_name"
         fi
     done
 fi
 
 # 重启SSH服务
 if systemctl is-active ssh &>/dev/null; then
-    $SUDO systemctl restart ssh && echo "已重启SSH服务"
+    \$SUDO systemctl restart ssh && echo "已重启SSH服务"
 elif systemctl is-active sshd &>/dev/null; then
-    $SUDO systemctl restart sshd && echo "已重启SSH服务"
+    \$SUDO systemctl restart sshd && echo "已重启SSH服务"
 else
     echo "警告: 未能重启SSH服务，请手动重启"
 fi
 
 echo "SSH配置还原完成!"
 EOF
-
-    # 替换模板中的变量
-    sed -i "s|BACKUP_FILE|${backup_file}|g" "$restore_script"
-    sed -i "s|CONFIG_BACKUP|${config_d_backup}|g" "$restore_script"
     
     chmod +x "$restore_script" 2>/dev/null || log_message "WARNING" "无法设置还原脚本的执行权限"
     log_message "INFO" "已创建SSH配置还原脚本: $restore_script"
