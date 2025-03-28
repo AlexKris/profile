@@ -1395,12 +1395,12 @@ backup_ssh_config() {
     
     # 创建还原脚本
     local restore_script="${CONFIG_BACKUP_DIR}/restore_ssh_config.${timestamp}.sh"
-    cat > "$restore_script" << EOF
+    cat > "$restore_script" << 'EOF'
 #!/bin/bash
-# SSH配置还原脚本 - 由setup.sh于 $(date) 自动生成
+# SSH配置还原脚本 - 由setup.sh自动生成
 
 # 检查是否有足够权限
-if [ ! -w "$SSH_CONFIG" ]; then
+if [ ! -w "/etc/ssh/sshd_config" ]; then
     echo "需要管理员权限来还原SSH配置"
     if command -v sudo &>/dev/null; then
         echo "将使用sudo执行还原操作"
@@ -1414,29 +1414,33 @@ else
 fi
 
 # 还原主配置文件
-\$SUDO cp "${backup_file}" "${SSH_CONFIG}" && echo "已还原 ${SSH_CONFIG}"
+$SUDO cp "BACKUP_FILE" "/etc/ssh/sshd_config" && echo "已还原 /etc/ssh/sshd_config"
 
 # 还原sshd_config.d目录
-if [ -d "${config_d_backup}" ]; then
-    for conf_file in "${config_d_backup}"/*.conf; do
-        if [ -f "\$conf_file" ]; then
-            file_name=\$(basename "\$conf_file")
-            \$SUDO cp "\$conf_file" "${SSH_CONFIG_DIR}/\$file_name" && echo "已还原 ${SSH_CONFIG_DIR}/\$file_name"
+if [ -d "CONFIG_BACKUP" ]; then
+    for conf_file in "CONFIG_BACKUP"/*.conf; do
+        if [ -f "$conf_file" ]; then
+            file_name=$(basename "$conf_file")
+            $SUDO cp "$conf_file" "/etc/ssh/sshd_config.d/$file_name" && echo "已还原 /etc/ssh/sshd_config.d/$file_name"
         fi
     done
 fi
 
 # 重启SSH服务
 if systemctl is-active ssh &>/dev/null; then
-    \$SUDO systemctl restart ssh && echo "已重启SSH服务"
+    $SUDO systemctl restart ssh && echo "已重启SSH服务"
 elif systemctl is-active sshd &>/dev/null; then
-    \$SUDO systemctl restart sshd && echo "已重启SSH服务"
+    $SUDO systemctl restart sshd && echo "已重启SSH服务"
 else
     echo "警告: 未能重启SSH服务，请手动重启"
 fi
 
 echo "SSH配置还原完成!"
 EOF
+
+    # 替换模板中的变量
+    sed -i "s|BACKUP_FILE|${backup_file}|g" "$restore_script"
+    sed -i "s|CONFIG_BACKUP|${config_d_backup}|g" "$restore_script"
     
     chmod +x "$restore_script" 2>/dev/null || log_message "WARNING" "无法设置还原脚本的执行权限"
     log_message "INFO" "已创建SSH配置还原脚本: $restore_script"
