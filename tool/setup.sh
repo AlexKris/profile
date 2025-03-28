@@ -42,7 +42,20 @@ parse_args() {
 
 # 更新脚本函数
 update_shell(){
-    wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/setup.sh" -O setup.sh && bash setup.sh
+    echo -e "[信息] 正在获取最新版本的脚本..."
+    if command -v git &> /dev/null; then
+        echo -e "[信息] 使用git克隆获取最新版本..."
+        TMP_DIR=$(mktemp -d)
+        git clone --depth=1 https://github.com/AlexKris/profile.git "$TMP_DIR"
+        cp "$TMP_DIR/tool/setup.sh" ./setup.sh
+        rm -rf "$TMP_DIR"
+    else
+        echo -e "[信息] git未安装，使用wget下载..."
+        wget -N "https://raw.githubusercontent.com/AlexKris/profile/main/tool/setup.sh?$(date +%s)" -O setup.sh
+    fi
+    
+    echo -e "[信息] 更新完成，正在执行新脚本..."
+    bash setup.sh
 }
 
 # 修复 sudo 的 'unable to resolve host' 问题
