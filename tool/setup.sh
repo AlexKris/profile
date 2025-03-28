@@ -10,7 +10,11 @@ readonly SCRIPT_VERSION="1.0.0"
 readonly DEFAULT_SSH_PORT="22"
 readonly MIN_PORT=1024
 readonly MAX_PORT=65535
-readonly CONFIG_BACKUP_DIR="/var/backups/ssh"
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 添加时间戳到配置备份目录名
+readonly TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+readonly CONFIG_BACKUP_DIR="$SCRIPT_DIR/ssh_backups_$TIMESTAMP"
 readonly SSH_CONFIG="/etc/ssh/sshd_config"
 readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
 
@@ -18,7 +22,8 @@ readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
 DISABLE_SSH_PASSWD="false"
 SSH_PORT="$DEFAULT_SSH_PORT"
 SSH_KEY=""
-LOG_FILE="/var/log/setup-script.log"
+# 添加时间戳到日志文件名
+LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
 TMP_FILES=""
 OS_TYPE=""
 OS_VERSION=""
@@ -74,20 +79,49 @@ log_message() {
             ;;
     esac
     
-    # 写入到日志文件
-    if [ ! -f "$LOG_FILE" ]; then
-        sudo touch "$LOG_FILE" || {
-            echo "[错误] 无法创建日志文件 $LOG_FILE" >&2
-            return 1
+    # 分析日志文件路径
+    local log_dir=$(dirname "$LOG_FILE")
+    
+    # 检查日志目录是否存在，不存在则创建
+    if [ ! -d "$log_dir" ]; then
+        mkdir -p "$log_dir" 2>/dev/null || {
+            echo "[警告] 无法创建日志目录: $log_dir，尝试使用临时目录" >&2
+            LOG_FILE="/tmp/setup-script-$(date +%s).log"
+            echo "[警告] 日志将写入: $LOG_FILE" >&2
         }
-        sudo chmod 644 "$LOG_FILE" || echo "[警告] 无法设置日志文件权限" >&2
     fi
     
-    echo "[$timestamp][$level] $message" | sudo tee -a "$LOG_FILE" > /dev/null
+    # 写入到日志文件
+    if [ ! -f "$LOG_FILE" ]; then
+        # 尝试创建日志文件
+        touch "$LOG_FILE" 2>/dev/null || {
+            echo "[警告] 无法创建日志文件: $LOG_FILE，尝试使用临时文件" >&2
+            LOG_FILE="/tmp/setup-script-$(date +%s).log"
+            touch "$LOG_FILE" || {
+                echo "[错误] 无法创建任何日志文件" >&2
+                return 1
+            }
+        }
+        chmod 644 "$LOG_FILE" 2>/dev/null || echo "[警告] 无法设置日志文件权限" >&2
+    fi
     
-    # 对于错误级别的消息，同时写入系统日志
+    # 写入日志内容
+    echo "[$timestamp][$level] $message" >> "$LOG_FILE" || {
+        echo "[警告] 无法写入日志文件: $LOG_FILE" >&2
+    }
+    
+    # 对于错误级别的消息，同时写入系统日志（如果有权限）
     if [ "$level" = "ERROR" ]; then
         logger -t "setup-script" "ERROR: $message" 2>/dev/null || true
+    fi
+}
+
+# 辅助函数：根据用户是否为root来确定是否添加sudo前缀
+run_with_root() {
+    if [ "$(id -u)" = "0" ]; then
+        "$@"
+    else
+        sudo "$@"
     fi
 }
 
@@ -189,9 +223,21 @@ parse_args() {
                     log_message "ERROR" "选项 $1 需要一个有效的文件路径参数"
                     exit 1
                 fi
-                LOG_FILE="$2"; shift ;;
+                # 保留用户指定的日志文件路径但添加时间戳
+                local log_dir=$(dirname "$2")
+                local log_name=$(basename "$2")
+                local log_ext="${log_name##*.}"
+                local log_base="${log_name%.*}"
+                if [ "$log_ext" = "$log_name" ]; then
+                    # 没有扩展名
+                    LOG_FILE="${log_dir}/${log_name}-${TIMESTAMP}"
+                else
+                    # 有扩展名
+                    LOG_FILE="${log_dir}/${log_base}-${TIMESTAMP}.${log_ext}"
+                fi
+                shift ;;
             -v|--version) echo "脚本版本: $SCRIPT_VERSION"; exit 0 ;;
-            *) echo "未知选项: $1"; usage; exit 1 ;;
+            *) echo "未知选项: $1"; usage; exit 0 ;;
         esac
         shift
     done
@@ -1243,49 +1289,108 @@ backup_ssh_config() {
     
     # 确保备份目录存在
     if [ ! -d "$CONFIG_BACKUP_DIR" ]; then
-        sudo mkdir -p "$CONFIG_BACKUP_DIR" || {
-            log_message "ERROR" "无法创建SSH配置备份目录: $CONFIG_BACKUP_DIR"
-            return 1
+        mkdir -p "$CONFIG_BACKUP_DIR" 2>/dev/null || {
+            echo "[警告] 无法创建SSH配置备份目录: $CONFIG_BACKUP_DIR" >&2
+            # 尝试使用临时目录
+            CONFIG_BACKUP_DIR="/tmp/ssh_backups_$(date +%s)"
+            mkdir -p "$CONFIG_BACKUP_DIR" || {
+                log_message "ERROR" "无法创建SSH配置备份目录: $CONFIG_BACKUP_DIR"
+                return 1
+            }
+            log_message "WARNING" "使用临时目录进行备份: $CONFIG_BACKUP_DIR"
         }
-        sudo chmod 700 "$CONFIG_BACKUP_DIR" || log_message "WARNING" "无法设置备份目录权限"
+        chmod 700 "$CONFIG_BACKUP_DIR" 2>/dev/null || log_message "WARNING" "无法设置备份目录权限"
     fi
     
+    # 检查是否有权限读取SSH配置文件
     if [ -f "$SSH_CONFIG" ]; then
         log_message "INFO" "正在备份SSH配置文件到 $backup_file"
-        sudo cp "$SSH_CONFIG" "$backup_file" || {
-            log_message "ERROR" "SSH配置备份失败"
-            read -p "是否继续执行而不进行备份? (y/n): " continue_without_backup
-            if [[ "$continue_without_backup" != "y" && "$continue_without_backup" != "Y" ]]; then
-                log_message "INFO" "用户选择终止脚本执行"
+        # 尝试直接拷贝
+        if [ -r "$SSH_CONFIG" ]; then
+            if cat "$SSH_CONFIG" > "$backup_file" 2>/dev/null; then
+                log_message "INFO" "SSH配置备份成功: $backup_file"
+            else
+                log_message "ERROR" "无法写入备份文件: $backup_file"
                 return 1
             fi
-            log_message "WARNING" "用户选择在没有备份的情况下继续执行，可能无法恢复原始配置"
-            return 0
-        }
+        else
+            # 如果没有读取权限，尝试使用sudo
+            log_message "WARNING" "无法直接读取SSH配置，尝试使用sudo..."
+            if command -v sudo &>/dev/null; then
+                if sudo cat "$SSH_CONFIG" > "$backup_file" 2>/dev/null; then
+                    log_message "INFO" "使用sudo备份SSH配置成功: $backup_file"
+                else
+                    log_message "ERROR" "SSH配置备份失败"
+                    read -p "是否继续执行而不进行备份? (y/n): " continue_without_backup
+                    if [[ "$continue_without_backup" != "y" && "$continue_without_backup" != "Y" ]]; then
+                        log_message "INFO" "用户选择终止脚本执行"
+                        return 1
+                    fi
+                    log_message "WARNING" "用户选择在没有备份的情况下继续执行，可能无法恢复原始配置"
+                    return 0
+                fi
+            else
+                log_message "ERROR" "无法备份SSH配置，sudo未安装，也没有足够的权限"
+                read -p "是否继续执行而不进行备份? (y/n): " continue_without_backup
+                if [[ "$continue_without_backup" != "y" && "$continue_without_backup" != "Y" ]]; then
+                    log_message "INFO" "用户选择终止脚本执行"
+                    return 1
+                fi
+                log_message "WARNING" "用户选择在没有备份的情况下继续执行，可能无法恢复原始配置"
+                return 0
+            fi
+        fi
         
         # 设置备份文件的权限为只读
-        sudo chmod 400 "$backup_file" || log_message "WARNING" "无法设置备份文件权限"
-        
-        log_message "INFO" "SSH配置备份成功: $backup_file"
+        chmod 400 "$backup_file" 2>/dev/null || log_message "WARNING" "无法设置备份文件权限"
         
         # 备份sshd_config.d目录下的所有文件
         if [ -d "$SSH_CONFIG_DIR" ]; then
             log_message "INFO" "备份 $SSH_CONFIG_DIR 目录中的配置文件..."
             local config_d_backup="${CONFIG_BACKUP_DIR}/sshd_config.d.${timestamp}"
-            sudo mkdir -p "$config_d_backup" || log_message "WARNING" "无法创建 sshd_config.d 备份目录"
+            mkdir -p "$config_d_backup" 2>/dev/null || log_message "WARNING" "无法创建 sshd_config.d 备份目录"
             
-            for conf_file in "$SSH_CONFIG_DIR"/*.conf; do
+            # 如果有读取权限，直接拷贝
+            local backup_success=true
+            for conf_file in "$SSH_CONFIG_DIR"/*.conf 2>/dev/null; do
                 if [ -f "$conf_file" ]; then
                     local file_name=$(basename "$conf_file")
-                    sudo cp "$conf_file" "${config_d_backup}/${file_name}" || log_message "WARNING" "无法备份 $file_name"
-                    sudo chmod 400 "${config_d_backup}/${file_name}" || log_message "WARNING" "无法设置 $file_name 的备份权限"
+                    if [ -r "$conf_file" ]; then
+                        if ! cat "$conf_file" > "${config_d_backup}/${file_name}" 2>/dev/null; then
+                            log_message "WARNING" "无法备份 $file_name (写入失败)"
+                            backup_success=false
+                        fi
+                    else
+                        # 如果没有读取权限，尝试使用sudo
+                        if command -v sudo &>/dev/null; then
+                            if ! sudo cat "$conf_file" > "${config_d_backup}/${file_name}" 2>/dev/null; then
+                                log_message "WARNING" "无法备份 $file_name (即使使用sudo)"
+                                backup_success=false
+                            fi
+                        else
+                            log_message "WARNING" "无法备份 $file_name (没有足够权限)"
+                            backup_success=false
+                        fi
+                    fi
+                    chmod 400 "${config_d_backup}/${file_name}" 2>/dev/null || log_message "WARNING" "无法设置 $file_name 的备份权限"
                 fi
             done
-            log_message "INFO" "sshd_config.d 目录备份完成: $config_d_backup"
+            
+            if $backup_success; then
+                log_message "INFO" "sshd_config.d 目录备份完成: $config_d_backup"
+            else
+                log_message "WARNING" "部分 sshd_config.d 文件可能未成功备份"
+            fi
         fi
     else
         log_message "WARNING" "SSH配置文件不存在: $SSH_CONFIG"
-        return 1
+        read -p "是否继续执行而不进行备份? (y/n): " continue_without_backup
+        if [[ "$continue_without_backup" != "y" && "$continue_without_backup" != "Y" ]]; then
+            log_message "INFO" "用户选择终止脚本执行"
+            return 1
+        fi
+        log_message "WARNING" "用户选择在没有备份的情况下继续执行，可能无法恢复原始配置"
+        return 0
     fi
     
     # 创建还原脚本
@@ -1294,24 +1399,38 @@ backup_ssh_config() {
 #!/bin/bash
 # SSH配置还原脚本 - 由setup.sh于 $(date) 自动生成
 
+# 检查是否有足够权限
+if [ ! -w "$SSH_CONFIG" ]; then
+    echo "需要管理员权限来还原SSH配置"
+    if command -v sudo &>/dev/null; then
+        echo "将使用sudo执行还原操作"
+        SUDO="sudo"
+    else
+        echo "sudo未安装，请以root用户运行此脚本"
+        exit 1
+    fi
+else
+    SUDO=""
+fi
+
 # 还原主配置文件
-sudo cp "${backup_file}" "${SSH_CONFIG}" && echo "已还原 ${SSH_CONFIG}"
+\$SUDO cp "${backup_file}" "${SSH_CONFIG}" && echo "已还原 ${SSH_CONFIG}"
 
 # 还原sshd_config.d目录
 if [ -d "${config_d_backup}" ]; then
     for conf_file in "${config_d_backup}"/*.conf; do
         if [ -f "\$conf_file" ]; then
             file_name=\$(basename "\$conf_file")
-            sudo cp "\$conf_file" "${SSH_CONFIG_DIR}/\$file_name" && echo "已还原 ${SSH_CONFIG_DIR}/\$file_name"
+            \$SUDO cp "\$conf_file" "${SSH_CONFIG_DIR}/\$file_name" && echo "已还原 ${SSH_CONFIG_DIR}/\$file_name"
         fi
     done
 fi
 
 # 重启SSH服务
 if systemctl is-active ssh &>/dev/null; then
-    sudo systemctl restart ssh && echo "已重启SSH服务"
+    \$SUDO systemctl restart ssh && echo "已重启SSH服务"
 elif systemctl is-active sshd &>/dev/null; then
-    sudo systemctl restart sshd && echo "已重启SSH服务"
+    \$SUDO systemctl restart sshd && echo "已重启SSH服务"
 else
     echo "警告: 未能重启SSH服务，请手动重启"
 fi
@@ -1319,7 +1438,7 @@ fi
 echo "SSH配置还原完成!"
 EOF
     
-    chmod +x "$restore_script" || log_message "WARNING" "无法设置还原脚本的执行权限"
+    chmod +x "$restore_script" 2>/dev/null || log_message "WARNING" "无法设置还原脚本的执行权限"
     log_message "INFO" "已创建SSH配置还原脚本: $restore_script"
     
     return 0
@@ -1328,6 +1447,35 @@ EOF
 # 主函数
 main() {
     parse_args "$@"
+    
+    # 检查sudo是否已安装
+    if ! command -v sudo &> /dev/null; then
+        echo "[信息] sudo未安装，正在安装..."
+        if [ -f /etc/debian_version ]; then
+            apt update -y && apt install -y sudo
+            echo "[信息] sudo已安装，正在配置sudo权限..."
+            # 为当前用户添加sudo权限（如果不是root）
+            if [ "$(id -u)" != "0" ]; then
+                usermod -aG sudo $(whoami)
+                echo "[信息] 已将用户 $(whoami) 添加到sudo组，重新登录后生效"
+            fi
+        elif [ -f /etc/redhat-release ]; then
+            if command -v dnf &> /dev/null; then
+                dnf install -y sudo
+            else
+                yum install -y sudo
+            fi
+            echo "[信息] sudo已安装，正在配置sudo权限..."
+            # 为当前用户添加sudo权限（如果不是root）
+            if [ "$(id -u)" != "0" ]; then
+                usermod -aG wheel $(whoami)
+                echo "[信息] 已将用户 $(whoami) 添加到wheel组，重新登录后生效"
+            fi
+        else
+            echo "[错误] 不支持的操作系统，无法自动安装sudo"
+            exit 1
+        fi
+    fi
     
     # 检查系统兼容性
     check_compatibility || {
