@@ -1,10 +1,7 @@
 #!/bin/bash
 
-# 参数赋值
-CONTAINER_NAME="$2"
-PANEL_URL="$3"
-PANEL_KEY="$4"
-NODE_ID="$5"
+# 启用错误处理
+set -euo pipefail
 
 # 更新系统包
 update_system(){
@@ -33,10 +30,15 @@ update_system(){
     echo -e "[信息] 系统更新完成。"
 }
 
-# 安装 Docker
+# 检查并安装 Docker
 install_docker(){
     if command -v docker &> /dev/null; then
-        echo -e "[信息] Docker 已经安装，跳过安装步骤..."
+        echo -e "[信息] Docker 已经安装，检查 Docker 服务状态..."
+        if ! systemctl is-active --quiet docker; then
+            echo -e "[信息] Docker 服务未运行，正在启动..."
+            sudo systemctl start docker
+            sudo systemctl enable docker
+        fi
         return
     fi
     echo -e "[信息] 正在安装 Docker..."
@@ -45,11 +47,14 @@ install_docker(){
         echo -e "[错误] 安装 Docker 失败，请检查网络连接。"
         exit 1
     fi
-    echo -e "[信息] Docker 已经安装..."
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    echo -e "[信息] Docker 已安装并启动..."
 }
 
 # 检查并删除已存在的容器
 check_remove_container(){
+    local CONTAINER_NAME="$1"
     echo -e "[信息] 检查是否存在旧的 $CONTAINER_NAME 容器..."
     if docker ps -a | grep -q "$CONTAINER_NAME"; then
         echo -e "[信息] 发现已存在的 $CONTAINER_NAME 容器，正在停止并删除..."
@@ -61,11 +66,35 @@ check_remove_container(){
     fi
 }
 
+# 验证输入参数格式
+validate_params() {
+    local PANEL_URL="$1"
+    local NODE_ID="$2"
+    
+    # 验证PANEL_URL格式
+    if [[ ! "$PANEL_URL" =~ ^https?:// ]]; then
+        echo -e "[错误] PANEL_URL 格式错误，必须以 http:// 或 https:// 开头"
+        exit 1
+    fi
+    
+    # 验证NODE_ID是否为数字
+    if ! [[ "$NODE_ID" =~ ^[0-9]+$ ]]; then
+        echo -e "[错误] NODE_ID 必须为数字"
+        exit 1
+    fi
+}
+
 # 配置并运行 soga
 config_run_soga(){
+    local CONTAINER_NAME="$1"
+    local PANEL_URL="$2"
+    local PANEL_KEY="$3"
+    local NODE_ID="$4"
+    
     echo -e "[信息] 正在安装 soga..."
     docker run --restart=always --name "$CONTAINER_NAME" -d \
-    -v /etc/soga/:/etc/soga/ --network host \
+    -v /etc/soga/:/etc/soga/ \
+    --network host \
     -e type=v2board \
     -e server_type=ss \
     -e node_id="$NODE_ID" \
@@ -80,19 +109,32 @@ config_run_soga(){
 
 # 安装 soga
 install_soga(){
+    local CONTAINER_NAME="$1"
+    local PANEL_URL="$2"
+    local PANEL_KEY="$3"
+    local NODE_ID="$4"
+    
+    validate_params "$PANEL_URL" "$NODE_ID"
     install_docker
-    check_remove_container
-    config_run_soga
+    check_remove_container "$CONTAINER_NAME"
+    config_run_soga "$CONTAINER_NAME" "$PANEL_URL" "$PANEL_KEY" "$NODE_ID"
 }
 
 # 重启 soga
 restart_soga(){
+    local CONTAINER_NAME="$1"
     echo -e "[信息] 正在重启 soga..."
     docker restart "$CONTAINER_NAME"
+    if [ $? -ne 0 ]; then
+        echo -e "[错误] 重启 soga 失败，请检查容器是否存在。"
+        exit 1
+    fi
     echo -e "[信息] soga 已经重启..."
 }
 
+# 停止并删除 soga 容器
 stop_soga(){
+    local CONTAINER_NAME="$1"
     echo -e "[信息] 检查是否存在 $CONTAINER_NAME 容器..."
     if docker ps -a | grep -q "$CONTAINER_NAME"; then
         echo -e "[信息] 发现已存在的 $CONTAINER_NAME 容器，正在停止并删除..."
@@ -110,30 +152,28 @@ case "$1" in
         update_system
         ;;
     install)
-        if [ -z "$CONTAINER_NAME" ] || [ -z "$PANEL_URL" ] || [ -z "$PANEL_KEY" ] || [ -z "$NODE_ID" ]; then
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ] || [ -z "${4:-}" ] || [ -z "${5:-}" ]; then
             echo "[错误] 安装soga需要提供所有参数: CONTAINER_NAME, PANEL_URL, PANEL_KEY, NODE_ID"
             echo "用法: $0 install <CONTAINER_NAME> <PANEL_URL> <PANEL_KEY> <NODE_ID>"
             exit 1
         fi
-        install_soga
+        install_soga "$2" "$3" "$4" "$5"
         ;;
     restart)
-        CONTAINER_NAME="$2"
-        if [ -z "$CONTAINER_NAME" ]; then
+        if [ -z "${2:-}" ]; then
             echo "[错误] 重启soga需要提供容器名"
             echo "用法: $0 restart <CONTAINER_NAME>"
             exit 1
         fi
-        restart_soga
+        restart_soga "$2"
         ;;
     stop)
-        CONTAINER_NAME="$2"
-        if [ -z "$CONTAINER_NAME" ]; then
+        if [ -z "${2:-}" ]; then
             echo "[错误] 停止soga需要提供容器名"
             echo "用法: $0 stop <CONTAINER_NAME>"
             exit 1
         fi
-        stop_soga
+        stop_soga "$2"
         ;;
     *)
         echo "用法: $0 {update|install|restart|stop}"
