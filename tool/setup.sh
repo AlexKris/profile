@@ -454,30 +454,12 @@ enable_ssh_pubkey_auth(){
             echo "PubkeyAuthentication yes" | sudo tee -a "$SSH_CONFIG"
         fi
 
-        # 同时写入到sshd_config.d目录，如果不存在则创建
-        log_message "INFO" "尝试将公钥认证配置写入到模块化配置目录..."
-        if [ ! -d "$SSH_CONFIG_DIR" ]; then
-            log_message "INFO" "配置目录 $SSH_CONFIG_DIR 不存在，正在创建..."
-            sudo mkdir -p "$SSH_CONFIG_DIR"
-            if [ $? -ne 0 ]; then
-                log_message "WARNING" "无法创建 $SSH_CONFIG_DIR 目录，将只修改主配置文件"
-            fi
-        fi
-        
+        # 处理模块化配置中的公钥认证设置
         if [ -d "$SSH_CONFIG_DIR" ]; then
-            log_message "INFO" "将公钥认证配置写入到 $SSH_CONFIG_DIR 目录..."
-            sudo tee "$SSH_CONFIG_DIR/98-pubkey-auth.conf" > /dev/null << EOF
-# SSH公钥认证配置
-PubkeyAuthentication yes
-EOF
-            log_message "INFO" "公钥认证配置已写入 $SSH_CONFIG_DIR/98-pubkey-auth.conf"
+            log_message "INFO" "检查模块化配置中的公钥认证设置..."
             
-            # 确保sshd_config包含Include指令
-            if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
-                log_message "INFO" "添加Include指令到主配置文件..."
-                echo -e "\n# Include modular configuration files\nInclude $SSH_CONFIG_DIR/*.conf" | sudo tee -a "$SSH_CONFIG" > /dev/null
-                log_message "INFO" "Include指令已添加到 $SSH_CONFIG"
-            fi
+            # 公钥认证配置将统一在ssh-security.conf中设置，由disable_ssh_password_login函数创建
+            log_message "INFO" "公钥认证配置将在禁用密码登录时一并处理"
         fi
 
         # 重启 SSH 服务
@@ -759,7 +741,7 @@ disable_ssh_password_login() {
 
         # 禁用密码认证
         if grep -E "^\s*PasswordAuthentication\s+no" "$SSH_CONFIG" > /dev/null; then
-            log_message "INFO" "SSH 密码认证已禁用"
+            log_message "INFO" "SSH 密码认证已在主配置文件中禁用"
         else
             if grep -E "^\s*PasswordAuthentication\s+yes" "$SSH_CONFIG" > /dev/null; then
                 sudo sed -i 's/^\s*PasswordAuthentication\s\+yes/PasswordAuthentication no/' "$SSH_CONFIG"
@@ -768,7 +750,7 @@ disable_ssh_password_login() {
             else
                 echo "PasswordAuthentication no" | sudo tee -a "$SSH_CONFIG"
             fi
-            log_message "INFO" "SSH 密码认证已禁用"
+            log_message "INFO" "SSH 密码认证已在主配置文件中禁用"
         fi
         
         # 禁用挑战应答认证
@@ -823,26 +805,48 @@ disable_ssh_password_login() {
             log_message "INFO" "SSH 空密码已禁用"
         fi
         
-        # 同时写入到sshd_config.d目录，如果不存在则创建
-        log_message "INFO" "尝试将安全配置写入到模块化配置目录..."
-        if [ ! -d "$SSH_CONFIG_DIR" ]; then
-            log_message "INFO" "配置目录 $SSH_CONFIG_DIR 不存在，正在创建..."
-            sudo mkdir -p "$SSH_CONFIG_DIR"
-            if [ $? -ne 0 ]; then
-                log_message "WARNING" "无法创建 $SSH_CONFIG_DIR 目录，将只修改主配置文件"
-            fi
-        fi
-        
+        # 处理模块化配置目录中的文件
         if [ -d "$SSH_CONFIG_DIR" ]; then
-            log_message "INFO" "将安全配置写入到 $SSH_CONFIG_DIR 目录..."
-            sudo tee "$SSH_CONFIG_DIR/99-no-password.conf" > /dev/null << EOF
-# SSH安全加固配置 - 禁用密码登录
+            log_message "INFO" "检查并修改模块化配置目录中的文件..."
+            
+            # 检查是否存在50-cloud-init.conf文件
+            if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
+                log_message "INFO" "检测到cloud-init配置文件，正在修改..."
+                # 备份cloud-init配置
+                sudo cp "$SSH_CONFIG_DIR/50-cloud-init.conf" "$SSH_CONFIG_DIR/50-cloud-init.conf.bak"
+                # 注释掉所有启用密码的配置
+                sudo sed -i 's/^\s*PasswordAuthentication\s\+yes/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+                sudo sed -i 's/^\s*ChallengeResponseAuthentication\s\+yes/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+                sudo sed -i 's/^\s*KbdInteractiveAuthentication\s\+yes/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+                log_message "INFO" "已修改cloud-init配置文件，禁用密码登录"
+            fi
+            
+            # 如果存在之前创建的高优先级配置文件，则删除它们
+            for file in "$SSH_CONFIG_DIR/99-"* "$SSH_CONFIG_DIR/98-"* "$SSH_CONFIG_DIR/97-"*; do
+                if [ -f "$file" ]; then
+                    log_message "INFO" "删除旧的优先级配置: $file"
+                    sudo rm -f "$file"
+                fi
+            done
+            
+            # 创建统一的SSH安全配置文件（无数字前缀）
+            log_message "INFO" "创建SSH安全配置文件..."
+            sudo tee "$SSH_CONFIG_DIR/ssh-security.conf" > /dev/null << EOF
+# SSH安全加固配置 - 由setup.sh创建
+# 此配置会覆盖cloud-init的设置
+
+# 禁用密码登录
 PasswordAuthentication no
+
+# 禁用其他不安全的认证方式
 ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 PermitEmptyPasswords no
+
+# 启用公钥认证
+PubkeyAuthentication yes
 EOF
-            log_message "INFO" "安全配置已写入 $SSH_CONFIG_DIR/99-no-password.conf"
+            log_message "INFO" "已创建SSH安全配置文件: $SSH_CONFIG_DIR/ssh-security.conf"
             
             # 确保sshd_config包含Include指令
             if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
@@ -906,29 +910,39 @@ change_ssh_port() {
                 echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG"
             fi
             
-            # 同时写入到sshd_config.d目录，如果不存在则创建
-            log_message "INFO" "尝试将端口配置写入到模块化配置目录..."
-            if [ ! -d "$SSH_CONFIG_DIR" ]; then
-                log_message "INFO" "配置目录 $SSH_CONFIG_DIR 不存在，正在创建..."
-                sudo mkdir -p "$SSH_CONFIG_DIR"
-                if [ $? -ne 0 ]; then
-                    log_message "WARNING" "无法创建 $SSH_CONFIG_DIR 目录，将只修改主配置文件"
-                fi
-            fi
-            
+            # 处理模块化配置中的端口设置
             if [ -d "$SSH_CONFIG_DIR" ]; then
-                log_message "INFO" "将端口配置写入到 $SSH_CONFIG_DIR 目录..."
-                sudo tee "$SSH_CONFIG_DIR/97-custom-port.conf" > /dev/null << EOF
-# SSH自定义端口配置
-Port $SSH_PORT
-EOF
-                log_message "INFO" "端口配置已写入 $SSH_CONFIG_DIR/97-custom-port.conf"
+                log_message "INFO" "检查模块化配置中的端口设置..."
                 
-                # 确保sshd_config包含Include指令
-                if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
-                    log_message "INFO" "添加Include指令到主配置文件..."
-                    echo -e "\n# Include modular configuration files\nInclude $SSH_CONFIG_DIR/*.conf" | sudo tee -a "$SSH_CONFIG" > /dev/null
-                    log_message "INFO" "Include指令已添加到 $SSH_CONFIG"
+                # 将端口设置添加到统一的安全配置文件中
+                if [ -f "$SSH_CONFIG_DIR/ssh-security.conf" ]; then
+                    # 如果文件已存在，检查并添加端口配置
+                    if ! grep -q "^Port $SSH_PORT" "$SSH_CONFIG_DIR/ssh-security.conf"; then
+                        log_message "INFO" "向SSH安全配置文件添加端口设置..."
+                        sudo sed -i "1s/^/# SSH端口配置\nPort $SSH_PORT\n\n/" "$SSH_CONFIG_DIR/ssh-security.conf"
+                    fi
+                else
+                    # 如果文件不存在，创建新文件
+                    log_message "INFO" "创建SSH安全配置文件，包含端口设置..."
+                    sudo tee "$SSH_CONFIG_DIR/ssh-security.conf" > /dev/null << EOF
+# SSH安全配置 - 由setup.sh创建
+
+# SSH端口配置
+Port $SSH_PORT
+
+# 启用公钥认证
+PubkeyAuthentication yes
+EOF
+                fi
+                
+                # 如果存在cloud-init配置，也需要处理
+                if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
+                    log_message "INFO" "检查cloud-init配置中的端口设置..."
+                    if grep -q "^Port" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
+                        # 如果cloud-init配置中有端口设置，注释掉它
+                        sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+                        log_message "INFO" "已注释cloud-init配置中的端口设置"
+                    fi
                 fi
             fi
             
