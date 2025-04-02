@@ -454,6 +454,32 @@ enable_ssh_pubkey_auth(){
             echo "PubkeyAuthentication yes" | sudo tee -a "$SSH_CONFIG"
         fi
 
+        # 同时写入到sshd_config.d目录，如果不存在则创建
+        log_message "INFO" "尝试将公钥认证配置写入到模块化配置目录..."
+        if [ ! -d "$SSH_CONFIG_DIR" ]; then
+            log_message "INFO" "配置目录 $SSH_CONFIG_DIR 不存在，正在创建..."
+            sudo mkdir -p "$SSH_CONFIG_DIR"
+            if [ $? -ne 0 ]; then
+                log_message "WARNING" "无法创建 $SSH_CONFIG_DIR 目录，将只修改主配置文件"
+            fi
+        fi
+        
+        if [ -d "$SSH_CONFIG_DIR" ]; then
+            log_message "INFO" "将公钥认证配置写入到 $SSH_CONFIG_DIR 目录..."
+            sudo tee "$SSH_CONFIG_DIR/98-pubkey-auth.conf" > /dev/null << EOF
+# SSH公钥认证配置
+PubkeyAuthentication yes
+EOF
+            log_message "INFO" "公钥认证配置已写入 $SSH_CONFIG_DIR/98-pubkey-auth.conf"
+            
+            # 确保sshd_config包含Include指令
+            if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
+                log_message "INFO" "添加Include指令到主配置文件..."
+                echo -e "\n# Include modular configuration files\nInclude $SSH_CONFIG_DIR/*.conf" | sudo tee -a "$SSH_CONFIG" > /dev/null
+                log_message "INFO" "Include指令已添加到 $SSH_CONFIG"
+            fi
+        fi
+
         # 重启 SSH 服务
         sudo systemctl restart ssh
         log_message "INFO" "SSH 公钥认证已启用，并重启了 SSH 服务"
@@ -710,8 +736,7 @@ EOF
 
 # 禁用SSH密码登录
 disable_ssh_password_login() {
-    # 删除局部变量赋值，使用全局的SSH_CONFIG变量
-    # SSH_CONFIG="/etc/ssh/sshd_config"
+    # SSH_CONFIG变量由全局定义
     
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         log_message "INFO" "正在禁用 SSH 密码登录..."
@@ -798,6 +823,35 @@ disable_ssh_password_login() {
             log_message "INFO" "SSH 空密码已禁用"
         fi
         
+        # 同时写入到sshd_config.d目录，如果不存在则创建
+        log_message "INFO" "尝试将安全配置写入到模块化配置目录..."
+        if [ ! -d "$SSH_CONFIG_DIR" ]; then
+            log_message "INFO" "配置目录 $SSH_CONFIG_DIR 不存在，正在创建..."
+            sudo mkdir -p "$SSH_CONFIG_DIR"
+            if [ $? -ne 0 ]; then
+                log_message "WARNING" "无法创建 $SSH_CONFIG_DIR 目录，将只修改主配置文件"
+            fi
+        fi
+        
+        if [ -d "$SSH_CONFIG_DIR" ]; then
+            log_message "INFO" "将安全配置写入到 $SSH_CONFIG_DIR 目录..."
+            sudo tee "$SSH_CONFIG_DIR/99-no-password.conf" > /dev/null << EOF
+# SSH安全加固配置 - 禁用密码登录
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+EOF
+            log_message "INFO" "安全配置已写入 $SSH_CONFIG_DIR/99-no-password.conf"
+            
+            # 确保sshd_config包含Include指令
+            if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
+                log_message "INFO" "添加Include指令到主配置文件..."
+                echo -e "\n# Include modular configuration files\nInclude $SSH_CONFIG_DIR/*.conf" | sudo tee -a "$SSH_CONFIG" > /dev/null
+                log_message "INFO" "Include指令已添加到 $SSH_CONFIG"
+            fi
+        fi
+        
         log_message "INFO" "SSH 密码登录已完全禁用"
         log_message "WARNING" "请确保您已经设置了 SSH 密钥，否则您将无法登录系统!"
     else
@@ -823,9 +877,6 @@ restart_ssh_service() {
 
 # 修改SSH端口
 change_ssh_port() {
-    # 删除局部变量赋值，使用全局的SSH_CONFIG变量
-    # SSH_CONFIG="/etc/ssh/sshd_config"
-    
     # 检查是否需要修改SSH端口
     if [ "$SSH_PORT" != "22" ]; then
         log_message "INFO" "正在将 SSH 端口修改为 $SSH_PORT..."
@@ -853,6 +904,32 @@ change_ssh_port() {
             else
                 # 如果配置文件中没有 'Port' 这一行，添加到文件末尾
                 echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG"
+            fi
+            
+            # 同时写入到sshd_config.d目录，如果不存在则创建
+            log_message "INFO" "尝试将端口配置写入到模块化配置目录..."
+            if [ ! -d "$SSH_CONFIG_DIR" ]; then
+                log_message "INFO" "配置目录 $SSH_CONFIG_DIR 不存在，正在创建..."
+                sudo mkdir -p "$SSH_CONFIG_DIR"
+                if [ $? -ne 0 ]; then
+                    log_message "WARNING" "无法创建 $SSH_CONFIG_DIR 目录，将只修改主配置文件"
+                fi
+            fi
+            
+            if [ -d "$SSH_CONFIG_DIR" ]; then
+                log_message "INFO" "将端口配置写入到 $SSH_CONFIG_DIR 目录..."
+                sudo tee "$SSH_CONFIG_DIR/97-custom-port.conf" > /dev/null << EOF
+# SSH自定义端口配置
+Port $SSH_PORT
+EOF
+                log_message "INFO" "端口配置已写入 $SSH_CONFIG_DIR/97-custom-port.conf"
+                
+                # 确保sshd_config包含Include指令
+                if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
+                    log_message "INFO" "添加Include指令到主配置文件..."
+                    echo -e "\n# Include modular configuration files\nInclude $SSH_CONFIG_DIR/*.conf" | sudo tee -a "$SSH_CONFIG" > /dev/null
+                    log_message "INFO" "Include指令已添加到 $SSH_CONFIG"
+                fi
             fi
             
             # 如果启用了防火墙，添加规则允许新端口
