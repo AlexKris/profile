@@ -5,12 +5,10 @@
 # Exit on error, undefined variables, and pipe failures
 set -euo pipefail
 
-# Color codes for better readability
-# Remove color codes as per requirements
-# RED='\033[0;31m'
-# GREEN='\033[0;32m'
-# YELLOW='\033[0;33m'
-# NC='\033[0m' # No Color
+SSRUST_BASE_DIR="/root/ssrust"
+SSRUST_CONFIG_DIR="${SSRUST_BASE_DIR}/conf"
+DOCKER_IMAGE="ghcr.io/shadowsocks/ssserver-rust:latest"
+DOCKER_COMPOSE_CMD="docker compose"
 
 # Function for logging
 log() {
@@ -103,18 +101,26 @@ install_docker() {
 
 # 检查并删除已存在的容器
 check_remove_container() {
-    log "info" "检查是否存在旧的 ${CONTAINER_NAME} 容器..."
-    if docker ps -a | grep -q "${CONTAINER_NAME}"; then
-        log "info" "发现已存在的 ${CONTAINER_NAME} 容器，正在停止并删除..."
-        if ! docker stop "${CONTAINER_NAME}" >/dev/null 2>&1; then
-            log "warn" "停止容器 ${CONTAINER_NAME} 失败"
+    log "info" "检查是否存在通过docker run方式启动的旧容器..."
+
+    # 检查是否存在直接通过docker run启动的容器
+    # 使用inspect检查容器是否由docker-compose启动
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        # 检查容器是否有docker-compose标签
+        if ! docker inspect "${CONTAINER_NAME}" 2>/dev/null | grep -q "com.docker.compose"; then
+            log "info" "发现通过docker run直接启动的 ${CONTAINER_NAME} 容器，正在停止并删除..."
+            if ! docker stop "${CONTAINER_NAME}" >/dev/null 2>&1; then
+                log "warn" "停止容器 ${CONTAINER_NAME} 失败"
+            fi
+            if ! docker rm "${CONTAINER_NAME}" >/dev/null 2>&1; then
+                log "warn" "删除容器 ${CONTAINER_NAME} 失败"
+            fi
+            log "info" "已删除通过docker run启动的旧容器"
+        else
+            log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，不进行处理"
         fi
-        if ! docker rm "${CONTAINER_NAME}" >/dev/null 2>&1; then
-            log "warn" "删除容器 ${CONTAINER_NAME} 失败"
-        fi
-        log "info" "已删除旧的 ${CONTAINER_NAME} 容器"
     else
-        log "info" "未发现已存在的 ${CONTAINER_NAME} 容器"
+        log "info" "未发现名为 ${CONTAINER_NAME} 的容器"
     fi
 }
 
@@ -122,7 +128,7 @@ check_remove_container() {
 config_run_ssrust() {
     log "info" "正在拉取 ssrust 镜像..."
     docker pull ghcr.io/shadowsocks/ssserver-rust
-    
+
     log "info" "正在启动 ssrust 容器..."
     docker run --entrypoint ssserver --restart=always --name "${CONTAINER_NAME}" -d \
     --net=host \
@@ -131,12 +137,12 @@ config_run_ssrust() {
     --log-opt max-file=3 \
     ghcr.io/shadowsocks/ssserver-rust \
     -s "[::]:${PORT}" -m "${ENC_METHOD}" -k "${PASSWORD}" -U
-    
+
     if [ $? -ne 0 ]; then
         log "error" "启动 ssrust 容器失败"
         exit 1
     fi
-    
+
     log "info" "检查容器是否正常运行..."
     sleep 2
     if ! docker ps | grep -q "${CONTAINER_NAME}"; then
@@ -144,11 +150,57 @@ config_run_ssrust() {
         docker logs "${CONTAINER_NAME}"
         exit 1
     fi
-    
+
     log "info" "ssrust 已经成功安装并启动"
     log "info" "服务信息:"
     log "info" "端口: ${PORT}"
     log "info" "加密方式: ${ENC_METHOD}"
+}
+
+config_run_ssrust_compose() {
+    log "info" "开始配置 shadowsocks-rust..."
+    mkdir -p "$SSRUST_CONFIG_DIR"
+
+    cat > "$SSRUST_CONFIG_DIR/config.json" <<EOF
+{
+    "servers": [
+        {
+            "server": "0.0.0.0",
+            "server_port": $PORT,
+            "method": "$ENC_METHOD",
+            "password": "$PASSWORD",
+            "timeout": 300,
+            "mode": "tcp_and_udp",
+            "fast_open": true
+        }
+    ]
+}
+EOF
+
+    cat > "$SSRUST_BASE_DIR/docker-compose.yml" <<EOF
+services:
+  shadowsocks:
+    image: $DOCKER_IMAGE
+    container_name: ${CONTAINER_NAME}
+    restart: always
+    network_mode: host
+    volumes:
+      - $SSRUST_CONFIG_DIR:/etc/shadowsocks-rust
+EOF
+
+    log "info" "正在启动 shadowsocks-rust ..."
+    cd "$SSRUST_BASE_DIR"
+    $DOCKER_COMPOSE_CMD down
+    $DOCKER_COMPOSE_CMD up -d
+
+    if [ $? -eq 0 ]; then
+        log "info" "ssrust 已经成功安装并启动"
+        log "info" "服务信息:"
+        log "info" "端口: ${PORT}"
+        log "info" "加密方式: ${ENC_METHOD}"
+    else
+        log "error" "服务启动失败，请检查日志."
+    fi
 }
 
 # 安装 ssrust
@@ -156,33 +208,28 @@ install_ssrust() {
     check_privileges
     install_docker
     check_remove_container
-    config_run_ssrust
+    config_run_ssrust_compose
 }
 
 # 重启 ssrust
 restart_ssrust() {
-    log "info" "正在重启 ${CONTAINER_NAME}..."
-    if ! docker restart "${CONTAINER_NAME}"; then
-        log "error" "重启 ${CONTAINER_NAME} 失败"
+    log "info" "正在重启 shadowsocks-rust..."
+    cd "$SSRUST_BASE_DIR"
+    if ! $DOCKER_COMPOSE_CMD restart; then
+        log "error" "重启 shadowsocks-rust 失败"
         exit 1
     fi
-    log "info" "${CONTAINER_NAME} 已经重启成功"
+    log "info" "shadowsocks-rust 已经重启成功"
 }
 
 stop_ssrust() {
-    log "info" "检查是否存在 ${CONTAINER_NAME} 容器..."
-    if docker ps -a | grep -q "${CONTAINER_NAME}"; then
-        log "info" "发现 ${CONTAINER_NAME} 容器，正在停止并删除..."
-        if ! docker stop "${CONTAINER_NAME}" >/dev/null 2>&1; then
-            log "warn" "停止容器 ${CONTAINER_NAME} 失败"
-        fi
-        if ! docker rm "${CONTAINER_NAME}" >/dev/null 2>&1; then
-            log "warn" "删除容器 ${CONTAINER_NAME} 失败"
-        fi
-        log "info" "已删除 ${CONTAINER_NAME} 容器"
-    else
-        log "info" "未发现 ${CONTAINER_NAME} 容器"
+    log "info" "正在停止 shadowsocks-rust..."
+    cd "$SSRUST_BASE_DIR"
+    if ! $DOCKER_COMPOSE_CMD down; then
+        log "error" "停止 shadowsocks-rust 失败"
+        exit 1
     fi
+    log "info" "shadowsocks-rust 已经停止成功"
 }
 
 # 显示使用帮助
@@ -190,8 +237,8 @@ show_help() {
     echo "用法: $0 {update|install|restart|stop}"
     echo " - 更新系统:  $0 update"
     echo " - 安装ssrust: $0 install <CONTAINER_NAME> <PORT> <PASSWORD> <ENC_METHOD>"
-    echo " - 重启ssrust: $0 restart <CONTAINER_NAME>"
-    echo " - 停止ssrust: $0 stop <CONTAINER_NAME>"
+    echo " - 重启ssrust: $0 restart"
+    echo " - 停止ssrust: $0 stop"
 }
 
 # 根据命令行参数执行不同功能
@@ -215,22 +262,10 @@ case "$1" in
         install_ssrust
         ;;
     restart)
-        CONTAINER_NAME="${2:-}"
-        if [ -z "${CONTAINER_NAME}" ]; then
-            log "error" "重启ssrust需要提供容器名"
-            show_help
-            exit 1
-        fi
         check_privileges
         restart_ssrust
         ;;
     stop)
-        CONTAINER_NAME="${2:-}"
-        if [ -z "${CONTAINER_NAME}" ]; then
-            log "error" "停止ssrust需要提供容器名"
-            show_help
-            exit 1
-        fi
         check_privileges
         stop_ssrust
         ;;
