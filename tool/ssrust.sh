@@ -37,12 +37,6 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-# 参数赋值 - Remove global parameter assignment
-# CONTAINER_NAME="$2"
-# PORT="$3"
-# PASSWORD="$4"
-# ENC_METHOD="$5"
-
 # 更新系统包
 update_system() {
     if [ -f /etc/debian_version ]; then
@@ -50,7 +44,7 @@ update_system() {
         apt update && apt upgrade -y && apt full-upgrade -y && apt autoclean -y && apt autoremove -y
     elif [ -f /etc/redhat-release ]; then
         log "info" "检测到 RHEL/CentOS 系统..."
-        
+
         # 检查是否有 dnf（CentOS/RHEL 8+）
         if command -v dnf &> /dev/null; then
             log "info" "使用 dnf 包管理器进行更新..."
@@ -79,23 +73,23 @@ install_docker() {
         log "info" "当前 Docker 版本: $docker_version"
         return
     fi
-    
+
     log "info" "正在安装 Docker..."
     if ! command -v curl &> /dev/null; then
         log "error" "未找到 curl 命令，请先安装 curl"
         exit 1
     fi
-    
+
     curl -fsSL https://get.docker.com | bash
     if [ $? -ne 0 ]; then
         log "error" "安装 Docker 失败，请检查网络连接。"
         exit 1
     fi
-    
+
     # Enable and start Docker service
     systemctl enable docker
     systemctl start docker
-    
+
     log "info" "Docker 已经安装完成。"
 }
 
@@ -157,6 +151,7 @@ config_run_ssrust() {
     log "info" "加密方式: ${ENC_METHOD}"
 }
 
+# 配置并运行 ssrust_compose
 config_run_ssrust_compose() {
     log "info" "开始配置 shadowsocks-rust..."
     mkdir -p "$SSRUST_CONFIG_DIR"
@@ -222,6 +217,7 @@ restart_ssrust() {
     log "info" "shadowsocks-rust 已经重启成功"
 }
 
+# 停止 ssrust
 stop_ssrust() {
     log "info" "正在停止 shadowsocks-rust..."
     cd "$SSRUST_BASE_DIR"
@@ -253,7 +249,7 @@ case "$1" in
         PORT="${3:-}"
         PASSWORD="${4:-}"
         ENC_METHOD="${5:-}"
-        
+
         if [ -z "${CONTAINER_NAME}" ] || [ -z "${PORT}" ] || [ -z "${PASSWORD}" ] || [ -z "${ENC_METHOD}" ]; then
             log "error" "安装ssrust需要提供所有参数: CONTAINER_NAME, PORT, PASSWORD, ENC_METHOD"
             show_help
