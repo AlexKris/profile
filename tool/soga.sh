@@ -110,6 +110,8 @@ check_remove_container() {
             log "info" "已删除通过docker run启动的旧容器"
         else
             log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，不进行处理"
+            cd "$SOGA_BASE_DIR"
+            $DOCKER_COMPOSE_CMD down
         fi
     else
         log "info" "未发现名为 ${CONTAINER_NAME} 的容器"
@@ -168,7 +170,7 @@ services:
   soga:
     image: $DOCKER_IMAGE
     container_name: ${CONTAINER_NAME}
-    restart: on-failure
+    restart: always
     network_mode: host
     environment:
       type: xboard
