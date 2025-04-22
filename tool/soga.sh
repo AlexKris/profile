@@ -183,6 +183,18 @@ services:
       log_level: info
     volumes:
       - $SOGA_CONFIG_DIR:/etc/soga
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower-soga
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=Asia/Hong_Kong
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400 # 每24小时检查一次更新
+    command: --interval 86400 --cleanup ${CONTAINER_NAME}
 EOF
 
     log "info" "正在启动 soga ..."
