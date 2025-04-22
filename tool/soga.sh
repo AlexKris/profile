@@ -168,7 +168,7 @@ services:
   soga:
     image: $DOCKER_IMAGE
     container_name: ${CONTAINER_NAME}
-    restart: on-failure
+    restart: always
     network_mode: host
     environment:
       type: xboard
