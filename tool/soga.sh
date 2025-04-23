@@ -99,7 +99,7 @@ check_remove_container() {
     # 使用inspect检查容器是否由docker-compose启动
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         # 检查容器是否有docker-compose标签
-        if ! docker inspect "${CONTAINER_NAME}" 2>/dev/null | grep -q "com.docker.compose"; then
+        if ! docker inspect "${CONTAINER_NAME}" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null | grep -q .; then
             log "info" "发现通过docker run直接启动的 ${CONTAINER_NAME} 容器，正在停止并删除..."
             if ! docker stop "${CONTAINER_NAME}" >/dev/null 2>&1; then
                 log "warn" "停止容器 ${CONTAINER_NAME} 失败"
