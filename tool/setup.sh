@@ -27,6 +27,8 @@ LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
 TMP_FILES=""
 OS_TYPE=""
 OS_VERSION=""
+# 新增：服务器地区参数
+SERVER_REGION="asia"
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -170,11 +172,13 @@ usage() {
     echo "  -f, --key-file FILE       从文件读取SSH公钥 (例如: --key-file ~/.ssh/id_rsa.pub)"
     echo "  -u, --update              更新此脚本"
     echo "  -l, --log-file FILE       指定日志文件路径 (默认: $LOG_FILE)"
+    echo "  -r, --region REGION       指定服务器所在地区，用于选择NTP服务器 (hk|tw|jp|sg|us|eu|asia，默认: asia)"
     echo "  -v, --version             显示脚本版本"
     echo ""
     echo "示例:"
     echo "  $0 -d -p 2222 -f ~/.ssh/id_rsa.pub   # 禁用密码登录，使用端口2222，添加指定的SSH密钥"
     echo "  $0 -k \"ssh-rsa AAAA...\"            # 仅添加指定的SSH公钥"
+    echo "  $0 -r us                             # 指定服务器位于美国，使用美国NTP服务器"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -217,6 +221,22 @@ parse_args() {
                     exit 1
                 fi
                 shift ;;
+            -r|--region)
+                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                    log_message "ERROR" "选项 $1 需要一个有效的地区参数"
+                    exit 1
+                fi
+                # 验证地区参数
+                case "$2" in
+                    hk|tw|jp|sg|us|eu|asia)
+                        SERVER_REGION="$2"
+                        ;;
+                    *)
+                        log_message "ERROR" "无效的地区参数: $2. 可用选项: hk, tw, jp, sg, us, eu, asia"
+                        exit 1
+                        ;;
+                esac
+                shift ;;
             -u|--update) update_shell; exit 0 ;;
             -l|--log-file) 
                 if [ -z "$2" ] || [[ "$2" == -* ]]; then
@@ -247,7 +267,7 @@ parse_args() {
         sudo mkdir -p "$CONFIG_BACKUP_DIR" || log_message "WARNING" "无法创建备份目录 $CONFIG_BACKUP_DIR"
     fi
     
-    log_message "INFO" "脚本开始执行，参数: SSH端口=$SSH_PORT, 禁用密码=$DISABLE_SSH_PASSWD, 日志文件=$LOG_FILE"
+    log_message "INFO" "脚本开始执行，参数: SSH端口=$SSH_PORT, 禁用密码=$DISABLE_SSH_PASSWD, 地区=$SERVER_REGION, 日志文件=$LOG_FILE"
 }
 
 # 更新脚本函数
@@ -557,8 +577,37 @@ configure_timezone(){
         log_message "INFO" "时区已是 $TARGET_TIMEZONE，无需更改"
     fi
 
-    # 配置时间同步
-    log_message "INFO" "配置时间同步服务..."
+    # 根据服务器地区选择NTP服务器
+    log_message "INFO" "配置时间同步服务，使用$SERVER_REGION地区的NTP服务器..."
+    
+    # 根据地区选择NTP服务器
+    local NTP_SERVER
+    case "$SERVER_REGION" in
+        hk)
+            NTP_SERVER="hk.pool.ntp.org"
+            ;;
+        tw)
+            NTP_SERVER="tw.pool.ntp.org"
+            ;;
+        jp)
+            NTP_SERVER="jp.pool.ntp.org"
+            ;;
+        sg)
+            NTP_SERVER="sg.pool.ntp.org"
+            ;;
+        us)
+            NTP_SERVER="us.pool.ntp.org"
+            ;;
+        eu)
+            NTP_SERVER="europe.pool.ntp.org"
+            ;;
+        asia|*)
+            NTP_SERVER="asia.pool.ntp.org"
+            ;;
+    esac
+    
+    log_message "INFO" "选择NTP服务器: $NTP_SERVER"
+    
     if [ -f /etc/debian_version ]; then
         # Debian/Ubuntu 系统
         log_message "INFO" "检测到 Debian/Ubuntu 系统，使用 systemd-timesyncd 或 chrony 配置时间同步"
@@ -567,9 +616,9 @@ configure_timezone(){
         if command -v chronyd &> /dev/null; then
             log_message "INFO" "使用 chrony 进行时间同步"
             sudo apt install -y chrony
-            # 配置 chrony 使用亚洲时间服务器
+            # 配置 chrony 使用选定的时间服务器
             sudo tee /etc/chrony/chrony.conf > /dev/null << EOF
-pool asia.pool.ntp.org iburst
+pool $NTP_SERVER iburst
 keyfile /etc/chrony/chrony.keys
 driftfile /var/lib/chrony/chrony.drift
 logdir /var/log/chrony
@@ -586,7 +635,7 @@ EOF
             sudo apt install -y systemd-timesyncd
             sudo tee /etc/systemd/timesyncd.conf > /dev/null << EOF
 [Time]
-NTP=asia.pool.ntp.org
+NTP=$NTP_SERVER
 FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
 EOF
             sudo systemctl restart systemd-timesyncd
@@ -599,9 +648,9 @@ EOF
         
         # CentOS 7+ 使用 chronyd
         sudo yum install -y chrony
-        # 配置 chrony 使用亚洲时间服务器
+        # 配置 chrony 使用选定的时间服务器
         sudo tee /etc/chrony.conf > /dev/null << EOF
-server asia.pool.ntp.org iburst
+server $NTP_SERVER iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync

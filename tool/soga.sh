@@ -167,11 +167,13 @@ config_run_soga_compose() {
 
     cat > "$SOGA_BASE_DIR/docker-compose.yml" <<EOF
 services:
-  sogass:
+  ${CONTAINER_NAME}:
     image: $DOCKER_IMAGE
+    container_name: ${CONTAINER_NAME}
     restart: on-failure
     network_mode: host
     environment:
+      TZ: Asia/Hong_Kong
       type: v2board
       server_type: ss
       node_id: ${NODE_ID}
@@ -180,7 +182,7 @@ services:
       webapi_key: ${PANEL_KEY}
       log_level: info
     volumes:
-      - "/etc/soga/:/etc/soga/"
+      - $SOGA_CONFIG_DIR:/etc/soga
 EOF
 
     log "info" "正在启动 soga ..."
