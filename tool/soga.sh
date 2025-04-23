@@ -109,7 +109,7 @@ check_remove_container() {
             fi
             log "info" "已删除通过docker run启动的旧容器"
         else
-            log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，不进行处理"
+            log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，正在停止并删除..."
             cd "$SOGA_BASE_DIR"
             $DOCKER_COMPOSE_CMD down
         fi
