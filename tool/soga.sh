@@ -167,34 +167,20 @@ config_run_soga_compose() {
 
     cat > "$SOGA_BASE_DIR/docker-compose.yml" <<EOF
 services:
-  soga:
+  sogass:
     image: $DOCKER_IMAGE
-    container_name: ${CONTAINER_NAME}
-    restart: always
+    restart: on-failure
     network_mode: host
     environment:
-      type: xboard
+      type: v2board
       server_type: ss
       node_id: ${NODE_ID}
       api: webapi
       webapi_url: ${PANEL_URL}
       webapi_key: ${PANEL_KEY}
-      forbidden_bit_torrent: 'true'
       log_level: info
     volumes:
-      - $SOGA_CONFIG_DIR:/etc/soga
-
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower-soga
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - TZ=Asia/Hong_Kong
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=86400 # 每24小时检查一次更新
-    command: --interval 86400 --cleanup ${CONTAINER_NAME}
+      - "/etc/soga/:/etc/soga/"
 EOF
 
     log "info" "正在启动 soga ..."
