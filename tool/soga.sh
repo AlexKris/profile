@@ -174,7 +174,7 @@ services:
     network_mode: host
     environment:
       TZ: Asia/Hong_Kong
-      type: v2board
+      type: xboard
       server_type: ss
       node_id: ${NODE_ID}
       api: webapi
