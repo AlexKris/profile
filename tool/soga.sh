@@ -3,8 +3,8 @@
 # 启用错误处理
 set -euo pipefail
 
-SOGA_BASE_DIR="/root/soga"
-SOGA_CONFIG_DIR="/etc/soga"
+BASE_DIR="/root/soga"
+CONFIG_DIR="/etc/soga"
 DOCKER_IMAGE="vaxilu/soga:latest"
 DOCKER_COMPOSE_CMD="docker compose"
 
@@ -110,7 +110,7 @@ check_remove_container() {
             log "info" "已删除通过docker run启动的旧容器"
         else
             log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，正在停止并删除..."
-            cd "$SOGA_BASE_DIR"
+            cd "$BASE_DIR"
             $DOCKER_COMPOSE_CMD down
         fi
     else
@@ -162,10 +162,10 @@ config_run_soga(){
 # 配置并运行 soga_compose
 config_run_soga_compose() {
     log "info" "开始配置 soga..."
-    mkdir -p "$SOGA_BASE_DIR"
-    mkdir -p "$SOGA_CONFIG_DIR"
+    mkdir -p "$BASE_DIR"
+    mkdir -p "$CONFIG_DIR"
 
-    cat > "$SOGA_BASE_DIR/docker-compose.yml" <<EOF
+    cat > "$BASE_DIR/docker-compose.yml" <<EOF
 services:
   ${CONTAINER_NAME}:
     image: $DOCKER_IMAGE
@@ -182,11 +182,11 @@ services:
       webapi_key: ${PANEL_KEY}
       log_level: info
     volumes:
-      - $SOGA_CONFIG_DIR:/etc/soga
+      - $CONFIG_DIR:/etc/soga
 EOF
 
     log "info" "正在启动 soga ..."
-    cd "$SOGA_BASE_DIR"
+    cd "$BASE_DIR"
     $DOCKER_COMPOSE_CMD down
     $DOCKER_COMPOSE_CMD up -d
 
@@ -209,7 +209,7 @@ install_soga() {
 # 重启 soga
 restart_soga() {
     log "info" "正在重启 soga..."
-    cd "$SOGA_BASE_DIR"
+    cd "$BASE_DIR"
     if ! $DOCKER_COMPOSE_CMD restart; then
         log "error" "重启 soga 失败"
         exit 1
@@ -220,7 +220,7 @@ restart_soga() {
 # 停止 soga
 stop_soga() {
     log "info" "正在停止 soga..."
-    cd "$SOGA_BASE_DIR"
+    cd "$BASE_DIR"
     if ! $DOCKER_COMPOSE_CMD down; then
         log "error" "停止 soga 失败"
         exit 1

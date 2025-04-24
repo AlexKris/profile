@@ -5,8 +5,8 @@
 # Exit on error, undefined variables, and pipe failures
 set -euo pipefail
 
-SSRUST_BASE_DIR="/root/ssrust"
-SSRUST_CONFIG_DIR="${SSRUST_BASE_DIR}/conf"
+BASE_DIR="/root/ssrust"
+CONFIG_DIR="${BASE_DIR}/conf"
 DOCKER_IMAGE="ghcr.io/shadowsocks/ssserver-rust:latest"
 DOCKER_COMPOSE_CMD="docker compose"
 
@@ -101,7 +101,7 @@ check_remove_container() {
     # 使用inspect检查容器是否由docker-compose启动
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         # 检查容器是否有docker-compose标签
-        if ! docker inspect "${CONTAINER_NAME}" 2>/dev/null | grep -q "com.docker.compose"; then
+        if ! docker inspect "${CONTAINER_NAME}" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null | grep -q .; then
             log "info" "发现通过docker run直接启动的 ${CONTAINER_NAME} 容器，正在停止并删除..."
             if ! docker stop "${CONTAINER_NAME}" >/dev/null 2>&1; then
                 log "warn" "停止容器 ${CONTAINER_NAME} 失败"
@@ -111,7 +111,9 @@ check_remove_container() {
             fi
             log "info" "已删除通过docker run启动的旧容器"
         else
-            log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，不进行处理"
+            log "info" "发现通过docker compose启动的 ${CONTAINER_NAME} 容器，正在停止并删除..."
+            cd "$BASE_DIR"
+            $DOCKER_COMPOSE_CMD down
         fi
     else
         log "info" "未发现名为 ${CONTAINER_NAME} 的容器"
@@ -154,9 +156,9 @@ config_run_ssrust() {
 # 配置并运行 ssrust_compose
 config_run_ssrust_compose() {
     log "info" "开始配置 shadowsocks-rust..."
-    mkdir -p "$SSRUST_CONFIG_DIR"
+    mkdir -p "$CONFIG_DIR"
 
-    cat > "$SSRUST_CONFIG_DIR/config.json" <<EOF
+    cat > "$CONFIG_DIR/config.json" <<EOF
 {
     "servers": [
         {
@@ -172,7 +174,7 @@ config_run_ssrust_compose() {
 }
 EOF
 
-    cat > "$SSRUST_BASE_DIR/docker-compose.yml" <<EOF
+    cat > "$BASE_DIR/docker-compose.yml" <<EOF
 services:
   ${CONTAINER_NAME}:
     image: $DOCKER_IMAGE
@@ -182,11 +184,11 @@ services:
     environment:
       TZ: Asia/Hong_Kong
     volumes:
-      - $SSRUST_CONFIG_DIR:/etc/shadowsocks-rust
+      - $CONFIG_DIR:/etc/shadowsocks-rust
 EOF
 
     log "info" "正在启动 shadowsocks-rust ..."
-    cd "$SSRUST_BASE_DIR"
+    cd "$BASE_DIR"
     $DOCKER_COMPOSE_CMD down
     $DOCKER_COMPOSE_CMD up -d
 
@@ -211,7 +213,7 @@ install_ssrust() {
 # 重启 ssrust
 restart_ssrust() {
     log "info" "正在重启 shadowsocks-rust..."
-    cd "$SSRUST_BASE_DIR"
+    cd "$BASE_DIR"
     if ! $DOCKER_COMPOSE_CMD restart; then
         log "error" "重启 shadowsocks-rust 失败"
         exit 1
@@ -222,7 +224,7 @@ restart_ssrust() {
 # 停止 ssrust
 stop_ssrust() {
     log "info" "正在停止 shadowsocks-rust..."
-    cd "$SSRUST_BASE_DIR"
+    cd "$BASE_DIR"
     if ! $DOCKER_COMPOSE_CMD down; then
         log "error" "停止 shadowsocks-rust 失败"
         exit 1
