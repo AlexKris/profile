@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.1.0"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -20,15 +20,16 @@ readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
 
 # 脚本参数变量
 DISABLE_SSH_PASSWD="false"
-SSH_PORT="$DEFAULT_SSH_PORT"
+SSH_PORT=""
 SSH_KEY=""
+CONFIGURE_NTP="true"
 # 添加时间戳到日志文件名
 LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
 TMP_FILES=""
 OS_TYPE=""
 OS_VERSION=""
-# 新增：服务器地区参数
-SERVER_REGION="asia"
+# 新增：服务器地区参数，默认为auto自动检测
+SERVER_REGION="auto"
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -165,20 +166,34 @@ check_compatibility() {
 usage() {
     echo "用法: $0 [选项]"
     echo "选项:"
-    echo "  -h, --help                显示此帮助信息"
-    echo "  -d, --disable-password    禁用SSH密码登录，仅允许SSH密钥认证"
-    echo "  -p, --port PORT           设置SSH端口号 (例如: --port 2222)"
-    echo "  -k, --key KEY             设置SSH公钥 (直接输入公钥文本或从文件读取，例如: --key \"ssh-rsa AAAA...\")"
-    echo "  -f, --key-file FILE       从文件读取SSH公钥 (例如: --key-file ~/.ssh/id_rsa.pub)"
-    echo "  -u, --update              更新此脚本"
-    echo "  -l, --log-file FILE       指定日志文件路径 (默认: $LOG_FILE)"
-    echo "  -r, --region REGION       指定服务器所在地区，用于选择NTP服务器 (hk|tw|jp|sg|us|eu|asia，默认: asia)"
-    echo "  -v, --version             显示脚本版本"
+    echo "  --help                    显示此帮助信息"
+    echo "  --disable_ssh_pwd         禁用SSH密码登录，仅允许SSH密钥认证"
+    echo "  --port PORT               设置SSH端口号 (例如: --port 2222)"
+    echo "  --ssh_key KEY             设置SSH公钥 (直接输入公钥文本，例如: --ssh_key \"ssh-rsa AAAA...\")"
+    echo "  --ssh_key_file FILE       从文件读取SSH公钥 (例如: --ssh_key_file ~/.ssh/id_rsa.pub)"
+    echo "  --update                  更新此脚本"
+    echo "  --log_file FILE           指定日志文件路径 (默认: $LOG_FILE)"
+    echo "  --region REGION           指定服务器所在地区，用于选择NTP服务器"
+    echo "                            (auto|cn|hk|tw|jp|sg|us|eu|asia，默认: auto)"
+    echo "  --disable_ntp             禁用NTP时间同步配置"
+    echo "  --version                 显示脚本版本"
+    echo ""
+    echo "地区说明:"
+    echo "  auto - 自动检测地区（推荐）"
+    echo "  cn   - 中国大陆，使用cn.pool.ntp.org"
+    echo "  hk   - 香港，使用hk.pool.ntp.org"
+    echo "  tw   - 台湾，使用tw.pool.ntp.org"
+    echo "  jp   - 日本，使用jp.pool.ntp.org"
+    echo "  sg   - 新加坡，使用sg.pool.ntp.org"
+    echo "  us   - 美国，使用us.pool.ntp.org"
+    echo "  eu   - 欧洲，使用europe.pool.ntp.org"
+    echo "  asia - 亚洲通用，使用asia.pool.ntp.org"
+    echo "  注意：所有地区统一使用东八区时区（Asia/Shanghai）"
     echo ""
     echo "示例:"
-    echo "  $0 -d -p 2222 -f ~/.ssh/id_rsa.pub   # 禁用密码登录，使用端口2222，添加指定的SSH密钥"
-    echo "  $0 -k \"ssh-rsa AAAA...\"            # 仅添加指定的SSH公钥"
-    echo "  $0 -r us                             # 指定服务器位于美国，使用美国NTP服务器"
+    echo "  $0 --disable_ssh_pwd --port 2222 --ssh_key_file ~/.ssh/id_rsa.pub"
+    echo "  $0 --ssh_key \"ssh-rsa AAAA...\" --region cn"
+    echo "  $0 --disable_ntp --region us"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -187,10 +202,10 @@ usage() {
 parse_args() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-            -h|--help) usage; exit 0 ;;
-            -d|--disable-password) DISABLE_SSH_PASSWD="true" ;;
-            -p|--port) 
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+            --help) usage; exit 0 ;;
+            --disable_ssh_pwd) DISABLE_SSH_PASSWD="true" ;;
+            --port) 
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的端口号参数"
                     exit 1
                 fi
@@ -200,14 +215,14 @@ parse_args() {
                 fi
                 SSH_PORT="$2"; 
                 shift ;;
-            -k|--key) 
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+            --ssh_key) 
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的SSH公钥参数"
                     exit 1
                 fi
                 SSH_KEY="$2"; shift ;;
-            -f|--key-file) 
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+            --ssh_key_file) 
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的文件路径参数"
                     exit 1
                 fi
@@ -221,25 +236,26 @@ parse_args() {
                     exit 1
                 fi
                 shift ;;
-            -r|--region)
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+            --region)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的地区参数"
                     exit 1
                 fi
                 # 验证地区参数
                 case "$2" in
-                    hk|tw|jp|sg|us|eu|asia)
+                    auto|cn|hk|tw|jp|sg|us|eu|asia)
                         SERVER_REGION="$2"
                         ;;
                     *)
-                        log_message "ERROR" "无效的地区参数: $2. 可用选项: hk, tw, jp, sg, us, eu, asia"
+                        log_message "ERROR" "无效的地区参数: $2. 可用选项: auto, cn, hk, tw, jp, sg, us, eu, asia"
                         exit 1
                         ;;
                 esac
                 shift ;;
-            -u|--update) update_shell; exit 0 ;;
-            -l|--log-file) 
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+            --disable_ntp) CONFIGURE_NTP="false" ;;
+            --update) update_shell; exit 0 ;;
+            --log_file) 
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的文件路径参数"
                     exit 1
                 fi
@@ -256,8 +272,8 @@ parse_args() {
                     LOG_FILE="${log_dir}/${log_base}-${TIMESTAMP}.${log_ext}"
                 fi
                 shift ;;
-            -v|--version) echo "脚本版本: $SCRIPT_VERSION"; exit 0 ;;
-            *) echo "未知选项: $1"; usage; exit 0 ;;
+            --version) echo "脚本版本: $SCRIPT_VERSION"; exit 0 ;;
+            *) echo "未知选项: $1"; usage; exit 1 ;;
         esac
         shift
     done
@@ -267,7 +283,7 @@ parse_args() {
         sudo mkdir -p "$CONFIG_BACKUP_DIR" || log_message "WARNING" "无法创建备份目录 $CONFIG_BACKUP_DIR"
     fi
     
-    log_message "INFO" "脚本开始执行，参数: SSH端口=$SSH_PORT, 禁用密码=$DISABLE_SSH_PASSWD, 地区=$SERVER_REGION, 日志文件=$LOG_FILE"
+    log_message "INFO" "脚本开始执行，参数: SSH端口=$SSH_PORT, 禁用密码=$DISABLE_SSH_PASSWD, 地区=$SERVER_REGION, NTP配置=$CONFIGURE_NTP, 日志文件=$LOG_FILE"
 }
 
 # 更新脚本函数
@@ -375,6 +391,12 @@ update_system_install_dependencies() {
 
 # 配置 SSH 公钥认证
 configure_ssh_keys(){
+    # 如果没有提供SSH密钥，则跳过此步骤
+    if [ -z "$SSH_KEY" ]; then
+        log_message "INFO" "未提供SSH公钥，跳过SSH密钥配置"
+        return 0
+    fi
+    
     SSH_DIR="$HOME/.ssh"
     AUTHORIZED_KEYS="$SSH_DIR/authorized_keys"
 
@@ -410,48 +432,18 @@ configure_ssh_keys(){
         fi
     fi
 
-    # 添加 SSH 公钥
-    if [ -n "$SSH_KEY" ]; then
-        # 验证公钥格式
-        if ! echo "$SSH_KEY" | grep -qE "^(ssh-rsa|ssh-dss|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) "; then
-            log_message "WARNING" "提供的 SSH 公钥格式可能不正确。标准格式应该以 'ssh-rsa', 'ssh-ed25519' 等开头。"
-            read -p "是否仍然继续添加此密钥？(y/n): " confirm
-            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-                log_message "INFO" "已取消添加 SSH 公钥"
-                return
-            fi
-        fi
-        
-        # 如果提供了命令行参数的SSH密钥
-        if grep -qF "$SSH_KEY" "$AUTHORIZED_KEYS"; then
-            log_message "INFO" "命令行提供的公钥已存在于 $AUTHORIZED_KEYS"
-        else
-            echo "$SSH_KEY" >> "$AUTHORIZED_KEYS"
-            log_message "INFO" "已将命令行提供的公钥添加到 $AUTHORIZED_KEYS"
-        fi
+    # 验证公钥格式
+    if ! echo "$SSH_KEY" | grep -qE "^(ssh-rsa|ssh-dss|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) "; then
+        log_message "WARNING" "提供的 SSH 公钥格式可能不正确。标准格式应该以 'ssh-rsa', 'ssh-ed25519' 等开头。"
+        log_message "WARNING" "将仍然尝试添加此密钥"
+    fi
+    
+    # 添加SSH公钥
+    if grep -qF "$SSH_KEY" "$AUTHORIZED_KEYS"; then
+        log_message "INFO" "提供的公钥已存在于 $AUTHORIZED_KEYS"
     else
-        # 如果没有通过命令行提供SSH密钥，则交互式输入
-        read -p "请输入您的 SSH 公钥（直接回车跳过）： " INPUT_SSH_KEY
-        if [ -n "$INPUT_SSH_KEY" ]; then
-            # 验证公钥格式
-            if ! echo "$INPUT_SSH_KEY" | grep -qE "^(ssh-rsa|ssh-dss|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) "; then
-                log_message "WARNING" "提供的 SSH 公钥格式可能不正确。标准格式应该以 'ssh-rsa', 'ssh-ed25519' 等开头。"
-                read -p "是否仍然继续添加此密钥？(y/n): " confirm
-                if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-                    log_message "INFO" "已取消添加 SSH 公钥"
-                    return
-                fi
-            fi
-            
-            if grep -qF "$INPUT_SSH_KEY" "$AUTHORIZED_KEYS"; then
-                log_message "INFO" "公钥已存在于 $AUTHORIZED_KEYS"
-            else
-                echo "$INPUT_SSH_KEY" >> "$AUTHORIZED_KEYS"
-                log_message "INFO" "已将公钥添加到 $AUTHORIZED_KEYS"
-            fi
-        else
-            log_message "INFO" "未输入任何公钥，跳过此步骤"
-        fi
+        echo "$SSH_KEY" >> "$AUTHORIZED_KEYS"
+        log_message "INFO" "已将公钥添加到 $AUTHORIZED_KEYS"
     fi
 }
 
@@ -564,25 +556,27 @@ EOF
     fi
 }
 
-# 检查并设置时区为香港
+# 检查并设置时区和NTP同步
 configure_timezone(){
-    CURRENT_TIMEZONE=$(timedatectl | grep "Time zone" | awk '{print $3}')
-    TARGET_TIMEZONE="Asia/Hong_Kong"
-
-    if [ "$CURRENT_TIMEZONE" != "$TARGET_TIMEZONE" ]; then
-        log_message "INFO" "当前时区为 $CURRENT_TIMEZONE，正在设置为 $TARGET_TIMEZONE..."
-        sudo timedatectl set-timezone "$TARGET_TIMEZONE"
-        log_message "INFO" "时区已设置为 $TARGET_TIMEZONE"
-    else
-        log_message "INFO" "时区已是 $TARGET_TIMEZONE，无需更改"
+    if [ "$CONFIGURE_NTP" = "false" ]; then
+        log_message "INFO" "已禁用NTP配置，跳过时区和时间同步设置"
+        return 0
     fi
-
-    # 根据服务器地区选择NTP服务器
-    log_message "INFO" "配置时间同步服务，使用$SERVER_REGION地区的NTP服务器..."
     
-    # 根据地区选择NTP服务器
+    local final_region="$SERVER_REGION"
+    
+    # 如果设置为auto，则自动检测
+    if [ "$SERVER_REGION" = "auto" ]; then
+        final_region=$(detect_server_region)
+    fi
+    
+    # 统一使用东八区时区，但根据地区选择不同的NTP服务器
+    local TARGET_TIMEZONE="Asia/Shanghai"  # 统一使用东八区
     local NTP_SERVER
-    case "$SERVER_REGION" in
+    case "$final_region" in
+        cn)
+            NTP_SERVER="cn.pool.ntp.org"
+            ;;
         hk)
             NTP_SERVER="hk.pool.ntp.org"
             ;;
@@ -605,8 +599,19 @@ configure_timezone(){
             NTP_SERVER="asia.pool.ntp.org"
             ;;
     esac
-    
-    log_message "INFO" "选择NTP服务器: $NTP_SERVER"
+
+    CURRENT_TIMEZONE=$(timedatectl | grep "Time zone" | awk '{print $3}')
+
+    if [ "$CURRENT_TIMEZONE" != "$TARGET_TIMEZONE" ]; then
+        log_message "INFO" "当前时区为 $CURRENT_TIMEZONE，正在设置为 $TARGET_TIMEZONE（东八区）..."
+        sudo timedatectl set-timezone "$TARGET_TIMEZONE"
+        log_message "INFO" "时区已设置为 $TARGET_TIMEZONE（东八区）"
+    else
+        log_message "INFO" "时区已是 $TARGET_TIMEZONE（东八区），无需更改"
+    fi
+
+    # 配置时间同步服务
+    log_message "INFO" "配置时间同步服务，使用 $final_region 地区的NTP服务器: $NTP_SERVER"
     
     if [ -f /etc/debian_version ]; then
         # Debian/Ubuntu 系统
@@ -647,7 +652,11 @@ EOF
         log_message "INFO" "检测到 CentOS/RHEL 系统，使用 chronyd 配置时间同步"
         
         # CentOS 7+ 使用 chronyd
-        sudo yum install -y chrony
+        if command -v dnf &> /dev/null; then
+            sudo dnf install -y chrony
+        else
+            sudo yum install -y chrony
+        fi
         # 配置 chrony 使用选定的时间服务器
         sudo tee /etc/chrony.conf > /dev/null << EOF
 server $NTP_SERVER iburst
@@ -663,12 +672,162 @@ EOF
         log_message "ERROR" "不支持的操作系统，无法配置时间同步"
     fi
 
-    # 检查时间同步状态
-    if systemctl is-active systemd-timesyncd &> /dev/null || systemctl is-active chrony &> /dev/null || systemctl is-active chronyd &> /dev/null; then
-        log_message "INFO" "时间同步服务已成功启用"
+    # 检查时间同步状态和NTP可用性
+    log_message "INFO" "检查NTP服务状态和同步情况..."
+    
+    # 等待服务启动完成
+    sleep 3
+    
+    # 检查服务是否运行
+    local ntp_service_running=false
+    local ntp_service_name=""
+    
+    if systemctl is-active systemd-timesyncd &> /dev/null; then
+        ntp_service_running=true
+        ntp_service_name="systemd-timesyncd"
+    elif systemctl is-active chrony &> /dev/null; then
+        ntp_service_running=true
+        ntp_service_name="chrony"
+    elif systemctl is-active chronyd &> /dev/null; then
+        ntp_service_running=true
+        ntp_service_name="chronyd"
+    fi
+    
+    if [ "$ntp_service_running" = "true" ]; then
+        log_message "INFO" "时间同步服务 $ntp_service_name 已成功启动"
+        
+        # 检查NTP服务器连通性
+        log_message "INFO" "检查NTP服务器连通性: $NTP_SERVER"
+        if check_ntp_connectivity "$NTP_SERVER"; then
+            log_message "INFO" "NTP服务器 $NTP_SERVER 连接正常"
+        else
+            log_message "WARNING" "NTP服务器 $NTP_SERVER 连接可能有问题，将尝试使用备用服务器"
+        fi
+        
+        # 检查时间同步状态
+        check_ntp_sync_status "$ntp_service_name"
+        
     else
         log_message "WARNING" "时间同步服务可能未正确启用，请手动检查"
+        log_message "INFO" "您可以手动检查服务状态："
+        log_message "INFO" "  systemctl status systemd-timesyncd"
+        log_message "INFO" "  systemctl status chrony"
+        log_message "INFO" "  systemctl status chronyd"
     fi
+}
+
+# 检查NTP服务器连通性
+check_ntp_connectivity() {
+    local ntp_server="$1"
+    local connectivity_ok=false
+    
+    # 方法1: 使用ntpdate检查（如果可用）
+    if command -v ntpdate &> /dev/null; then
+        if timeout 10 ntpdate -q "$ntp_server" &> /dev/null; then
+            connectivity_ok=true
+            log_message "INFO" "通过ntpdate验证NTP服务器连通性成功"
+        fi
+    fi
+    
+    # 方法2: 使用chrony客户端检查（如果可用且connectivity_ok为false）
+    if [ "$connectivity_ok" = "false" ] && command -v chronyc &> /dev/null; then
+        # 等待chrony启动完成
+        sleep 2
+        local chrony_sources=$(timeout 10 chronyc sources 2>/dev/null || true)
+        if echo "$chrony_sources" | grep -q "$ntp_server\|pool"; then
+            connectivity_ok=true
+            log_message "INFO" "通过chronyc验证NTP服务器连通性成功"
+        fi
+    fi
+    
+    # 方法3: 使用UDP端口检查（如果前面方法都失败）
+    if [ "$connectivity_ok" = "false" ] && command -v nc &> /dev/null; then
+        if timeout 5 nc -u -z "$ntp_server" 123 &> /dev/null; then
+            connectivity_ok=true
+            log_message "INFO" "NTP端口123可达，连通性检查通过"
+        fi
+    fi
+    
+    # 方法4: 使用ping检查基本网络连通性
+    if [ "$connectivity_ok" = "false" ] && command -v ping &> /dev/null; then
+        if timeout 5 ping -c 2 "$ntp_server" &> /dev/null; then
+            log_message "INFO" "NTP服务器网络可达，但NTP协议可能有问题"
+        else
+            log_message "WARNING" "NTP服务器网络不可达: $ntp_server"
+        fi
+    fi
+    
+    [ "$connectivity_ok" = "true" ]
+}
+
+# 检查NTP同步状态
+check_ntp_sync_status() {
+    local service_name="$1"
+    
+    case "$service_name" in
+        "systemd-timesyncd")
+            log_message "INFO" "检查systemd-timesyncd同步状态..."
+            local timedatectl_output=$(timedatectl status 2>/dev/null || true)
+            
+            if echo "$timedatectl_output" | grep -q "NTP synchronized: yes"; then
+                log_message "INFO" "✓ 时间同步状态: 已同步"
+            else
+                log_message "WARNING" "⚠ 时间同步状态: 未同步或正在同步中"
+                log_message "INFO" "这是正常的，新配置的NTP服务需要几分钟才能完成首次同步"
+            fi
+            
+            # 显示当前NTP服务器信息
+            if echo "$timedatectl_output" | grep -q "NTP service"; then
+                local ntp_info=$(echo "$timedatectl_output" | grep "NTP service" | cut -d: -f2- | xargs)
+                log_message "INFO" "NTP服务状态: $ntp_info"
+            fi
+            ;;
+            
+        "chrony"|"chronyd")
+            log_message "INFO" "检查chrony同步状态..."
+            if command -v chronyc &> /dev/null; then
+                # 等待chrony完全启动
+                sleep 2
+                
+                # 检查chrony源状态
+                local chrony_sources=$(timeout 10 chronyc sources 2>/dev/null || true)
+                if [ -n "$chrony_sources" ]; then
+                    log_message "INFO" "Chrony NTP源状态:"
+                    echo "$chrony_sources" | while read line; do
+                        if [[ "$line" =~ ^\^.*\* ]] || [[ "$line" =~ ^\*.*$ ]]; then
+                            log_message "INFO" "  ✓ $line (已同步)"
+                        elif [[ "$line" =~ ^\^ ]] || [[ "$line" =~ ^\+ ]]; then
+                            log_message "INFO" "  ○ $line (可用)"
+                        elif [[ "$line" =~ ^- ]] || [[ "$line" =~ ^\? ]]; then
+                            log_message "WARNING" "  ⚠ $line (不可用或未测试)"
+                        fi
+                    done
+                fi
+                
+                # 检查同步状态
+                local chrony_tracking=$(timeout 10 chronyc tracking 2>/dev/null || true)
+                if echo "$chrony_tracking" | grep -q "Leap status.*Normal"; then
+                    log_message "INFO" "✓ Chrony时间同步状态正常"
+                    
+                    # 显示时间偏差信息
+                    local offset=$(echo "$chrony_tracking" | grep "Last offset" | awk '{print $4" "$5}' | head -1)
+                    if [ -n "$offset" ]; then
+                        log_message "INFO" "当前时间偏差: $offset"
+                    fi
+                else
+                    log_message "WARNING" "⚠ Chrony可能还在初始化中，请稍后检查同步状态"
+                fi
+            else
+                log_message "WARNING" "chronyc命令不可用，无法详细检查同步状态"
+            fi
+            ;;
+    esac
+    
+    # 通用时间同步建议
+    log_message "INFO" "时间同步配置完成。建议："
+    log_message "INFO" "  1. 首次同步可能需要几分钟时间"
+    log_message "INFO" "  2. 可使用 'timedatectl status' 查看详细状态"
+    log_message "INFO" "  3. 如使用chrony，可用 'chronyc sources -v' 查看NTP源"
 }
 
 # 检查并启用 BBR
@@ -930,50 +1089,54 @@ restart_ssh_service() {
 
 # 修改SSH端口
 change_ssh_port() {
-    # 检查是否需要修改SSH端口
-    if [ "$SSH_PORT" != "22" ]; then
-        log_message "INFO" "正在将 SSH 端口修改为 $SSH_PORT..."
-        
-        # 验证端口号是否有效
-        if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [ "$SSH_PORT" -lt 1024 ] || [ "$SSH_PORT" -gt 65535 ]; then
-            log_message "ERROR" "无效的端口号: $SSH_PORT. 端口号应在 1024-65535 范围内"
-            log_message "INFO" "使用默认端口 22"
-            SSH_PORT="22"
-            return
+    # 如果没有指定SSH端口，则不修改端口
+    if [ -z "$SSH_PORT" ]; then
+        log_message "INFO" "未指定SSH端口，保持当前端口设置"
+        return 0
+    fi
+    
+    log_message "INFO" "正在将 SSH 端口修改为 $SSH_PORT..."
+    
+    # 验证端口号是否有效
+    if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [ "$SSH_PORT" -lt 1024 ] || [ "$SSH_PORT" -gt 65535 ]; then
+        log_message "ERROR" "无效的端口号: $SSH_PORT. 端口号应在 1024-65535 范围内"
+        log_message "INFO" "保持当前端口设置"
+        SSH_PORT=""
+        return 1
+    fi
+    
+    # 检查当前端口设置
+    CURRENT_PORT=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" | awk '{print $2}' | head -1)
+    
+    if [ "$CURRENT_PORT" = "$SSH_PORT" ]; then
+        log_message "INFO" "SSH 端口已经是 $SSH_PORT，无需修改"
+    else
+        # 如果存在 'Port' 行，将其替换
+        if grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" > /dev/null; then
+            sudo sed -i "s/^\s*Port\s\+[0-9]\+/Port $SSH_PORT/" "$SSH_CONFIG"
+        elif grep -E "^\s*#\s*Port" "$SSH_CONFIG" > /dev/null; then
+            # 如果存在被注释的 'Port' 行，去掉注释并设置为新端口
+            sudo sed -i "s/^\s*#\s*Port.*/Port $SSH_PORT/" "$SSH_CONFIG"
+        else
+            # 如果配置文件中没有 'Port' 这一行，添加到文件末尾
+            echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG"
         fi
         
-        # 检查当前端口设置
-        CURRENT_PORT=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" | awk '{print $2}')
-        
-        if [ "$CURRENT_PORT" = "$SSH_PORT" ]; then
-            log_message "INFO" "SSH 端口已经是 $SSH_PORT，无需修改"
-        else
-            # 如果存在 'Port' 行，将其替换
-            if grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" > /dev/null; then
-                sudo sed -i "s/^\s*Port\s\+[0-9]\+/Port $SSH_PORT/" "$SSH_CONFIG"
-            elif grep -E "^\s*#\s*Port" "$SSH_CONFIG" > /dev/null; then
-                # 如果存在被注释的 'Port' 行，去掉注释并设置为新端口
-                sudo sed -i "s/^\s*#\s*Port.*/Port $SSH_PORT/" "$SSH_CONFIG"
-            else
-                # 如果配置文件中没有 'Port' 这一行，添加到文件末尾
-                echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG"
-            fi
+        # 处理模块化配置中的端口设置
+        if [ -d "$SSH_CONFIG_DIR" ]; then
+            log_message "INFO" "检查模块化配置中的端口设置..."
             
-            # 处理模块化配置中的端口设置
-            if [ -d "$SSH_CONFIG_DIR" ]; then
-                log_message "INFO" "检查模块化配置中的端口设置..."
-                
-                # 将端口设置添加到统一的安全配置文件中
-                if [ -f "$SSH_CONFIG_DIR/ssh-security.conf" ]; then
-                    # 如果文件已存在，检查并添加端口配置
-                    if ! grep -q "^Port $SSH_PORT" "$SSH_CONFIG_DIR/ssh-security.conf"; then
-                        log_message "INFO" "向SSH安全配置文件添加端口设置..."
-                        sudo sed -i "1s/^/# SSH端口配置\nPort $SSH_PORT\n\n/" "$SSH_CONFIG_DIR/ssh-security.conf"
-                    fi
-                else
-                    # 如果文件不存在，创建新文件
-                    log_message "INFO" "创建SSH安全配置文件，包含端口设置..."
-                    sudo tee "$SSH_CONFIG_DIR/ssh-security.conf" > /dev/null << EOF
+            # 将端口设置添加到统一的安全配置文件中
+            if [ -f "$SSH_CONFIG_DIR/ssh-security.conf" ]; then
+                # 如果文件已存在，检查并添加端口配置
+                if ! grep -q "^Port $SSH_PORT" "$SSH_CONFIG_DIR/ssh-security.conf"; then
+                    log_message "INFO" "向SSH安全配置文件添加端口设置..."
+                    sudo sed -i "1s/^/# SSH端口配置\nPort $SSH_PORT\n\n/" "$SSH_CONFIG_DIR/ssh-security.conf"
+                fi
+            else
+                # 如果文件不存在，创建新文件
+                log_message "INFO" "创建SSH安全配置文件，包含端口设置..."
+                sudo tee "$SSH_CONFIG_DIR/ssh-security.conf" > /dev/null << EOF
 # SSH安全配置 - 由setup.sh创建
 
 # SSH端口配置
@@ -982,44 +1145,41 @@ Port $SSH_PORT
 # 启用公钥认证
 PubkeyAuthentication yes
 EOF
-                fi
-                
-                # 如果存在cloud-init配置，也需要处理
-                if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
-                    log_message "INFO" "检查cloud-init配置中的端口设置..."
-                    if grep -q "^Port" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
-                        # 如果cloud-init配置中有端口设置，注释掉它
-                        sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
-                        log_message "INFO" "已注释cloud-init配置中的端口设置"
-                    fi
-                fi
             fi
             
-            # 如果启用了防火墙，添加规则允许新端口
-            if command -v ufw &> /dev/null && sudo ufw status | grep -q "active"; then
-                log_message "INFO" "检测到 UFW 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
-                sudo ufw allow "$SSH_PORT/tcp" comment 'SSH Port'
-            elif command -v firewall-cmd &> /dev/null && sudo firewall-cmd --state | grep -q "running"; then
-                log_message "INFO" "检测到 firewalld 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
-                sudo firewall-cmd --permanent --add-port="$SSH_PORT/tcp"
-                sudo firewall-cmd --reload
-            elif command -v iptables &> /dev/null; then
-                log_message "INFO" "使用 iptables 添加规则允许 SSH 端口 $SSH_PORT"
-                sudo iptables -A INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT
-                # 尝试保存 iptables 规则
-                if command -v iptables-save &> /dev/null; then
-                    if [ -f /etc/debian_version ]; then
-                        sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
-                    elif [ -f /etc/redhat-release ]; then
-                        sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
-                    fi
+            # 如果存在cloud-init配置，也需要处理
+            if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
+                log_message "INFO" "检查cloud-init配置中的端口设置..."
+                if grep -q "^Port" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
+                    # 如果cloud-init配置中有端口设置，注释掉它
+                    sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+                    log_message "INFO" "已注释cloud-init配置中的端口设置"
                 fi
             fi
-            
-            log_message "INFO" "SSH 端口已修改为 $SSH_PORT"
         fi
-    else
-        log_message "INFO" "未设置修改 SSH 端口，保持默认端口 22"
+        
+        # 如果启用了防火墙，添加规则允许新端口
+        if command -v ufw &> /dev/null && sudo ufw status | grep -q "active"; then
+            log_message "INFO" "检测到 UFW 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
+            sudo ufw allow "$SSH_PORT/tcp" comment 'SSH Port'
+        elif command -v firewall-cmd &> /dev/null && sudo firewall-cmd --state | grep -q "running"; then
+            log_message "INFO" "检测到 firewalld 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
+            sudo firewall-cmd --permanent --add-port="$SSH_PORT/tcp"
+            sudo firewall-cmd --reload
+        elif command -v iptables &> /dev/null; then
+            log_message "INFO" "使用 iptables 添加规则允许 SSH 端口 $SSH_PORT"
+            sudo iptables -A INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT
+            # 尝试保存 iptables 规则
+            if command -v iptables-save &> /dev/null; then
+                if [ -f /etc/debian_version ]; then
+                    sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
+                elif [ -f /etc/redhat-release ]; then
+                    sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
+                fi
+            fi
+        fi
+        
+        log_message "INFO" "SSH 端口已修改为 $SSH_PORT"
     fi
 }
 
@@ -1447,6 +1607,70 @@ EOF
     return 0
 }
 
+# 自动检测服务器地区
+detect_server_region() {
+    log_message "INFO" "正在自动检测服务器地区..."
+    
+    # 尝试通过IP地理位置检测
+    local detected_region="asia"  # 默认值
+    
+    # 方法1：通过curl获取IP地理位置信息
+    if command -v curl &> /dev/null; then
+        local ip_info
+        # 尝试多个IP地理位置服务
+        for service in "ipapi.co/country_code" "ifconfig.me/country_code" "api.country.is"; do
+            ip_info=$(curl -s --connect-timeout 5 --max-time 10 "http://$service" 2>/dev/null || true)
+            if [ -n "$ip_info" ]; then
+                case "$ip_info" in
+                    *CN*|*China*) detected_region="cn"; break ;;
+                    *HK*|*Hong*) detected_region="hk"; break ;;
+                    *TW*|*Taiwan*) detected_region="tw"; break ;;
+                    *JP*|*Japan*) detected_region="jp"; break ;;
+                    *SG*|*Singapore*) detected_region="sg"; break ;;
+                    *US*|*United*States*) detected_region="us"; break ;;
+                    *GB*|*UK*|*DE*|*FR*|*IT*|*ES*|*NL*) detected_region="eu"; break ;;
+                    *) detected_region="asia" ;;
+                esac
+                log_message "INFO" "通过IP地理位置检测到地区: $ip_info -> $detected_region"
+                break
+            fi
+        done
+    fi
+    
+    # 方法2：通过系统时区推测
+    if [ "$detected_region" = "asia" ]; then
+        local current_tz=$(timedatectl 2>/dev/null | grep "Time zone" | awk '{print $3}' || echo "")
+        case "$current_tz" in
+            *Shanghai*|*Beijing*|*Chongqing*) detected_region="cn" ;;
+            *Hong_Kong*) detected_region="hk" ;;
+            *Taipei*) detected_region="tw" ;;
+            *Tokyo*|*Osaka*) detected_region="jp" ;;
+            *Singapore*) detected_region="sg" ;;
+            *New_York*|*Los_Angeles*|*Chicago*) detected_region="us" ;;
+            *London*|*Paris*|*Berlin*|*Rome*) detected_region="eu" ;;
+        esac
+        if [ "$detected_region" != "asia" ]; then
+            log_message "INFO" "通过系统时区推测地区: $current_tz -> $detected_region"
+        fi
+    fi
+    
+    # 方法3：通过DNS解析速度测试（简单测试）
+    if [ "$detected_region" = "asia" ] && command -v dig &> /dev/null; then
+        local cn_speed us_speed eu_speed
+        cn_speed=$(timeout 3 dig +time=1 @223.5.5.5 baidu.com 2>/dev/null | grep "Query time" | awk '{print $4}' || echo "999")
+        us_speed=$(timeout 3 dig +time=1 @8.8.8.8 google.com 2>/dev/null | grep "Query time" | awk '{print $4}' || echo "999")
+        eu_speed=$(timeout 3 dig +time=1 @1.1.1.1 cloudflare.com 2>/dev/null | grep "Query time" | awk '{print $4}' || echo "999")
+        
+        if [ "$cn_speed" -lt "50" ] && [ "$cn_speed" -lt "$us_speed" ] && [ "$cn_speed" -lt "$eu_speed" ]; then
+            detected_region="cn"
+            log_message "INFO" "通过DNS解析速度推测为中国大陆地区"
+        fi
+    fi
+    
+    log_message "INFO" "自动检测到服务器地区: $detected_region"
+    echo "$detected_region"
+}
+
 # 主函数
 main() {
     parse_args "$@"
@@ -1513,16 +1737,14 @@ main() {
             log_message "WARNING" "可能无法通过SSH密钥登录，为安全起见不继续修改端口"
             read -p "是否仍然继续修改SSH端口? (y/n): " continue_port
             if [[ "$continue_port" != "y" && "$continue_port" != "Y" ]]; then
-                SSH_PORT="$DEFAULT_SSH_PORT"
-                log_message "INFO" "用户选择不修改SSH端口，使用默认端口 $DEFAULT_SSH_PORT"
+                SSH_PORT=""
+                log_message "INFO" "用户选择不修改SSH端口"
             fi
         }
     fi
     
     # 修改SSH端口
-    if [ "$SSH_PORT" != "$DEFAULT_SSH_PORT" ]; then
-        change_ssh_port || log_message "WARNING" "修改SSH端口失败，但继续执行"
-    fi
+    change_ssh_port || log_message "WARNING" "修改SSH端口失败，但继续执行"
     
     # 检查并处理sshd_config.d目录中的配置
     check_sshd_config_d || log_message "WARNING" "处理SSH模块化配置失败，但继续执行"
@@ -1538,7 +1760,7 @@ main() {
     
     # 配置额外服务
     configure_fail2ban || log_message "WARNING" "配置fail2ban失败，但继续执行"
-    configure_timezone || log_message "WARNING" "配置时区失败，但继续执行"
+    configure_timezone || log_message "WARNING" "配置时区和NTP失败，但继续执行"
     configure_bbr || log_message "WARNING" "配置BBR失败，但继续执行"
     configure_ip_forward || log_message "WARNING" "配置IP转发失败，但继续执行"
     
@@ -1549,17 +1771,26 @@ main() {
     verify_configuration || log_message "WARNING" "配置验证失败，请手动检查配置"
     
     log_message "INFO" "========== 系统配置完成 =========="
-    log_message "INFO" "SSH 端口: $SSH_PORT"
+    log_message "INFO" "SSH 端口: $([ -n "$SSH_PORT" ] && echo "$SSH_PORT" || get_current_ssh_port)"
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         log_message "INFO" "SSH 密码登录: 已禁用"
     else
         log_message "INFO" "SSH 密码登录: 已启用"
     fi
+    log_message "INFO" "SSH 密钥: $([ -n "$SSH_KEY" ] && echo "已添加" || echo "未添加")"
     log_message "INFO" "fail2ban 状态: $(systemctl is-active fail2ban 2>/dev/null || echo '未运行')"
-    log_message "INFO" "当前时区: $(timedatectl | grep "Time zone" | awk '{print $3}')"
+    if [ "$CONFIGURE_NTP" = "true" ]; then
+        log_message "INFO" "当前时区: $(timedatectl | grep "Time zone" | awk '{print $3}')"
+    else
+        log_message "INFO" "时区配置: 已跳过"
+    fi
     log_message "INFO" "BBR 状态: $(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo '未启用')"
     log_message "INFO" "IP 转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo '未启用')"
-    log_message "INFO" "请记住保存您的 SSH 密钥以便远程登录"
+    if [ -n "$SSH_KEY" ]; then
+        log_message "INFO" "请记住保存您的 SSH 密钥以便远程登录"
+    else
+        log_message "INFO" "请注意：未添加SSH密钥，确保您有其他方式访问服务器"
+    fi
     
     # 显示配置总结
     show_configuration_summary
@@ -1597,13 +1828,23 @@ verify_configuration() {
 
 # 显示配置总结
 show_configuration_summary() {
+    local actual_ssh_port
+    
+    # 如果脚本中修改了SSH端口，使用修改后的端口；否则获取当前实际端口
+    if [ -n "$SSH_PORT" ]; then
+        actual_ssh_port="$SSH_PORT"
+    else
+        actual_ssh_port=$(get_current_ssh_port)
+    fi
+    
     log_message "INFO" "配置总结:"
     echo "--------------------------------------------------"
     echo "系统类型: $OS_TYPE $OS_VERSION"
     echo "SSH 配置:"
-    echo "  - 端口: $SSH_PORT"
+    echo "  - 端口: $actual_ssh_port"
     echo "  - 密码登录: $([ "$DISABLE_SSH_PASSWD" = "true" ] && echo "已禁用" || echo "已启用")"
     echo "  - 公钥认证: 已启用"
+    echo "  - SSH密钥: $([ -n "$SSH_KEY" ] && echo "已添加" || echo "未添加")"
     
     # 检查防火墙状态
     FIREWALL_STATUS="未启用"
@@ -1623,17 +1864,50 @@ show_configuration_summary() {
     echo "系统优化:"
     echo "  - BBR: $(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo '未启用')"
     echo "  - IP转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo '未启用')"
-    echo "  - 时区: $(timedatectl | grep "Time zone" | awk '{print $3}')"
+    if [ "$CONFIGURE_NTP" = "true" ]; then
+        echo "  - 时区: $(timedatectl | grep "Time zone" | awk '{print $3}')"
+        echo "  - NTP同步: 已配置"
+    else
+        echo "  - 时区: 未修改"
+        echo "  - NTP同步: 已跳过"
+    fi
     echo "--------------------------------------------------"
     echo "日志文件路径: $LOG_FILE"
     echo "SSH配置备份: $CONFIG_BACKUP_DIR"
     echo "--------------------------------------------------"
-    echo "如需远程登录，请使用: ssh -p $SSH_PORT 用户名@服务器IP"
+    echo "如需远程登录，请使用: ssh -p $actual_ssh_port 用户名@服务器IP"
     
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         echo "注意: 密码登录已禁用，请确保您已保存SSH密钥"
     fi
+    if [ -z "$SSH_KEY" ]; then
+        echo "注意: 未添加SSH密钥，请确保您有其他方式访问服务器"
+    fi
     echo "--------------------------------------------------"
+}
+
+# 获取当前实际的SSH端口
+get_current_ssh_port() {
+    local current_port
+    
+    # 首先检查是否有监听的SSH端口
+    if command -v ss &> /dev/null; then
+        current_port=$(sudo ss -tlnp | grep sshd | head -1 | sed 's/.*:\([0-9]\+\) .*/\1/')
+    elif command -v netstat &> /dev/null; then
+        current_port=$(sudo netstat -tlnp | grep sshd | head -1 | awk '{print $4}' | sed 's/.*:\([0-9]\+\)$/\1/')
+    fi
+    
+    # 如果无法从监听端口获取，则从配置文件读取
+    if [ -z "$current_port" ]; then
+        current_port=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" | awk '{print $2}' | head -1)
+    fi
+    
+    # 如果仍然为空，则使用默认端口
+    if [ -z "$current_port" ]; then
+        current_port="22"
+    fi
+    
+    echo "$current_port"
 }
 
 # 执行主函数
