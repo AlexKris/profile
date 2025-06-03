@@ -449,10 +449,34 @@ update_system_install_dependencies() {
         sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get full-upgrade -y && sudo apt-get autoclean -y && sudo apt-get autoremove -y
 
         log_message "INFO" "正在安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr..."
-        # 预配置可能的交互式包
+        
+        # 预配置可能的交互式包（支持多种可能的配置项名称）
+        log_message "INFO" "预配置交互式包以避免安装提示..."
         echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
-        # 设置非交互模式并安装包
-        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+        echo 'iperf3 iperf3/start_daemon boolean false' | sudo debconf-set-selections
+        echo 'iperf iperf/autostart boolean false' | sudo debconf-set-selections
+        echo 'iperf iperf/start_daemon boolean false' | sudo debconf-set-selections
+        
+        # 额外设置环境变量确保非交互模式
+        export DEBIAN_FRONTEND=noninteractive
+        export DEBIAN_PRIORITY=critical
+        export DEBCONF_NONINTERACTIVE_SEEN=true
+        
+        # 先安装基础包
+        sudo -E apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr
+        
+        # 单独处理iperf3安装（增强非交互模式）
+        log_message "INFO" "单独安装iperf3..."
+        if ! dpkg -l | grep -q "^ii.*iperf3"; then
+            # 再次确保debconf预配置
+            echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections 2>/dev/null || true
+            echo 'iperf3 iperf3/start_daemon boolean false' | sudo debconf-set-selections 2>/dev/null || true
+                         # 使用最强的非交互模式安装，包含dpkg强制选项
+             sudo bash -c 'DEBIAN_FRONTEND=noninteractive DEBIAN_PRIORITY=critical DEBCONF_NONINTERACTIVE_SEEN=true apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" iperf3'
+            log_message "INFO" "iperf3 安装完成"
+        else
+            log_message "INFO" "iperf3 已经安装"
+        fi
     elif [ -f /etc/redhat-release ]; then
         log_message "INFO" "检测到 RHEL/CentOS 系统..."
         
