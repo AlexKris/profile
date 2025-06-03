@@ -1,31 +1,49 @@
 #!/usr/bin/env bash
-# filename: disable_debian_user.sh
+# disable_debian_user.sh
+# 功能：禁用 debian 账号＋杀进程＋更新 SSH & cloud-init
+# 使用：root 登录后 ./disable_debian_user.sh
+
 set -euxo pipefail
+exec > >(tee -a ~/disable_debian.log) 2>&1
 
-TARGET=debian                     # 要禁用的账户
+TARGET=debian                    # 要禁用的账号
 
-# 1️⃣ 结束该用户的全部会话与进程
-pkill -u "$TARGET"  || true       # 普通方式
-loginctl terminate-user "$TARGET" || true  # systemd 用户会话
+###############################################################################
+# 1️⃣ 终止该用户的所有进程和会话
+###############################################################################
+pkill   -u "$TARGET"          || true
+loginctl terminate-user "$TARGET" || true
 
-# 2️⃣ 彻底锁定账号，禁止登录
-passwd  -l   "$TARGET"            # 锁定密码
-usermod -L   "$TARGET"            # 锁定 shadow 条目
-chsh -s /usr/sbin/nologin "$TARGET"  # 无交互 shell
+###############################################################################
+# 2️⃣ 锁定账号：密码 / Shadow / Shell
+###############################################################################
+passwd  -l "$TARGET"                          # 锁密码
+usermod -L "$TARGET"                          # 锁 shadow
+chsh -s /usr/sbin/nologin "$TARGET"           # 置无交互 shell
 
+###############################################################################
 # 3️⃣ 移除 sudo 权限
-deluser "$TARGET" sudo  || true
+###############################################################################
+deluser "$TARGET" sudo || true
 
+###############################################################################
 # 4️⃣ SSH 层面再加保险
-if ! grep -q "^DenyUsers" /etc/ssh/sshd_config; then
-  echo "DenyUsers $TARGET" >> /etc/ssh/sshd_config
+###############################################################################
+SSH_CFG=/etc/ssh/sshd_config
+if ! grep -q "^DenyUsers" "$SSH_CFG"; then
+    echo "DenyUsers $TARGET" >> "$SSH_CFG"
 else
-  sed -i "s/^DenyUsers.*/& $TARGET/" /etc/ssh/sshd_config
+    sed -Ei "s/^(DenyUsers.*)/\1 $TARGET/" "$SSH_CFG"
 fi
-systemctl reload sshd
+systemctl reload ssh                       # Debian 中的服务名
 
-# 5️⃣ cloud-init 侧禁止再次创建/启用 debian 用户
-sed -Ei 's/^(\s*name:\s*).*/\1root/'       /etc/cloud/cloud.cfg
-sed -Ei 's/^(\s*lock_password:\s*).*/\1true/' /etc/cloud/cloud.cfg
+###############################################################################
+# 5️⃣ cloud-init：禁止再次创建 / 启用 debian 账户
+###############################################################################
+CFG=/etc/cloud/cloud.cfg
+sed -Ei 's/^( *name:).*/\1 root/'          "$CFG"
+sed -Ei 's/^( *lock_password:).*/\1 true/' "$CFG"
 
-echo "[ OK ] $TARGET 已被彻底禁用。"
+###############################################################################
+echo "[ OK ] 账号 $TARGET 已被彻底禁用并从登录列表移除。"
+###############################################################################
