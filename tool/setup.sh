@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="1.2.0"
+readonly SCRIPT_VERSION="1.4.0"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -44,6 +44,9 @@ BLOCK_WEB_PORTS="false"
 ALLOW_CLOUDFLARE="false"
 # 新增：审计方式选择
 INSTALL_ETCKEEPER="false"
+INSTALL_AUDITD="true"  # 默认安装auditd
+# 新增：日志级别控制
+LOG_LEVEL="INFO"  # DEBUG, INFO, WARNING, ERROR
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -80,21 +83,47 @@ log_message() {
     local message="$2"
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     
-    # 打印到控制台
+    # 日志级别优先级：ERROR(3) > WARNING(2) > INFO(1) > DEBUG(0)
+    local level_num=0
+    local current_level_num=1  # 默认INFO级别
+    
     case "$level" in
-        "ERROR")
-            echo -e "[错误] $message" >&2
-            ;;
-        "WARNING")
-            echo -e "[警告] $message"
-            ;;
-        "INFO")
-            echo -e "[信息] $message"
-            ;;
-        *)
-            echo -e "[日志] $message"
-            ;;
+        "ERROR") level_num=3 ;;
+        "WARNING") level_num=2 ;;
+        "INFO") level_num=1 ;;
+        "DEBUG") level_num=0 ;;
+        *) level_num=1 ;;
     esac
+    
+    case "$LOG_LEVEL" in
+        "ERROR") current_level_num=3 ;;
+        "WARNING") current_level_num=2 ;;
+        "INFO") current_level_num=1 ;;
+        "DEBUG") current_level_num=0 ;;
+        *) current_level_num=1 ;;
+    esac
+    
+    # 只显示等于或高于当前日志级别的消息
+    if [ $level_num -ge $current_level_num ]; then
+        # 打印到控制台
+        case "$level" in
+            "ERROR")
+                echo -e "[错误] $message" >&2
+                ;;
+            "WARNING")
+                echo -e "[警告] $message"
+                ;;
+            "INFO")
+                echo -e "[信息] $message"
+                ;;
+            "DEBUG")
+                echo -e "[调试] $message"
+                ;;
+            *)
+                echo -e "[日志] $message"
+                ;;
+        esac
+    fi
     
     # 分析日志文件路径
     local log_dir=$(dirname "$LOG_FILE")
@@ -197,7 +226,11 @@ usage() {
     echo "  --disable_icmp            禁用ICMP（禁止ping）"
     echo "  --block_web_ports         阻止80和443端口的公网访问"
     echo "  --allow_cloudflare        允许Cloudflare IP访问80和443端口（配合--block_web_ports使用）"
-    echo "  --install_etckeeper       安装etckeeper替代auditd（用于配置文件版本控制）"
+    echo "  --install_etckeeper       安装etckeeper用于配置文件版本控制（保留auditd）"
+    echo "  --disable_auditd          不安装auditd安全审计工具"
+    echo "  --audit_both              同时安装auditd和etckeeper（推荐用于生产环境）"
+    echo "  --debug                   启用调试模式（显示详细日志）"
+    echo "  --quiet                   静默模式（只显示警告和错误）"
     echo ""
     echo "地区说明:"
     echo "  auto - 自动检测地区（推荐）"
@@ -220,7 +253,9 @@ usage() {
     echo "  $0 --block_web_ports --allow_cloudflare  # 阻止公网访问但允许Cloudflare"
     echo "  $0 --ntp_service chrony --region cn  # 指定使用chrony和中国NTP服务器"
     echo "  $0 --ntp_service timesyncd  # 强制使用systemd-timesyncd"
-    echo "  $0 --install_etckeeper  # 使用etckeeper替代auditd进行配置管理"
+    echo "  $0 --install_etckeeper  # 安装etckeeper + auditd（默认组合）"
+    echo "  $0 --audit_both  # 明确同时安装auditd和etckeeper"
+    echo "  $0 --disable_auditd --install_etckeeper  # 只用etckeeper，不用auditd"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -345,6 +380,15 @@ parse_args() {
                 ALLOW_CLOUDFLARE="true" ;;
             --install_etckeeper)
                 INSTALL_ETCKEEPER="true" ;;
+            --disable_auditd)
+                INSTALL_AUDITD="false" ;;
+            --audit_both)
+                INSTALL_ETCKEEPER="true"
+                INSTALL_AUDITD="true" ;;
+            --debug)
+                LOG_LEVEL="DEBUG" ;;
+            --quiet)
+                LOG_LEVEL="WARNING" ;;
             *) echo "未知选项: $1"; usage; exit 1 ;;
         esac
         shift
@@ -1380,12 +1424,17 @@ allow_cloudflare_ips() {
         local count=0
         while IFS= read -r ip; do
             if [ -n "$ip" ] && [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-                iptables -A INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT
-                iptables -A INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT
-                ((count++))
+                # 检查规则是否已存在，避免重复添加
+                if ! sudo iptables -C INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT 2>/dev/null; then
+                    sudo iptables -A INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT
+                    ((count++))
+                fi
+                if ! sudo iptables -C INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT 2>/dev/null; then
+                    sudo iptables -A INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT
+                fi
             fi
         done < "$cf_ips_v4"
-        log_message "INFO" "已添加 $count 个Cloudflare IPv4地址"
+        log_message "INFO" "已处理 $count 个Cloudflare IPv4地址（跳过已存在的规则）"
         rm -f "$cf_ips_v4"
     else
         log_message "WARNING" "无法获取Cloudflare IPv4地址列表"
@@ -1397,16 +1446,63 @@ allow_cloudflare_ips() {
             local count6=0
             while IFS= read -r ip; do
                 if [ -n "$ip" ] && [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$ ]]; then
-                    ip6tables -A INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT
-                    ip6tables -A INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT
-                    ((count6++))
+                    # 检查IPv6规则是否已存在
+                    if ! sudo ip6tables -C INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT 2>/dev/null; then
+                        sudo ip6tables -A INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT
+                        ((count6++))
+                    fi
+                    if ! sudo ip6tables -C INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT 2>/dev/null; then
+                        sudo ip6tables -A INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT
+                    fi
                 fi
             done < "$cf_ips_v6"
-            log_message "INFO" "已添加 $count6 个Cloudflare IPv6地址"
+            log_message "INFO" "已处理 $count6 个Cloudflare IPv6地址（跳过已存在的规则）"
             rm -f "$cf_ips_v6"
         else
             log_message "WARNING" "无法获取Cloudflare IPv6地址列表"
         fi
+    fi
+}
+
+# 清理重复的防火墙规则
+clean_duplicate_firewall_rules() {
+    log_message "INFO" "检查并清理重复的防火墙规则..."
+    
+    # 检查是否有重复的80/443端口规则
+    local dup_443=$(sudo iptables -L INPUT -n | grep "tcp dpt:443.*ACCEPT" | wc -l)
+    local dup_80=$(sudo iptables -L INPUT -n | grep "tcp dpt:80.*ACCEPT" | wc -l)
+    local dup_drop_443=$(sudo iptables -L INPUT -n | grep "tcp dpt:443.*DROP" | wc -l)
+    local dup_drop_80=$(sudo iptables -L INPUT -n | grep "tcp dpt:80.*DROP" | wc -l)
+    
+    if [ "$dup_443" -gt 14 ] || [ "$dup_80" -gt 14 ] || [ "$dup_drop_443" -gt 1 ] || [ "$dup_drop_80" -gt 1 ]; then
+        log_message "WARNING" "检测到重复的防火墙规则"
+        log_message "INFO" "  - 443端口ACCEPT: $dup_443个, DROP: $dup_drop_443个"
+        log_message "INFO" "  - 80端口ACCEPT: $dup_80个, DROP: $dup_drop_80个"
+        log_message "INFO" "开始清理重复规则..."
+        
+        local deleted_rules=0
+        
+        # 删除所有80/443端口的ACCEPT规则
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:80.*ACCEPT" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do 
+            ((deleted_rules++))
+        done
+        
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:443.*ACCEPT" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do 
+            ((deleted_rules++))
+        done
+        
+        # 删除重复的DROP规则
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:80.*DROP" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do 
+            ((deleted_rules++))
+        done
+        
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:443.*DROP" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do 
+            ((deleted_rules++))
+        done
+        
+        log_message "INFO" "重复规则清理完成，共删除 $deleted_rules 条规则"
+    else
+        log_message "DEBUG" "防火墙规则正常（443: ${dup_443}个ACCEPT/${dup_drop_443}个DROP, 80: ${dup_80}个ACCEPT/${dup_drop_80}个DROP）"
     fi
 }
 
@@ -1420,6 +1516,9 @@ configure_advanced_firewall() {
         return 1
     fi
     
+    # 先清理重复规则
+    clean_duplicate_firewall_rules
+    
     # 获取SSH端口
     local ssh_port="${SSH_PORT:-22}"
     if [ -z "$SSH_PORT" ]; then
@@ -1430,8 +1529,11 @@ configure_advanced_firewall() {
     if [ "$ENABLE_SSH_WHITELIST" = "true" ] && [ -n "$SSH_WHITELIST_IPS" ]; then
         log_message "INFO" "配置SSH白名单..."
         
-        # 首先删除现有的SSH规则（如果有）
-        sudo iptables -D INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+        # 完全清理SSH端口的所有规则（包括带IP的规则）
+        log_message "INFO" "清理现有SSH端口 $ssh_port 的所有规则..."
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:$ssh_port" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do 
+            log_message "DEBUG" "删除SSH端口规则"
+        done
         
         # 为每个白名单IP添加规则
         IFS=',' read -ra IPS <<< "$SSH_WHITELIST_IPS"
@@ -1440,61 +1542,102 @@ configure_advanced_firewall() {
             ip=$(echo "$ip" | xargs)
             # 验证IP格式
             if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(/[0-9]{1,2})?$ ]]; then
-                sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
-                log_message "INFO" "允许IP $ip 访问SSH端口 $ssh_port"
+                # 检查规则是否已存在
+                if ! sudo iptables -C INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null; then
+                    sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
+                    log_message "INFO" "允许IP $ip 访问SSH端口 $ssh_port"
+                else
+                    log_message "DEBUG" "SSH规则已存在，跳过: $ip"
+                fi
             else
                 log_message "WARNING" "无效的IP地址格式: $ip"
             fi
         done
         
-        # 拒绝其他所有SSH连接
-        sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
-        log_message "INFO" "已拒绝白名单外的所有SSH连接"
+        # 检查并添加DROP规则（避免重复）
+        if ! sudo iptables -C INPUT -p tcp --dport "$ssh_port" -j DROP 2>/dev/null; then
+            sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
+            log_message "INFO" "已拒绝白名单外的所有SSH连接"
+        else
+            log_message "DEBUG" "SSH DROP规则已存在"
+        fi
     fi
     
     # 2. 禁用ICMP（禁止ping）
     if [ "$DISABLE_ICMP" = "true" ]; then
         log_message "INFO" "禁用ICMP（禁止ping）..."
+        
         # 删除可能存在的允许规则
-        sudo iptables -D INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        # 添加拒绝规则
-        sudo iptables -A INPUT -p icmp -j DROP
-        sudo iptables -A OUTPUT -p icmp -j DROP
-        log_message "INFO" "已禁用ICMP"
+        while sudo iptables -D INPUT -p icmp -j ACCEPT 2>/dev/null; do 
+            log_message "DEBUG" "删除ICMP ACCEPT规则"
+        done
+        
+        # 检查并添加INPUT拒绝规则（避免重复）
+        if ! sudo iptables -C INPUT -p icmp -j DROP 2>/dev/null; then
+            sudo iptables -A INPUT -p icmp -j DROP
+            log_message "INFO" "已添加ICMP INPUT DROP规则"
+        else
+            log_message "DEBUG" "ICMP INPUT DROP规则已存在"
+        fi
+        
+        # 检查并添加OUTPUT拒绝规则（避免重复）
+        if ! sudo iptables -C OUTPUT -p icmp -j DROP 2>/dev/null; then
+            sudo iptables -A OUTPUT -p icmp -j DROP
+            log_message "INFO" "已添加ICMP OUTPUT DROP规则"
+        else
+            log_message "DEBUG" "ICMP OUTPUT DROP规则已存在"
+        fi
+        
+        log_message "INFO" "ICMP已禁用"
     fi
     
     # 3. 阻止80和443端口的公网访问
     if [ "$BLOCK_WEB_PORTS" = "true" ]; then
         log_message "INFO" "阻止80和443端口的公网访问..."
         
-        # 清理可能存在的旧规则
-        while iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
-        while iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
-        while iptables -D INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null; do :; done
-        while iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null; do :; done
+        # 完全清理所有80/443端口相关的规则（包括带IP的规则）
+        log_message "INFO" "清理现有的80/443端口规则..."
+        while sudo iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+        while sudo iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+        
+        # 删除所有80/443端口的ACCEPT规则（包括带源IP的）
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:80.*ACCEPT" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do :; done
+        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:443.*ACCEPT" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do :; done
         
         # 允许本地访问
-        iptables -A INPUT -p tcp --dport 80 -s 127.0.0.1 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 443 -s 127.0.0.1 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 80 -s 127.0.0.1 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 443 -s 127.0.0.1 -j ACCEPT
         
         # 允许内网访问
-        iptables -A INPUT -p tcp --dport 80 -s 10.0.0.0/8 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 443 -s 10.0.0.0/8 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 80 -s 172.16.0.0/12 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 443 -s 172.16.0.0/12 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 80 -s 192.168.0.0/16 -j ACCEPT
-        iptables -A INPUT -p tcp --dport 443 -s 192.168.0.0/16 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 80 -s 10.0.0.0/8 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 443 -s 10.0.0.0/8 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 80 -s 172.16.0.0/12 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 443 -s 172.16.0.0/12 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 80 -s 192.168.0.0/16 -j ACCEPT
+        sudo iptables -A INPUT -p tcp --dport 443 -s 192.168.0.0/16 -j ACCEPT
         
-        # 检查是否需要允许Cloudflare IP（通过环境变量或参数控制）
-        if [ "${ALLOW_CLOUDFLARE:-false}" = "true" ]; then
-            log_message "INFO" "允许Cloudflare IP访问443端口..."
+        # 检查是否需要允许Cloudflare IP
+        if [ "$ALLOW_CLOUDFLARE" = "true" ]; then
+            log_message "INFO" "允许Cloudflare IP访问80和443端口..."
             allow_cloudflare_ips
         fi
         
-        # 拒绝其他所有访问
-        iptables -A INPUT -p tcp --dport 80 -j DROP
-        iptables -A INPUT -p tcp --dport 443 -j DROP
-        log_message "INFO" "已阻止80和443端口的公网访问"
+        # 检查并添加最终的DROP规则（避免重复）
+        if ! sudo iptables -C INPUT -p tcp --dport 80 -j DROP 2>/dev/null; then
+            sudo iptables -A INPUT -p tcp --dport 80 -j DROP
+            log_message "INFO" "已添加80端口DROP规则"
+        else
+            log_message "DEBUG" "80端口DROP规则已存在"
+        fi
+        
+        if ! sudo iptables -C INPUT -p tcp --dport 443 -j DROP 2>/dev/null; then
+            sudo iptables -A INPUT -p tcp --dport 443 -j DROP
+            log_message "INFO" "已添加443端口DROP规则"
+        else
+            log_message "DEBUG" "443端口DROP规则已存在"
+        fi
+        
+        log_message "INFO" "Web端口访问控制配置完成"
     fi
     
     # 保存iptables规则
@@ -1571,28 +1714,48 @@ harden_system() {
     # 设置SSH连接超时
     if ! grep -q "ClientAliveInterval" "$SSH_CONFIG"; then
         echo "ClientAliveInterval 300" | sudo tee -a "$SSH_CONFIG"
+        log_message "INFO" "已添加SSH连接超时配置"
+    else
+        log_message "DEBUG" "SSH连接超时配置已存在"
+    fi
+    
+    if ! grep -q "ClientAliveCountMax" "$SSH_CONFIG"; then
         echo "ClientAliveCountMax 2" | sudo tee -a "$SSH_CONFIG"
+        log_message "INFO" "已添加SSH连接计数配置"
+    else
+        log_message "DEBUG" "SSH连接计数配置已存在"
     fi
     
     # 限制SSH版本
     if ! grep -q "Protocol" "$SSH_CONFIG"; then
         echo "Protocol 2" | sudo tee -a "$SSH_CONFIG"
+        log_message "INFO" "已添加SSH协议版本限制"
+    else
+        log_message "DEBUG" "SSH协议版本限制已存在"
     fi
     
     # 禁用主机名查找（提高性能）
     if ! grep -q "UseDNS" "$SSH_CONFIG"; then
         echo "UseDNS no" | sudo tee -a "$SSH_CONFIG"
+        log_message "INFO" "已禁用SSH主机名查找"
+    else
+        log_message "DEBUG" "SSH主机名查找禁用配置已存在"
     fi
     
     # 3. 设置更安全的系统限制
     if [ -f /etc/security/limits.conf ]; then
         log_message "INFO" "配置系统资源限制..."
         
-        # 备份原始文件
-        sudo cp /etc/security/limits.conf /etc/security/limits.conf.bak
-        
-        # 添加安全限制
-        cat << EOF | sudo tee -a /etc/security/limits.conf > /dev/null
+        # 检查是否已经配置过
+        if ! grep -q "# 添加系统安全限制" /etc/security/limits.conf; then
+            # 备份原始文件
+            if [ ! -f /etc/security/limits.conf.bak ]; then
+                sudo cp /etc/security/limits.conf /etc/security/limits.conf.bak
+                log_message "INFO" "已备份原始limits.conf文件"
+            fi
+            
+            # 添加安全限制
+            cat << EOF | sudo tee -a /etc/security/limits.conf > /dev/null
 # 添加系统安全限制
 * soft core 0
 * hard core 0
@@ -1601,15 +1764,20 @@ harden_system() {
 * soft nofile 4096
 * hard nofile 10240
 EOF
+            log_message "INFO" "已添加系统安全限制配置"
+        else
+            log_message "DEBUG" "系统安全限制配置已存在"
+        fi
     fi
     
     # 4. 配置系统日志审计
     log_message "INFO" "配置系统日志审计..."
     
-    # 用户可以选择auditd（安全审计）或etckeeper（配置管理）
-    # 默认安装auditd用于安全加固
+    # 现在支持同时安装auditd和etckeeper，或者只选择其中一个
+    local audit_tools_installed=0
+    
+    # 安装etckeeper用于配置文件版本控制
     if [ "${INSTALL_ETCKEEPER:-false}" = "true" ]; then
-        # 安装etckeeper用于配置文件版本控制
         log_message "INFO" "安装etckeeper用于配置文件版本控制..."
         if [ -f /etc/debian_version ]; then
             wait_for_apt || return 1
@@ -1631,8 +1799,11 @@ EOF
         else
             log_message "INFO" "etckeeper已经初始化"
         fi
-    else
-        # 默认安装auditd用于安全审计
+        audit_tools_installed=1
+    fi
+    
+    # 安装auditd用于系统安全审计
+    if [ "${INSTALL_AUDITD:-true}" = "true" ]; then
         log_message "INFO" "安装auditd用于系统安全审计..."
         if [ -f /etc/debian_version ]; then
             wait_for_apt || return 1
@@ -1647,6 +1818,7 @@ EOF
         
         # 如果auditd已安装，配置基本审计规则
         if command -v auditd &> /dev/null; then
+            log_message "INFO" "配置auditd审计规则..."
             # 创建基本的审计规则
             cat << EOF | sudo tee /etc/audit/rules.d/audit.rules > /dev/null
 # 删除所有现有规则
@@ -1679,8 +1851,15 @@ EOF
             # 重启auditd服务
             sudo systemctl restart auditd
             sudo systemctl enable auditd
-            log_message "INFO" "审计服务已配置并启用"
+            log_message "INFO" "auditd服务已配置并启用"
         fi
+        audit_tools_installed=1
+    fi
+    
+    # 检查是否至少安装了一个审计工具
+    if [ $audit_tools_installed -eq 0 ]; then
+        log_message "WARNING" "未安装任何审计工具（auditd或etckeeper），这可能降低系统的安全可见性"
+        log_message "INFO" "可以使用 --audit_both 参数同时安装两个工具，或使用 --install_etckeeper 安装配置文件版本控制"
     fi
     
     log_message "INFO" "系统安全加固完成"
@@ -2197,6 +2376,19 @@ main() {
     fi
     log_message "INFO" "BBR 状态: $(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo '未启用')"
     log_message "INFO" "IP 转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo '未启用')"
+    
+    # 显示审计工具状态
+    local audit_status=""
+    if [ "${INSTALL_AUDITD:-true}" = "true" ] && [ "${INSTALL_ETCKEEPER:-false}" = "true" ]; then
+        audit_status="auditd + etckeeper（双重保护）"
+    elif [ "${INSTALL_AUDITD:-true}" = "true" ]; then
+        audit_status="auditd（安全审计）"
+    elif [ "${INSTALL_ETCKEEPER:-false}" = "true" ]; then
+        audit_status="etckeeper（配置版本控制）"
+    else
+        audit_status="无（未安装审计工具）"
+    fi
+    log_message "INFO" "审计工具: $audit_status"
     if [ -n "$SSH_KEY" ]; then
         log_message "INFO" "请记住保存您的 SSH 密钥以便远程登录"
     else
@@ -2285,6 +2477,8 @@ show_configuration_summary() {
     echo "  - fail2ban: $(systemctl is-active fail2ban 2>/dev/null || echo '未运行')"
     echo "  - SELinux: $(command -v getenforce &> /dev/null && getenforce || echo '未启用')"
     echo "  - 根用户登录: 已禁用"
+    echo "  - auditd: $(systemctl is-active auditd 2>/dev/null || echo '未运行')"
+    echo "  - etckeeper: $([ -d /etc/.git ] && echo '已初始化' || echo '未初始化')"
     if [ "$CREATE_DEVOPS_USER" = "true" ]; then
         echo "  - 管理员用户: $SUDO_USERNAME (已创建)"
     fi
