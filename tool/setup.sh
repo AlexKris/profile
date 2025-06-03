@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="1.4.0"
+readonly SCRIPT_VERSION="1.6.0"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -45,6 +45,9 @@ ALLOW_CLOUDFLARE="false"
 # 新增：审计方式选择
 INSTALL_ETCKEEPER="false"
 INSTALL_AUDITD="true"  # 默认安装auditd
+# 新增：Docker相关
+INSTALL_DOCKER="false"
+SYNC_DOCKER_FIREWALL="true"  # 默认同步防火墙规则到DOCKER-USER链
 # 新增：日志级别控制
 LOG_LEVEL="INFO"  # DEBUG, INFO, WARNING, ERROR
 
@@ -229,6 +232,8 @@ usage() {
     echo "  --install_etckeeper       安装etckeeper用于配置文件版本控制（保留auditd）"
     echo "  --disable_auditd          不安装auditd安全审计工具"
     echo "  --audit_both              同时安装auditd和etckeeper（推荐用于生产环境）"
+    echo "  --install_docker          安装Docker（使用官方安装脚本）"
+    echo "  --no_docker_firewall      不同步防火墙规则到DOCKER-USER链"
     echo "  --debug                   启用调试模式（显示详细日志）"
     echo "  --quiet                   静默模式（只显示警告和错误）"
     echo ""
@@ -256,6 +261,8 @@ usage() {
     echo "  $0 --install_etckeeper  # 安装etckeeper + auditd（默认组合）"
     echo "  $0 --audit_both  # 明确同时安装auditd和etckeeper"
     echo "  $0 --disable_auditd --install_etckeeper  # 只用etckeeper，不用auditd"
+    echo "  $0 --install_docker --block_web_ports --allow_cloudflare  # 安装Docker并配置防火墙"
+    echo "  $0 --install_docker --no_docker_firewall  # 安装Docker但不同步防火墙规则"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -385,6 +392,10 @@ parse_args() {
             --audit_both)
                 INSTALL_ETCKEEPER="true"
                 INSTALL_AUDITD="true" ;;
+            --install_docker)
+                INSTALL_DOCKER="true" ;;
+            --no_docker_firewall)
+                SYNC_DOCKER_FIREWALL="false" ;;
             --debug)
                 LOG_LEVEL="DEBUG" ;;
             --quiet)
@@ -1464,6 +1475,81 @@ allow_cloudflare_ips() {
     fi
 }
 
+# 配置Docker防火墙规则（DOCKER-USER链）
+configure_docker_firewall() {
+    log_message "INFO" "配置Docker防火墙规则（DOCKER-USER链）..."
+    
+    # 检查DOCKER-USER链是否存在
+    if ! sudo iptables -L DOCKER-USER -n &>/dev/null; then
+        log_message "INFO" "创建DOCKER-USER链..."
+        sudo iptables -N DOCKER-USER
+        sudo iptables -I FORWARD -j DOCKER-USER
+    fi
+    
+    # 清理DOCKER-USER链中的80/443相关规则
+    log_message "INFO" "清理DOCKER-USER链中的旧规则..."
+    while sudo iptables -L DOCKER-USER -n --line-numbers | grep -E "dpt:(80|443)" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D DOCKER-USER 2>/dev/null; do 
+        :
+    done
+    
+    # 允许本地访问
+    if ! sudo iptables -C DOCKER-USER -i lo -j RETURN 2>/dev/null; then
+        sudo iptables -I DOCKER-USER -i lo -j RETURN
+    fi
+    if ! sudo iptables -C DOCKER-USER -s 127.0.0.1 -j RETURN 2>/dev/null; then
+        sudo iptables -I DOCKER-USER -s 127.0.0.1 -j RETURN
+    fi
+    
+    # 允许内网访问
+    for subnet in "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"; do
+        if ! sudo iptables -C DOCKER-USER -s "$subnet" -j RETURN 2>/dev/null; then
+            sudo iptables -A DOCKER-USER -s "$subnet" -j RETURN
+        fi
+    done
+    
+    # 如果允许Cloudflare，添加Cloudflare IP规则
+    if [ "$ALLOW_CLOUDFLARE" = "true" ]; then
+        log_message "INFO" "在DOCKER-USER链中添加Cloudflare IP白名单..."
+        
+        # 获取Cloudflare IP
+        local cf_ips_v4=$(curl -s https://www.cloudflare.com/ips-v4)
+        local cf_ips_v6=$(curl -s https://www.cloudflare.com/ips-v6)
+        
+        # 添加IPv4规则
+        while IFS= read -r ip; do
+            if [[ -n "$ip" && "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+                sudo iptables -A DOCKER-USER -s "$ip" -p tcp --dport 80 -j RETURN
+                sudo iptables -A DOCKER-USER -s "$ip" -p tcp --dport 443 -j RETURN
+            fi
+        done <<< "$cf_ips_v4"
+        
+        # 添加IPv6规则
+        if command -v ip6tables &>/dev/null; then
+            while IFS= read -r ip; do
+                if [[ -n "$ip" && "$ip" =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$ ]]; then
+                    sudo ip6tables -A DOCKER-USER -s "$ip" -p tcp --dport 80 -j RETURN
+                    sudo ip6tables -A DOCKER-USER -s "$ip" -p tcp --dport 443 -j RETURN
+                fi
+            done <<< "$cf_ips_v6"
+        fi
+    fi
+    
+    # 拒绝其他所有对80/443的访问
+    sudo iptables -A DOCKER-USER -p tcp --dport 80 -j DROP
+    sudo iptables -A DOCKER-USER -p tcp --dport 443 -j DROP
+    
+    # 允许其他所有流量（不影响其他端口）
+    if ! sudo iptables -C DOCKER-USER -j RETURN 2>/dev/null; then
+        sudo iptables -A DOCKER-USER -j RETURN
+    fi
+    
+    log_message "INFO" "Docker防火墙规则配置完成"
+    log_message "DEBUG" "DOCKER-USER链规则："
+    sudo iptables -L DOCKER-USER -n -v --line-numbers | while read line; do
+        log_message "DEBUG" "  $line"
+    done
+}
+
 # 清理重复的防火墙规则
 clean_duplicate_firewall_rules() {
     log_message "INFO" "检查并清理重复的防火墙规则..."
@@ -1595,6 +1681,13 @@ configure_advanced_firewall() {
     if [ "$BLOCK_WEB_PORTS" = "true" ]; then
         log_message "INFO" "阻止80和443端口的公网访问..."
         
+        # 检查是否有Docker环境
+        local has_docker=false
+        if command -v docker &> /dev/null && systemctl is-active docker &> /dev/null; then
+            has_docker=true
+            log_message "INFO" "检测到Docker环境，将配置DOCKER-USER链规则"
+        fi
+        
         # 完全清理所有80/443端口相关的规则（包括带IP的规则）
         log_message "INFO" "清理现有的80/443端口规则..."
         while sudo iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
@@ -1635,6 +1728,14 @@ configure_advanced_firewall() {
             log_message "INFO" "已添加443端口DROP规则"
         else
             log_message "DEBUG" "443端口DROP规则已存在"
+        fi
+        
+        # 如果有Docker且启用了同步，配置DOCKER-USER链
+        if [ "$has_docker" = "true" ] && [ "$SYNC_DOCKER_FIREWALL" = "true" ]; then
+            configure_docker_firewall
+        elif [ "$has_docker" = "true" ] && [ "$SYNC_DOCKER_FIREWALL" = "false" ]; then
+            log_message "INFO" "检测到Docker但未启用防火墙同步，跳过DOCKER-USER链配置"
+            log_message "WARNING" "注意：Docker容器的端口可能绕过iptables规则，建议启用防火墙同步"
         fi
         
         log_message "INFO" "Web端口访问控制配置完成"
@@ -1937,6 +2038,123 @@ check_sshd_config_d() {
     else
         log_message "INFO" "未检测到 $CONFIG_DIR 目录，跳过模块化配置检查"
     fi
+}
+
+# 安装Docker
+install_docker() {
+    log_message "INFO" "检查Docker安装状态..."
+    
+    # 检查Docker是否已安装
+    if command -v docker &> /dev/null; then
+        local docker_version=$(docker --version | awk '{print $3}' | sed 's/,$//')
+        log_message "INFO" "Docker已安装，版本: $docker_version"
+        
+        # 确保Docker服务运行
+        if ! systemctl is-active docker &> /dev/null; then
+            log_message "INFO" "启动Docker服务..."
+            sudo systemctl start docker
+            sudo systemctl enable docker
+        fi
+        
+        return 0
+    fi
+    
+    log_message "INFO" "开始安装Docker..."
+    
+    # 检查网络连接
+    if ! curl -s --connect-timeout 5 https://get.docker.com > /dev/null; then
+        log_message "ERROR" "无法访问Docker安装脚本，请检查网络连接"
+        return 1
+    fi
+    
+    # 使用官方脚本安装Docker
+    log_message "INFO" "下载并执行Docker官方安装脚本..."
+    if curl -fsSL https://get.docker.com | sudo bash; then
+        log_message "INFO" "Docker安装成功"
+        
+        # 启动Docker服务
+        log_message "INFO" "启动Docker服务..."
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        # 验证安装
+        if docker --version &> /dev/null; then
+            local docker_version=$(docker --version | awk '{print $3}' | sed 's/,$//')
+            log_message "INFO" "Docker版本: $docker_version"
+            
+            # 运行测试容器
+            log_message "INFO" "运行Docker测试容器..."
+            if sudo docker run --rm hello-world &> /dev/null; then
+                log_message "INFO" "Docker测试成功"
+            else
+                log_message "WARNING" "Docker测试容器运行失败，但Docker已安装"
+            fi
+        else
+            log_message "ERROR" "Docker安装似乎失败，无法获取版本信息"
+            return 1
+        fi
+        
+        # 添加当前用户到docker组（如果不是root）
+        if [ "$(id -u)" != "0" ] && [ -n "${SUDO_USER:-}" ]; then
+            log_message "INFO" "将用户 $SUDO_USER 添加到docker组..."
+            sudo usermod -aG docker "$SUDO_USER"
+            log_message "INFO" "请注意：需要重新登录才能使docker组权限生效"
+        fi
+        
+        # 配置Docker镜像加速（针对中国用户）
+        if [ "$SERVER_REGION" = "cn" ] || [ "$final_region" = "cn" ] 2>/dev/null; then
+            log_message "INFO" "检测到中国地区，配置Docker镜像加速..."
+            configure_docker_mirror
+        fi
+        
+    else
+        log_message "ERROR" "Docker安装失败"
+        return 1
+    fi
+    
+    return 0
+}
+
+# 配置Docker镜像加速
+configure_docker_mirror() {
+    local docker_config="/etc/docker/daemon.json"
+    local temp_config="/tmp/docker-daemon-temp.json"
+    
+    log_message "INFO" "配置Docker镜像加速..."
+    
+    # 创建docker目录
+    sudo mkdir -p /etc/docker
+    
+    # 如果配置文件已存在，备份它
+    if [ -f "$docker_config" ]; then
+        sudo cp "$docker_config" "${docker_config}.bak.$(date +%Y%m%d%H%M%S)"
+    fi
+    
+    # 创建新的配置
+    cat > "$temp_config" << 'EOF'
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://hub-mirror.c.163.com"
+  ],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+    
+    # 移动配置文件
+    sudo mv "$temp_config" "$docker_config"
+    
+    # 重新加载Docker配置
+    log_message "INFO" "重新加载Docker配置..."
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
+    
+    log_message "INFO" "Docker镜像加速配置完成"
 }
 
 # 为非标准SSH端口配置SELinux
@@ -2349,6 +2567,11 @@ main() {
     configure_bbr || log_message "WARNING" "配置BBR失败，但继续执行"
     configure_ip_forward || log_message "WARNING" "配置IP转发失败，但继续执行"
     
+    # 安装Docker（如果需要）
+    if [ "$INSTALL_DOCKER" = "true" ]; then
+        install_docker || log_message "WARNING" "Docker安装失败，但继续执行"
+    fi
+    
     # 系统安全加固
     harden_system || log_message "WARNING" "系统安全加固失败，但继续执行"
     
@@ -2397,6 +2620,17 @@ main() {
     
     if [ "$CREATE_DEVOPS_USER" = "true" ]; then
         log_message "INFO" "已创建管理员用户 $SUDO_USERNAME，可使用SSH密钥登录"
+    fi
+    
+    # Docker相关提示
+    if command -v docker &> /dev/null; then
+        log_message "INFO" "Docker已安装，可以开始部署容器化应用"
+        if [ "$BLOCK_WEB_PORTS" = "true" ] && [ "$SYNC_DOCKER_FIREWALL" = "true" ]; then
+            log_message "INFO" "Docker防火墙规则已同步，容器端口访问受iptables控制"
+        elif [ "$BLOCK_WEB_PORTS" = "true" ] && [ "$SYNC_DOCKER_FIREWALL" = "false" ]; then
+            log_message "WARNING" "Docker防火墙规则未同步，容器端口可能绕过iptables限制"
+            log_message "INFO" "建议运行: bash tool/fix_docker_iptables.sh"
+        fi
     fi
     
     # 显示配置总结
@@ -2463,6 +2697,31 @@ show_configuration_summary() {
         FIREWALL_STATUS="iptables 规则已配置"
     fi
     echo "  - 防火墙: $FIREWALL_STATUS"
+    
+    # 检查Docker状态
+    if command -v docker &> /dev/null; then
+        local docker_version=$(docker --version 2>/dev/null | awk '{print $3}' | sed 's/,$//')
+        echo "容器化:"
+        echo "  - Docker: 已安装 (v$docker_version)"
+        if systemctl is-active docker &> /dev/null; then
+            echo "  - Docker服务: 运行中"
+            if sudo iptables -L DOCKER-USER -n &>/dev/null; then
+                local docker_rules=$(sudo iptables -L DOCKER-USER -n | grep -E "dpt:(80|443)" | wc -l)
+                if [ "$docker_rules" -gt 0 ]; then
+                    echo "  - Docker防火墙: DOCKER-USER链已配置 ($docker_rules 条规则)"
+                else
+                    echo "  - Docker防火墙: DOCKER-USER链存在但无Web端口规则"
+                fi
+            else
+                echo "  - Docker防火墙: 未配置DOCKER-USER链"
+            fi
+        else
+            echo "  - Docker服务: 未运行"
+        fi
+    else
+        echo "容器化:"
+        echo "  - Docker: 未安装"
+    fi
     if [ "$ENABLE_SSH_WHITELIST" = "true" ]; then
         echo "  - SSH白名单: 已启用 (允许: $SSH_WHITELIST_IPS)"
     fi
