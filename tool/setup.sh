@@ -1015,18 +1015,20 @@ disable_ssh_password_login() {
         
         # 处理模块化配置目录中的文件
         if [ -d "$SSH_CONFIG_DIR" ]; then
-            log_message "INFO" "检查并修改模块化配置目录中的文件..."
+            log_message "INFO" "处理模块化配置目录中的文件..."
             
-            # 检查是否存在50-cloud-init.conf文件
+            # 检查是否存在50-cloud-init.conf文件并处理冲突配置
             if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
-                log_message "INFO" "检测到cloud-init配置文件，正在修改..."
+                log_message "INFO" "检测到cloud-init配置文件，正在处理冲突配置..."
                 # 备份cloud-init配置
-                sudo cp "$SSH_CONFIG_DIR/50-cloud-init.conf" "$SSH_CONFIG_DIR/50-cloud-init.conf.bak"
+                if [ ! -f "$SSH_CONFIG_DIR/50-cloud-init.conf.bak" ]; then
+                    sudo cp "$SSH_CONFIG_DIR/50-cloud-init.conf" "$SSH_CONFIG_DIR/50-cloud-init.conf.bak"
+                fi
                 # 注释掉所有启用密码的配置
                 sudo sed -i 's/^\s*PasswordAuthentication\s\+yes/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
                 sudo sed -i 's/^\s*ChallengeResponseAuthentication\s\+yes/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
                 sudo sed -i 's/^\s*KbdInteractiveAuthentication\s\+yes/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
-                log_message "INFO" "已修改cloud-init配置文件，禁用密码登录"
+                log_message "INFO" "已注释cloud-init配置文件中的密码认证设置"
             fi
             
             # 如果存在之前创建的高优先级配置文件，则删除它们
@@ -1037,24 +1039,8 @@ disable_ssh_password_login() {
                 fi
             done
             
-            # 创建统一的SSH安全配置文件（无数字前缀）
-            log_message "INFO" "创建SSH安全配置文件..."
-            sudo tee "$SSH_CONFIG_DIR/ssh-security.conf" > /dev/null << EOF
-# SSH安全加固配置 - 由setup.sh创建
-# 此配置会覆盖cloud-init的设置
-
-# 禁用密码登录
-PasswordAuthentication no
-
-# 禁用其他不安全的认证方式
-ChallengeResponseAuthentication no
-KbdInteractiveAuthentication no
-PermitEmptyPasswords no
-
-# 启用公钥认证
-PubkeyAuthentication yes
-EOF
-            log_message "INFO" "已创建SSH安全配置文件: $SSH_CONFIG_DIR/ssh-security.conf"
+            # 使用统一的配置创建函数
+            create_or_update_ssh_security_conf
             
             # 确保sshd_config包含Include指令
             if ! grep -q "Include $SSH_CONFIG_DIR/\*.conf" "$SSH_CONFIG"; then
@@ -1109,9 +1095,9 @@ change_ssh_port() {
     CURRENT_PORT=$(grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" | awk '{print $2}' | head -1)
     
     if [ "$CURRENT_PORT" = "$SSH_PORT" ]; then
-        log_message "INFO" "SSH 端口已经是 $SSH_PORT，无需修改"
+        log_message "INFO" "SSH 端口已经是 $SSH_PORT，无需修改主配置文件"
     else
-        # 如果存在 'Port' 行，将其替换
+        # 修改主配置文件中的端口
         if grep -E "^\s*Port\s+[0-9]+" "$SSH_CONFIG" > /dev/null; then
             sudo sed -i "s/^\s*Port\s\+[0-9]\+/Port $SSH_PORT/" "$SSH_CONFIG"
         elif grep -E "^\s*#\s*Port" "$SSH_CONFIG" > /dev/null; then
@@ -1121,65 +1107,100 @@ change_ssh_port() {
             # 如果配置文件中没有 'Port' 这一行，添加到文件末尾
             echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG"
         fi
+        log_message "INFO" "已更新主配置文件中的SSH端口为 $SSH_PORT"
+    fi
+    
+    # 处理模块化配置中的端口设置（无论主配置是否需要修改，都需要确保模块化配置正确）
+    if [ -d "$SSH_CONFIG_DIR" ]; then
+        log_message "INFO" "处理模块化配置中的端口设置..."
         
-        # 处理模块化配置中的端口设置
-        if [ -d "$SSH_CONFIG_DIR" ]; then
-            log_message "INFO" "检查模块化配置中的端口设置..."
-            
-            # 将端口设置添加到统一的安全配置文件中
-            if [ -f "$SSH_CONFIG_DIR/ssh-security.conf" ]; then
-                # 如果文件已存在，检查并添加端口配置
-                if ! grep -q "^Port $SSH_PORT" "$SSH_CONFIG_DIR/ssh-security.conf"; then
-                    log_message "INFO" "向SSH安全配置文件添加端口设置..."
-                    sudo sed -i "1s/^/# SSH端口配置\nPort $SSH_PORT\n\n/" "$SSH_CONFIG_DIR/ssh-security.conf"
-                fi
-            else
-                # 如果文件不存在，创建新文件
-                log_message "INFO" "创建SSH安全配置文件，包含端口设置..."
-                sudo tee "$SSH_CONFIG_DIR/ssh-security.conf" > /dev/null << EOF
+        # 如果存在cloud-init配置，注释掉其中的端口设置以避免冲突
+        if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
+            log_message "INFO" "检查cloud-init配置中的端口设置..."
+            if grep -qE "^\s*Port\s+[0-9]+" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
+                # 如果cloud-init配置中有端口设置，注释掉它
+                sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+                log_message "INFO" "已注释cloud-init配置中的端口设置以避免冲突"
+            fi
+        fi
+        
+        # 创建或更新统一的SSH安全配置文件
+        create_or_update_ssh_security_conf
+    fi
+    
+    # 配置防火墙规则
+    configure_firewall_for_ssh_port
+    
+    log_message "INFO" "SSH 端口配置完成: $SSH_PORT"
+}
+
+# 创建或更新SSH安全配置文件
+create_or_update_ssh_security_conf() {
+    local security_conf="$SSH_CONFIG_DIR/ssh-security.conf"
+    local temp_conf="/tmp/ssh-security-temp.conf"
+    
+    # 创建临时配置文件
+    cat > "$temp_conf" << EOF
 # SSH安全配置 - 由setup.sh创建
+# 此配置会覆盖cloud-init等其他配置
 
-# SSH端口配置
-Port $SSH_PORT
-
-# 启用公钥认证
-PubkeyAuthentication yes
 EOF
-            fi
-            
-            # 如果存在cloud-init配置，也需要处理
-            if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
-                log_message "INFO" "检查cloud-init配置中的端口设置..."
-                if grep -q "^Port" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
-                    # 如果cloud-init配置中有端口设置，注释掉它
-                    sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
-                    log_message "INFO" "已注释cloud-init配置中的端口设置"
-                fi
+    
+    # 添加端口配置（如果指定了端口）
+    if [ -n "$SSH_PORT" ]; then
+        echo "# SSH端口配置" >> "$temp_conf"
+        echo "Port $SSH_PORT" >> "$temp_conf"
+        echo "" >> "$temp_conf"
+    fi
+    
+    # 添加认证相关配置
+    echo "# 认证配置" >> "$temp_conf"
+    echo "PubkeyAuthentication yes" >> "$temp_conf"
+    
+    # 如果需要禁用密码登录，添加相关配置
+    if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
+        cat >> "$temp_conf" << EOF
+
+# 禁用密码登录
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+EOF
+    fi
+    
+    # 将临时文件移动到最终位置
+    sudo mv "$temp_conf" "$security_conf"
+    sudo chmod 644 "$security_conf"
+    
+    log_message "INFO" "已创建/更新SSH安全配置文件: $security_conf"
+}
+
+# 配置防火墙规则允许SSH端口
+configure_firewall_for_ssh_port() {
+    if [ -z "$SSH_PORT" ]; then
+        return 0
+    fi
+    
+    # 如果启用了防火墙，添加规则允许新端口
+    if command -v ufw &> /dev/null && sudo ufw status | grep -q "active"; then
+        log_message "INFO" "检测到 UFW 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
+        sudo ufw allow "$SSH_PORT/tcp" comment 'SSH Port'
+    elif command -v firewall-cmd &> /dev/null && sudo firewall-cmd --state | grep -q "running"; then
+        log_message "INFO" "检测到 firewalld 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
+        sudo firewall-cmd --permanent --add-port="$SSH_PORT/tcp"
+        sudo firewall-cmd --reload
+    elif command -v iptables &> /dev/null; then
+        log_message "INFO" "使用 iptables 添加规则允许 SSH 端口 $SSH_PORT"
+        sudo iptables -A INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT
+        # 尝试保存 iptables 规则
+        if command -v iptables-save &> /dev/null; then
+            if [ -f /etc/debian_version ]; then
+                sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
+            elif [ -f /etc/redhat-release ]; then
+                sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
             fi
         fi
-        
-        # 如果启用了防火墙，添加规则允许新端口
-        if command -v ufw &> /dev/null && sudo ufw status | grep -q "active"; then
-            log_message "INFO" "检测到 UFW 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
-            sudo ufw allow "$SSH_PORT/tcp" comment 'SSH Port'
-        elif command -v firewall-cmd &> /dev/null && sudo firewall-cmd --state | grep -q "running"; then
-            log_message "INFO" "检测到 firewalld 防火墙，添加规则允许 SSH 端口 $SSH_PORT"
-            sudo firewall-cmd --permanent --add-port="$SSH_PORT/tcp"
-            sudo firewall-cmd --reload
-        elif command -v iptables &> /dev/null; then
-            log_message "INFO" "使用 iptables 添加规则允许 SSH 端口 $SSH_PORT"
-            sudo iptables -A INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT
-            # 尝试保存 iptables 规则
-            if command -v iptables-save &> /dev/null; then
-                if [ -f /etc/debian_version ]; then
-                    sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
-                elif [ -f /etc/redhat-release ]; then
-                    sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
-                fi
-            fi
-        fi
-        
-        log_message "INFO" "SSH 端口已修改为 $SSH_PORT"
     fi
 }
 
@@ -1348,10 +1369,10 @@ check_sshd_config_d() {
                         sudo sed -i 's/^\s*PermitEmptyPasswords\s\+yes/PermitEmptyPasswords no/' "$conf_file"
                     fi
                     
-                    # 处理端口设置
-                    if [ "$SSH_PORT" != "22" ] && grep -qE "^\s*Port\s+[0-9]+" "$conf_file"; then
-                        log_message "INFO" "正在更新 $conf_file 中的端口设置..."
-                        sudo sed -i "s/^\s*Port\s\+[0-9]\+/Port $SSH_PORT/" "$conf_file"
+                    # 处理端口设置 - 注释掉冲突的端口配置，避免与统一配置冲突
+                    if grep -qE "^\s*Port\s+[0-9]+" "$conf_file"; then
+                        log_message "INFO" "正在注释 $conf_file 中的端口设置以避免配置冲突..."
+                        sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$conf_file"
                     fi
                 fi
             fi
@@ -1743,11 +1764,11 @@ main() {
         }
     fi
     
-    # 修改SSH端口
-    change_ssh_port || log_message "WARNING" "修改SSH端口失败，但继续执行"
-    
-    # 检查并处理sshd_config.d目录中的配置
+    # 检查并处理sshd_config.d目录中的配置（在修改端口之前处理，避免冲突）
     check_sshd_config_d || log_message "WARNING" "处理SSH模块化配置失败，但继续执行"
+    
+    # 修改SSH端口（会创建统一的配置文件）
+    change_ssh_port || log_message "WARNING" "修改SSH端口失败，但继续执行"
     
     # 配置SELinux以支持自定义SSH端口
     configure_selinux_for_ssh || log_message "WARNING" "配置SELinux失败，但继续执行"
