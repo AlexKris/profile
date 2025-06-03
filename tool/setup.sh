@@ -1289,6 +1289,13 @@ EOF
     echo "# 认证配置" >> "$temp_conf"
     echo "PubkeyAuthentication yes" >> "$temp_conf"
     
+    # 添加安全配置 - 禁用root登录
+    cat >> "$temp_conf" << EOF
+
+# 安全配置
+PermitRootLogin no
+EOF
+    
     # 如果需要禁用密码登录，添加相关配置
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         cat >> "$temp_conf" << EOF
