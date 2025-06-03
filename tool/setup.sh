@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="1.6.0"
+readonly SCRIPT_VERSION="1.6.1"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -2102,7 +2102,12 @@ install_docker() {
         fi
         
         # 配置Docker镜像加速（针对中国用户）
-        if [ "$SERVER_REGION" = "cn" ] || [ "$final_region" = "cn" ] 2>/dev/null; then
+        local detected_region="$SERVER_REGION"
+        if [ "$SERVER_REGION" = "auto" ]; then
+            detected_region=$(detect_server_region)
+        fi
+        
+        if [ "$detected_region" = "cn" ]; then
             log_message "INFO" "检测到中国地区，配置Docker镜像加速..."
             configure_docker_mirror
         fi
