@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.2.0"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -42,6 +42,8 @@ SSH_WHITELIST_IPS=""
 DISABLE_ICMP="false"
 BLOCK_WEB_PORTS="false"
 ALLOW_CLOUDFLARE="false"
+# 新增：审计方式选择
+INSTALL_ETCKEEPER="false"
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -195,6 +197,7 @@ usage() {
     echo "  --disable_icmp            禁用ICMP（禁止ping）"
     echo "  --block_web_ports         阻止80和443端口的公网访问"
     echo "  --allow_cloudflare        允许Cloudflare IP访问80和443端口（配合--block_web_ports使用）"
+    echo "  --install_etckeeper       安装etckeeper替代auditd（用于配置文件版本控制）"
     echo ""
     echo "地区说明:"
     echo "  auto - 自动检测地区（推荐）"
@@ -217,6 +220,7 @@ usage() {
     echo "  $0 --block_web_ports --allow_cloudflare  # 阻止公网访问但允许Cloudflare"
     echo "  $0 --ntp_service chrony --region cn  # 指定使用chrony和中国NTP服务器"
     echo "  $0 --ntp_service timesyncd  # 强制使用systemd-timesyncd"
+    echo "  $0 --install_etckeeper  # 使用etckeeper替代auditd进行配置管理"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -339,6 +343,8 @@ parse_args() {
                 BLOCK_WEB_PORTS="true" ;;
             --allow_cloudflare)
                 ALLOW_CLOUDFLARE="true" ;;
+            --install_etckeeper)
+                INSTALL_ETCKEEPER="true" ;;
             *) echo "未知选项: $1"; usage; exit 1 ;;
         esac
         shift
@@ -443,7 +449,10 @@ update_system_install_dependencies() {
         sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get full-upgrade -y && sudo apt-get autoclean -y && sudo apt-get autoremove -y
 
         log_message "INFO" "正在安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr..."
-        sudo apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+        # 预配置可能的交互式包
+        echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
+        # 设置非交互模式并安装包
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
     elif [ -f /etc/redhat-release ]; then
         log_message "INFO" "检测到 RHEL/CentOS 系统..."
         
@@ -567,7 +576,7 @@ configure_fail2ban(){
     # 确保需要的包已安装
     if [ -f /etc/debian_version ]; then
         wait_for_apt || return 1
-        sudo apt-get install -y fail2ban rsyslog
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y fail2ban rsyslog
     elif [ -f /etc/redhat-release ]; then
         if command -v dnf &> /dev/null; then
             sudo dnf install -y fail2ban rsyslog
@@ -732,7 +741,7 @@ configure_timezone(){
             fi
             
             wait_for_apt || return 1
-            sudo apt-get install -y chrony
+            DEBIAN_FRONTEND=noninteractive sudo apt-get install -y chrony
             # 配置 chrony 使用选定的时间服务器
             sudo tee /etc/chrony/chrony.conf > /dev/null << EOF
 pool $NTP_SERVER iburst
@@ -1469,11 +1478,14 @@ save_iptables_rules() {
     
     if [ -f /etc/debian_version ]; then
         # Debian/Ubuntu系统
-        # 安装iptables-persistent包
-        if ! dpkg -l | grep -q iptables-persistent; then
-            log_message "INFO" "安装iptables-persistent以保存规则..."
-            wait_for_apt || return 1
-            DEBIAN_FRONTEND=noninteractive sudo apt-get install -y iptables-persistent
+            # 安装iptables-persistent包
+    if ! dpkg -l | grep -q iptables-persistent; then
+        log_message "INFO" "安装iptables-persistent以保存规则..."
+        wait_for_apt || return 1
+        # 预配置iptables-persistent的答案，自动保存当前规则
+        echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | sudo debconf-set-selections
+        echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | sudo debconf-set-selections
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y iptables-persistent
         fi
         # 保存规则
         sudo mkdir -p /etc/iptables
@@ -1501,11 +1513,18 @@ harden_system() {
     # 1. 限制 root 登录
     # 删除局部变量赋值，使用全局的SSH_CONFIG变量
     # SSH_CONFIG="/etc/ssh/sshd_config"
-    if grep -E "^\s*PermitRootLogin\s+yes" "$SSH_CONFIG" > /dev/null; then
+    if grep -E "^\s*PermitRootLogin\s+(yes|prohibit-password)" "$SSH_CONFIG" > /dev/null; then
         log_message "INFO" "禁用 root 直接登录..."
-        sudo sed -i 's/^\s*PermitRootLogin\s\+yes/PermitRootLogin no/' "$SSH_CONFIG"
+        sudo sed -i 's/^\s*PermitRootLogin\s\+\(yes\|prohibit-password\)/PermitRootLogin no/' "$SSH_CONFIG"
     elif ! grep -q "PermitRootLogin" "$SSH_CONFIG"; then
+        log_message "INFO" "添加 PermitRootLogin no 配置..."
         echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
+    else
+        # 检查是否已经是no
+        if ! grep -q "PermitRootLogin no" "$SSH_CONFIG"; then
+            log_message "INFO" "更新 PermitRootLogin 为 no..."
+            sudo sed -i 's/^\s*PermitRootLogin\s\+.*/PermitRootLogin no/' "$SSH_CONFIG"
+        fi
     fi
     
     # 2. 修改SSH设置增强安全性
@@ -1556,22 +1575,49 @@ EOF
     # 4. 配置系统日志审计
     log_message "INFO" "配置系统日志审计..."
     
-    # 安装auditd（如果可用）
-    if [ -f /etc/debian_version ]; then
-        wait_for_apt || return 1
-        sudo apt-get install -y auditd
-    elif [ -f /etc/redhat-release ]; then
-        if command -v dnf &> /dev/null; then
-            sudo dnf install -y audit
-        else
-            sudo yum install -y audit
+    # 用户可以选择auditd（安全审计）或etckeeper（配置管理）
+    # 默认安装auditd用于安全加固
+    if [ "${INSTALL_ETCKEEPER:-false}" = "true" ]; then
+        # 安装etckeeper用于配置文件版本控制
+        log_message "INFO" "安装etckeeper用于配置文件版本控制..."
+        if [ -f /etc/debian_version ]; then
+            wait_for_apt || return 1
+            DEBIAN_FRONTEND=noninteractive sudo apt-get install -y etckeeper git
+        elif [ -f /etc/redhat-release ]; then
+            if command -v dnf &> /dev/null; then
+                sudo dnf install -y etckeeper git
+            else
+                sudo yum install -y etckeeper git
+            fi
         fi
-    fi
-    
-    # 如果auditd已安装，配置基本审计规则
-    if command -v auditd &> /dev/null; then
-        # 创建基本的审计规则
-        cat << EOF | sudo tee /etc/audit/rules.d/audit.rules > /dev/null
+        
+        # 初始化etckeeper
+        if [ ! -d /etc/.git ]; then
+            log_message "INFO" "初始化etckeeper..."
+            sudo etckeeper init
+            sudo etckeeper commit "Initial commit - system setup"
+            log_message "INFO" "etckeeper已初始化，/etc目录现在受版本控制"
+        else
+            log_message "INFO" "etckeeper已经初始化"
+        fi
+    else
+        # 默认安装auditd用于安全审计
+        log_message "INFO" "安装auditd用于系统安全审计..."
+        if [ -f /etc/debian_version ]; then
+            wait_for_apt || return 1
+            DEBIAN_FRONTEND=noninteractive sudo apt-get install -y auditd
+        elif [ -f /etc/redhat-release ]; then
+            if command -v dnf &> /dev/null; then
+                sudo dnf install -y audit
+            else
+                sudo yum install -y audit
+            fi
+        fi
+        
+        # 如果auditd已安装，配置基本审计规则
+        if command -v auditd &> /dev/null; then
+            # 创建基本的审计规则
+            cat << EOF | sudo tee /etc/audit/rules.d/audit.rules > /dev/null
 # 删除所有现有规则
 -D
 
@@ -1599,10 +1645,11 @@ EOF
 -w /usr/sbin/groupmod -p x -k group_modify
 EOF
 
-        # 重启auditd服务
-        sudo systemctl restart auditd
-        sudo systemctl enable auditd
-        log_message "INFO" "审计服务已配置并启用"
+            # 重启auditd服务
+            sudo systemctl restart auditd
+            sudo systemctl enable auditd
+            log_message "INFO" "审计服务已配置并启用"
+        fi
     fi
     
     log_message "INFO" "系统安全加固完成"
@@ -1623,7 +1670,7 @@ check_sshd_config_d() {
         # 检查是否有覆盖我们关心设置的配置文件
         for conf_file in "$CONFIG_DIR"/*.conf; do
             if [ -f "$conf_file" ]; then
-                if grep -qE "^\s*(PasswordAuthentication|PubkeyAuthentication|Port|ChallengeResponseAuthentication|KbdInteractiveAuthentication|PermitEmptyPasswords)" "$conf_file"; then
+                if grep -qE "^\s*(PasswordAuthentication|PubkeyAuthentication|Port|ChallengeResponseAuthentication|KbdInteractiveAuthentication|PermitEmptyPasswords|PermitRootLogin)" "$conf_file"; then
                     log_message "WARNING" "发现模块化配置文件 $conf_file 包含关键SSH设置，可能会覆盖主配置"
                     
                     # 创建配置文件备份
@@ -1664,6 +1711,15 @@ check_sshd_config_d() {
                     if grep -qE "^\s*Port\s+[0-9]+" "$conf_file"; then
                         log_message "INFO" "正在注释 $conf_file 中的端口设置以避免配置冲突..."
                         sudo sed -i 's/^\s*Port\s\+[0-9]\+/# &/' "$conf_file"
+                    fi
+                    
+                    # 处理root登录设置 - 确保禁用root登录
+                    if grep -qE "^\s*PermitRootLogin\s+(yes|prohibit-password)" "$conf_file"; then
+                        log_message "INFO" "正在更新 $conf_file 中的root登录设置..."
+                        sudo sed -i 's/^\s*PermitRootLogin\s\+\(yes\|prohibit-password\)/PermitRootLogin no/' "$conf_file"
+                    elif grep -qE "^\s*PermitRootLogin\s+" "$conf_file" && ! grep -q "PermitRootLogin no" "$conf_file"; then
+                        log_message "INFO" "正在更新 $conf_file 中的root登录设置为no..."
+                        sudo sed -i 's/^\s*PermitRootLogin\s\+.*/PermitRootLogin no/' "$conf_file"
                     fi
                 fi
             fi
@@ -2337,10 +2393,10 @@ create_devops_user() {
         log_message "INFO" "已将SSH公钥添加到用户 $SUDO_USERNAME"
     fi
     
-    # 配置sudo免密码（可选，根据需要取消注释）
-    # echo "$SUDO_USERNAME ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$SUDO_USERNAME > /dev/null
-    # sudo chmod 440 /etc/sudoers.d/$SUDO_USERNAME
-    # log_message "INFO" "已配置用户 $SUDO_USERNAME sudo免密码"
+    # 配置sudo免密码（安全且方便）
+    echo "$SUDO_USERNAME ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$SUDO_USERNAME > /dev/null
+    sudo chmod 440 /etc/sudoers.d/$SUDO_USERNAME
+    log_message "INFO" "已配置用户 $SUDO_USERNAME sudo免密码"
     
     log_message "INFO" "用户 $SUDO_USERNAME 创建完成"
     log_message "INFO" "用户 $SUDO_USERNAME 可以通过'sudo su -'切换到root用户"
