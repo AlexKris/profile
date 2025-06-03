@@ -30,6 +30,18 @@ OS_TYPE=""
 OS_VERSION=""
 # 新增：服务器地区参数，默认为auto自动检测
 SERVER_REGION="auto"
+# 新增：创建devops用户参数
+CREATE_DEVOPS_USER="false"
+# 新增：sudo用户名
+SUDO_USERNAME=""
+# 新增：NTP服务选择（auto|timesyncd|chrony）
+NTP_SERVICE="auto"
+# 新增：防火墙相关参数
+ENABLE_SSH_WHITELIST="false"
+SSH_WHITELIST_IPS=""
+DISABLE_ICMP="false"
+BLOCK_WEB_PORTS="false"
+ALLOW_CLOUDFLARE="false"
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -176,7 +188,13 @@ usage() {
     echo "  --region REGION           指定服务器所在地区，用于选择NTP服务器"
     echo "                            (auto|cn|hk|tw|jp|sg|us|eu|asia，默认: auto)"
     echo "  --disable_ntp             禁用NTP时间同步配置"
+    echo "  --ntp_service SERVICE     指定NTP服务（auto|timesyncd|chrony，默认: auto）"
     echo "  --version                 显示脚本版本"
+    echo "  --create_user USERNAME    创建管理员用户（必须提供SSH密钥）"
+    echo "  --ssh_whitelist IPS       启用SSH白名单，只允许指定IP访问（逗号分隔）"
+    echo "  --disable_icmp            禁用ICMP（禁止ping）"
+    echo "  --block_web_ports         阻止80和443端口的公网访问"
+    echo "  --allow_cloudflare        允许Cloudflare IP访问80和443端口（配合--block_web_ports使用）"
     echo ""
     echo "地区说明:"
     echo "  auto - 自动检测地区（推荐）"
@@ -194,6 +212,11 @@ usage() {
     echo "  $0 --disable_ssh_pwd --port 2222 --ssh_key_file ~/.ssh/id_rsa.pub"
     echo "  $0 --ssh_key \"ssh-rsa AAAA...\" --region cn"
     echo "  $0 --disable_ntp --region us"
+    echo "  $0 --create_user devops --ssh_key_file ~/.ssh/id_rsa.pub --disable_ssh_pwd"
+    echo "  $0 --ssh_whitelist \"1.2.3.4,5.6.7.8/24\" --disable_icmp --block_web_ports"
+    echo "  $0 --block_web_ports --allow_cloudflare  # 阻止公网访问但允许Cloudflare"
+    echo "  $0 --ntp_service chrony --region cn  # 指定使用chrony和中国NTP服务器"
+    echo "  $0 --ntp_service timesyncd  # 强制使用systemd-timesyncd"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -253,6 +276,22 @@ parse_args() {
                 esac
                 shift ;;
             --disable_ntp) CONFIGURE_NTP="false" ;;
+            --ntp_service)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    log_message "ERROR" "选项 $1 需要一个有效的服务参数"
+                    exit 1
+                fi
+                # 验证NTP服务参数
+                case "$2" in
+                    auto|timesyncd|chrony)
+                        NTP_SERVICE="$2"
+                        ;;
+                    *)
+                        log_message "ERROR" "无效的NTP服务参数: $2. 可用选项: auto, timesyncd, chrony"
+                        exit 1
+                        ;;
+                esac
+                shift ;;
             --update) update_shell; exit 0 ;;
             --log_file) 
                 if [ -z "$2" ] || [[ "$2" == --* ]]; then
@@ -273,6 +312,33 @@ parse_args() {
                 fi
                 shift ;;
             --version) echo "脚本版本: $SCRIPT_VERSION"; exit 0 ;;
+            --create_user)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    log_message "ERROR" "选项 $1 需要一个有效的用户名参数"
+                    exit 1
+                fi
+                CREATE_DEVOPS_USER="true"
+                SUDO_USERNAME="$2"
+                # 验证用户名格式
+                if ! [[ "$2" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+                    log_message "ERROR" "无效的用户名: $2. 用户名必须以小写字母或下划线开头，只能包含小写字母、数字、下划线和连字符"
+                    exit 1
+                fi
+                shift ;;
+            --ssh_whitelist)
+                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                    log_message "ERROR" "选项 $1 需要一个有效的IP列表参数"
+                    exit 1
+                fi
+                ENABLE_SSH_WHITELIST="true"
+                SSH_WHITELIST_IPS="$2"
+                shift ;;
+            --disable_icmp)
+                DISABLE_ICMP="true" ;;
+            --block_web_ports)
+                BLOCK_WEB_PORTS="true" ;;
+            --allow_cloudflare)
+                ALLOW_CLOUDFLARE="true" ;;
             *) echo "未知选项: $1"; usage; exit 1 ;;
         esac
         shift
@@ -281,6 +347,18 @@ parse_args() {
     # 确保备份目录存在
     if [ ! -d "$CONFIG_BACKUP_DIR" ]; then
         sudo mkdir -p "$CONFIG_BACKUP_DIR" || log_message "WARNING" "无法创建备份目录 $CONFIG_BACKUP_DIR"
+    fi
+    
+    # 验证创建用户时必须提供SSH密钥和用户名
+    if [ "$CREATE_DEVOPS_USER" = "true" ]; then
+        if [ -z "$SSH_KEY" ]; then
+            log_message "ERROR" "创建管理员用户时必须提供SSH密钥（使用 --ssh_key 或 --ssh_key_file）"
+            exit 1
+        fi
+        if [ -z "$SUDO_USERNAME" ]; then
+            log_message "ERROR" "创建管理员用户时必须提供用户名"
+            exit 1
+        fi
     fi
     
     log_message "INFO" "脚本开始执行，参数: SSH端口=$SSH_PORT, 禁用密码=$DISABLE_SSH_PASSWD, 地区=$SERVER_REGION, NTP配置=$CONFIGURE_NTP, 日志文件=$LOG_FILE"
@@ -310,7 +388,8 @@ fix_sudo_issue(){
     if ! command -v sudo &> /dev/null; then
         log_message "INFO" "sudo 未安装，正在安装..."
         if [ -f /etc/debian_version ]; then
-            apt update -y && apt install -y sudo
+            wait_for_apt || return 1
+            apt-get update -y && apt-get install -y sudo
         elif [ -f /etc/redhat-release ]; then
             if command -v dnf &> /dev/null; then
                 dnf install -y sudo
@@ -360,10 +439,11 @@ update_system_install_dependencies() {
     log_message "INFO" "正在更新系统包..."
     if [ -f /etc/debian_version ]; then
         log_message "INFO" "检测到 Debian/Ubuntu 系统..."
-        sudo apt update && sudo apt upgrade -y && sudo apt full-upgrade -y && sudo apt autoclean -y && sudo apt autoremove -y
+        wait_for_apt || return 1
+        sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get full-upgrade -y && sudo apt-get autoclean -y && sudo apt-get autoremove -y
 
         log_message "INFO" "正在安装 wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr..."
-        sudo apt install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
+        sudo apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr
     elif [ -f /etc/redhat-release ]; then
         log_message "INFO" "检测到 RHEL/CentOS 系统..."
         
@@ -486,7 +566,8 @@ configure_fail2ban(){
     
     # 确保需要的包已安装
     if [ -f /etc/debian_version ]; then
-        sudo apt install -y fail2ban rsyslog
+        wait_for_apt || return 1
+        sudo apt-get install -y fail2ban rsyslog
     elif [ -f /etc/redhat-release ]; then
         if command -v dnf &> /dev/null; then
             sudo dnf install -y fail2ban rsyslog
@@ -617,10 +698,41 @@ configure_timezone(){
         # Debian/Ubuntu 系统
         log_message "INFO" "检测到 Debian/Ubuntu 系统，使用 systemd-timesyncd 或 chrony 配置时间同步"
         
-        # 检查是否有 chrony
-        if command -v chronyd &> /dev/null; then
+        # 根据用户选择决定使用哪个NTP服务
+        local use_chrony=false
+        
+        case "$NTP_SERVICE" in
+            "chrony")
+                use_chrony=true
+                log_message "INFO" "用户指定使用 chrony"
+                ;;
+            "timesyncd")
+                use_chrony=false
+                log_message "INFO" "用户指定使用 systemd-timesyncd"
+                ;;
+            "auto"|*)
+                # 自动选择：如果已安装chrony则使用，否则使用timesyncd
+                if command -v chronyd &> /dev/null || dpkg -l | grep -q "^ii.*chrony"; then
+                    use_chrony=true
+                    log_message "INFO" "自动选择：检测到 chrony 已安装，将使用 chrony"
+                else
+                    use_chrony=false
+                    log_message "INFO" "自动选择：未检测到 chrony，将使用 systemd-timesyncd"
+                fi
+                ;;
+        esac
+        
+        if [ "$use_chrony" = "true" ]; then
             log_message "INFO" "使用 chrony 进行时间同步"
-            sudo apt install -y chrony
+            # 如果选择了chrony但是timesyncd正在运行，先停止它
+            if systemctl is-active systemd-timesyncd &> /dev/null; then
+                log_message "INFO" "停止 systemd-timesyncd 服务"
+                sudo systemctl stop systemd-timesyncd
+                sudo systemctl disable systemd-timesyncd
+            fi
+            
+            wait_for_apt || return 1
+            sudo apt-get install -y chrony
             # 配置 chrony 使用选定的时间服务器
             sudo tee /etc/chrony/chrony.conf > /dev/null << EOF
 pool $NTP_SERVER iburst
@@ -637,7 +749,18 @@ EOF
         else
             # 使用 systemd-timesyncd
             log_message "INFO" "使用 systemd-timesyncd 进行时间同步"
-            sudo apt install -y systemd-timesyncd
+            
+            # 如果选择了timesyncd但是chrony正在运行，先停止它
+            if systemctl is-active chrony &> /dev/null || systemctl is-active chronyd &> /dev/null; then
+                log_message "INFO" "停止 chrony 服务"
+                sudo systemctl stop chrony 2>/dev/null || true
+                sudo systemctl stop chronyd 2>/dev/null || true
+                sudo systemctl disable chrony 2>/dev/null || true
+                sudo systemctl disable chronyd 2>/dev/null || true
+            fi
+            
+            wait_for_apt || return 1
+            sudo apt-get install -y systemd-timesyncd
             sudo tee /etc/systemd/timesyncd.conf > /dev/null << EOF
 [Time]
 NTP=$NTP_SERVER
@@ -1204,6 +1327,173 @@ configure_firewall_for_ssh_port() {
     fi
 }
 
+# 允许Cloudflare IP访问
+allow_cloudflare_ips() {
+    log_message "INFO" "获取Cloudflare IP列表..."
+    
+    # 临时文件存储IP列表
+    local cf_ips_v4="/tmp/cloudflare-ips-v4.txt"
+    local cf_ips_v6="/tmp/cloudflare-ips-v6.txt"
+    
+    # 获取Cloudflare IPv4地址
+    if curl -s https://www.cloudflare.com/ips-v4 -o "$cf_ips_v4"; then
+        local count=0
+        while IFS= read -r ip; do
+            if [ -n "$ip" ] && [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+                iptables -A INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT
+                iptables -A INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT
+                ((count++))
+            fi
+        done < "$cf_ips_v4"
+        log_message "INFO" "已添加 $count 个Cloudflare IPv4地址"
+        rm -f "$cf_ips_v4"
+    else
+        log_message "WARNING" "无法获取Cloudflare IPv4地址列表"
+    fi
+    
+    # 获取Cloudflare IPv6地址
+    if command -v ip6tables &> /dev/null; then
+        if curl -s https://www.cloudflare.com/ips-v6 -o "$cf_ips_v6"; then
+            local count6=0
+            while IFS= read -r ip; do
+                if [ -n "$ip" ] && [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$ ]]; then
+                    ip6tables -A INPUT -p tcp -s "$ip" --dport 443 -j ACCEPT
+                    ip6tables -A INPUT -p tcp -s "$ip" --dport 80 -j ACCEPT
+                    ((count6++))
+                fi
+            done < "$cf_ips_v6"
+            log_message "INFO" "已添加 $count6 个Cloudflare IPv6地址"
+            rm -f "$cf_ips_v6"
+        else
+            log_message "WARNING" "无法获取Cloudflare IPv6地址列表"
+        fi
+    fi
+}
+
+# 配置高级防火墙规则
+configure_advanced_firewall() {
+    log_message "INFO" "配置高级防火墙规则..."
+    
+    # 检查iptables是否可用
+    if ! command -v iptables &> /dev/null; then
+        log_message "ERROR" "iptables未安装，无法配置防火墙规则"
+        return 1
+    fi
+    
+    # 获取SSH端口
+    local ssh_port="${SSH_PORT:-22}"
+    if [ -z "$SSH_PORT" ]; then
+        ssh_port=$(get_current_ssh_port)
+    fi
+    
+    # 1. 配置SSH白名单
+    if [ "$ENABLE_SSH_WHITELIST" = "true" ] && [ -n "$SSH_WHITELIST_IPS" ]; then
+        log_message "INFO" "配置SSH白名单..."
+        
+        # 首先删除现有的SSH规则（如果有）
+        sudo iptables -D INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+        
+        # 为每个白名单IP添加规则
+        IFS=',' read -ra IPS <<< "$SSH_WHITELIST_IPS"
+        for ip in "${IPS[@]}"; do
+            # 去除空格
+            ip=$(echo "$ip" | xargs)
+            # 验证IP格式
+            if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(/[0-9]{1,2})?$ ]]; then
+                sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
+                log_message "INFO" "允许IP $ip 访问SSH端口 $ssh_port"
+            else
+                log_message "WARNING" "无效的IP地址格式: $ip"
+            fi
+        done
+        
+        # 拒绝其他所有SSH连接
+        sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
+        log_message "INFO" "已拒绝白名单外的所有SSH连接"
+    fi
+    
+    # 2. 禁用ICMP（禁止ping）
+    if [ "$DISABLE_ICMP" = "true" ]; then
+        log_message "INFO" "禁用ICMP（禁止ping）..."
+        # 删除可能存在的允许规则
+        sudo iptables -D INPUT -p icmp -j ACCEPT 2>/dev/null || true
+        # 添加拒绝规则
+        sudo iptables -A INPUT -p icmp -j DROP
+        sudo iptables -A OUTPUT -p icmp -j DROP
+        log_message "INFO" "已禁用ICMP"
+    fi
+    
+    # 3. 阻止80和443端口的公网访问
+    if [ "$BLOCK_WEB_PORTS" = "true" ]; then
+        log_message "INFO" "阻止80和443端口的公网访问..."
+        
+        # 清理可能存在的旧规则
+        while iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+        while iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+        while iptables -D INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null; do :; done
+        
+        # 允许本地访问
+        iptables -A INPUT -p tcp --dport 80 -s 127.0.0.1 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 443 -s 127.0.0.1 -j ACCEPT
+        
+        # 允许内网访问
+        iptables -A INPUT -p tcp --dport 80 -s 10.0.0.0/8 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 443 -s 10.0.0.0/8 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 80 -s 172.16.0.0/12 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 443 -s 172.16.0.0/12 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 80 -s 192.168.0.0/16 -j ACCEPT
+        iptables -A INPUT -p tcp --dport 443 -s 192.168.0.0/16 -j ACCEPT
+        
+        # 检查是否需要允许Cloudflare IP（通过环境变量或参数控制）
+        if [ "${ALLOW_CLOUDFLARE:-false}" = "true" ]; then
+            log_message "INFO" "允许Cloudflare IP访问443端口..."
+            allow_cloudflare_ips
+        fi
+        
+        # 拒绝其他所有访问
+        iptables -A INPUT -p tcp --dport 80 -j DROP
+        iptables -A INPUT -p tcp --dport 443 -j DROP
+        log_message "INFO" "已阻止80和443端口的公网访问"
+    fi
+    
+    # 保存iptables规则
+    save_iptables_rules
+    
+    log_message "INFO" "高级防火墙规则配置完成"
+}
+
+# 保存iptables规则
+save_iptables_rules() {
+    log_message "INFO" "保存iptables规则..."
+    
+    if [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu系统
+        # 安装iptables-persistent包
+        if ! dpkg -l | grep -q iptables-persistent; then
+            log_message "INFO" "安装iptables-persistent以保存规则..."
+            wait_for_apt || return 1
+            DEBIAN_FRONTEND=noninteractive sudo apt-get install -y iptables-persistent
+        fi
+        # 保存规则
+        sudo mkdir -p /etc/iptables
+        sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
+        sudo ip6tables-save | sudo tee /etc/iptables/rules.v6 > /dev/null
+    elif [ -f /etc/redhat-release ]; then
+        # RHEL/CentOS系统
+        if command -v systemctl &> /dev/null && systemctl is-enabled iptables &> /dev/null; then
+            sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
+            sudo systemctl restart iptables
+        else
+            # 对于没有iptables服务的系统，使用rc.local
+            sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
+            log_message "WARNING" "请确保iptables规则在重启后能够加载"
+        fi
+    fi
+    
+    log_message "INFO" "iptables规则已保存"
+}
+
 # 添加系统安全加固函数
 harden_system() {
     log_message "INFO" "正在执行系统安全加固..."
@@ -1268,7 +1558,8 @@ EOF
     
     # 安装auditd（如果可用）
     if [ -f /etc/debian_version ]; then
-        sudo apt install -y auditd
+        wait_for_apt || return 1
+        sudo apt-get install -y auditd
     elif [ -f /etc/redhat-release ]; then
         if command -v dnf &> /dev/null; then
             sudo dnf install -y audit
@@ -1700,7 +1991,8 @@ main() {
     if ! command -v sudo &> /dev/null; then
         echo "[信息] sudo未安装，正在安装..."
         if [ -f /etc/debian_version ]; then
-            apt update -y && apt install -y sudo
+            wait_for_apt || exit 1
+            apt-get update -y && apt-get install -y sudo
             echo "[信息] sudo已安装，正在配置sudo权限..."
             # 为当前用户添加sudo权限（如果不是root）
             if [ "$(id -u)" != "0" ]; then
@@ -1731,6 +2023,9 @@ main() {
         exit 1
     }
     
+    # 等待cloud-init完成
+    wait_for_cloud_init
+    
     # 以下命令全部使用错误处理
     fix_sudo_issue || log_message "WARNING" "修复sudo问题失败，但继续执行后续步骤"
     
@@ -1750,6 +2045,9 @@ main() {
     # 配置SSH密钥和认证
     configure_ssh_keys || log_message "WARNING" "配置SSH密钥失败，但继续执行"
     enable_ssh_pubkey_auth || log_message "WARNING" "启用SSH公钥认证失败，但继续执行"
+    
+    # 创建管理员用户
+    create_devops_user || log_message "WARNING" "创建管理员用户失败，但继续执行"
     
     # 禁用SSH密码登录
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
@@ -1788,6 +2086,11 @@ main() {
     # 系统安全加固
     harden_system || log_message "WARNING" "系统安全加固失败，但继续执行"
     
+    # 配置高级防火墙规则
+    if [ "$ENABLE_SSH_WHITELIST" = "true" ] || [ "$DISABLE_ICMP" = "true" ] || [ "$BLOCK_WEB_PORTS" = "true" ]; then
+        configure_advanced_firewall || log_message "WARNING" "配置高级防火墙规则失败，但继续执行"
+    fi
+    
     # 验证配置有效性
     verify_configuration || log_message "WARNING" "配置验证失败，请手动检查配置"
     
@@ -1811,6 +2114,10 @@ main() {
         log_message "INFO" "请记住保存您的 SSH 密钥以便远程登录"
     else
         log_message "INFO" "请注意：未添加SSH密钥，确保您有其他方式访问服务器"
+    fi
+    
+    if [ "$CREATE_DEVOPS_USER" = "true" ]; then
+        log_message "INFO" "已创建管理员用户 $SUDO_USERNAME，可使用SSH密钥登录"
     fi
     
     # 显示配置总结
@@ -1877,11 +2184,23 @@ show_configuration_summary() {
         FIREWALL_STATUS="iptables 规则已配置"
     fi
     echo "  - 防火墙: $FIREWALL_STATUS"
+    if [ "$ENABLE_SSH_WHITELIST" = "true" ]; then
+        echo "  - SSH白名单: 已启用 (允许: $SSH_WHITELIST_IPS)"
+    fi
+    if [ "$DISABLE_ICMP" = "true" ]; then
+        echo "  - ICMP: 已禁用（禁止ping）"
+    fi
+    if [ "$BLOCK_WEB_PORTS" = "true" ]; then
+        echo "  - Web端口保护: 已启用（80/443端口仅限本地和内网访问）"
+    fi
     
     echo "安全加固:"
     echo "  - fail2ban: $(systemctl is-active fail2ban 2>/dev/null || echo '未运行')"
     echo "  - SELinux: $(command -v getenforce &> /dev/null && getenforce || echo '未启用')"
     echo "  - 根用户登录: 已禁用"
+    if [ "$CREATE_DEVOPS_USER" = "true" ]; then
+        echo "  - 管理员用户: $SUDO_USERNAME (已创建)"
+    fi
     echo "系统优化:"
     echo "  - BBR: $(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo '未启用')"
     echo "  - IP转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo '未启用')"
@@ -1930,6 +2249,104 @@ get_current_ssh_port() {
     
     echo "$current_port"
 }
+
+# 等待cloud-init完成
+wait_for_cloud_init() {
+    if command -v cloud-init &> /dev/null; then
+        log_message "INFO" "检测到cloud-init，等待其完成初始化..."
+        cloud-init status --wait || {
+            log_message "WARNING" "cloud-init可能未正常完成，但继续执行"
+        }
+        log_message "INFO" "cloud-init初始化完成"
+    else
+        log_message "INFO" "未检测到cloud-init，跳过等待"
+    fi
+}
+
+# 等待apt锁释放
+wait_for_apt() {
+    local max_wait=300  # 最多等待5分钟
+    local waited=0
+    
+    while fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+        if [ $waited -ge $max_wait ]; then
+            log_message "ERROR" "等待apt锁超时（${max_wait}秒），请手动检查"
+            return 1
+        fi
+        log_message "INFO" "等待apt锁释放... ($waited/$max_wait秒)"
+        sleep 5
+        waited=$((waited + 5))
+    done
+    
+    if [ $waited -gt 0 ]; then
+        log_message "INFO" "apt锁已释放，继续执行"
+    fi
+    return 0
+}
+
+# 创建管理员用户
+create_devops_user() {
+    if [ "$CREATE_DEVOPS_USER" != "true" ]; then
+        return 0
+    fi
+    
+    log_message "INFO" "正在创建管理员用户 $SUDO_USERNAME..."
+    
+    # 检查用户是否已存在
+    if id "$SUDO_USERNAME" &>/dev/null; then
+        log_message "WARNING" "用户 $SUDO_USERNAME 已存在，跳过创建"
+    else
+        # 创建用户（不创建密码）
+        if [ -f /etc/debian_version ]; then
+            # Debian/Ubuntu系统
+            sudo adduser --disabled-password --gecos "Administrator" "$SUDO_USERNAME"
+            # 添加到sudo组
+            sudo usermod -aG sudo "$SUDO_USERNAME"
+            log_message "INFO" "用户 $SUDO_USERNAME 已创建并添加到sudo组"
+        elif [ -f /etc/redhat-release ]; then
+            # RHEL/CentOS系统
+            sudo useradd -m -s /bin/bash -c "Administrator" "$SUDO_USERNAME"
+            # 添加到wheel组
+            sudo usermod -aG wheel "$SUDO_USERNAME"
+            log_message "INFO" "用户 $SUDO_USERNAME 已创建并添加到wheel组"
+        else
+            log_message "ERROR" "不支持的操作系统，无法创建用户"
+            return 1
+        fi
+    fi
+    
+    # 配置SSH密钥
+    local USER_SSH_DIR="/home/$SUDO_USERNAME/.ssh"
+    local USER_AUTHORIZED_KEYS="$USER_SSH_DIR/authorized_keys"
+    
+    # 创建.ssh目录
+    sudo mkdir -p "$USER_SSH_DIR"
+    sudo chown "$SUDO_USERNAME:$SUDO_USERNAME" "$USER_SSH_DIR"
+    sudo chmod 700 "$USER_SSH_DIR"
+    
+    # 创建authorized_keys文件
+    sudo touch "$USER_AUTHORIZED_KEYS"
+    sudo chown "$SUDO_USERNAME:$SUDO_USERNAME" "$USER_AUTHORIZED_KEYS"
+    sudo chmod 600 "$USER_AUTHORIZED_KEYS"
+    
+    # 添加SSH公钥
+    if sudo grep -qF "$SSH_KEY" "$USER_AUTHORIZED_KEYS"; then
+        log_message "INFO" "SSH公钥已存在于用户 $SUDO_USERNAME 的authorized_keys中"
+    else
+        echo "$SSH_KEY" | sudo tee -a "$USER_AUTHORIZED_KEYS" > /dev/null
+        log_message "INFO" "已将SSH公钥添加到用户 $SUDO_USERNAME"
+    fi
+    
+    # 配置sudo免密码（可选，根据需要取消注释）
+    # echo "$SUDO_USERNAME ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$SUDO_USERNAME > /dev/null
+    # sudo chmod 440 /etc/sudoers.d/$SUDO_USERNAME
+    # log_message "INFO" "已配置用户 $SUDO_USERNAME sudo免密码"
+    
+    log_message "INFO" "用户 $SUDO_USERNAME 创建完成"
+    log_message "INFO" "用户 $SUDO_USERNAME 可以通过'sudo su -'切换到root用户"
+}
+
+# 检查并启用 SSH 公钥认证
 
 # 执行主函数
 main "$@"
