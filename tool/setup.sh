@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="2.1.0"
+readonly SCRIPT_VERSION="2.1.1"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -345,17 +345,61 @@ parse_args() {
 wait_for_apt() {
     [ "$OS_TYPE" != "debian" ] && return 0
     
-    local max_wait=300
+    local max_wait=600  # 增加到10分钟
     local waited=0
+    local check_interval=5
     
-    while fuser /var/lib/dpkg/lock* /var/lib/apt/lists/lock* /var/cache/apt/archives/lock* >/dev/null 2>&1; do
-        [ $waited -ge $max_wait ] && { log_message "ERROR" "等待apt锁超时"; return 1; }
+    # 检查所有可能的apt锁文件
+    while true; do
+        local locked=false
+        
+        # 检查dpkg锁
+        if fuser /var/lib/dpkg/lock* >/dev/null 2>&1; then
+            locked=true
+        fi
+        
+        # 检查apt锁
+        if fuser /var/lib/apt/lists/lock* >/dev/null 2>&1; then
+            locked=true
+        fi
+        
+        # 检查apt缓存锁
+        if fuser /var/cache/apt/archives/lock* >/dev/null 2>&1; then
+            locked=true
+        fi
+        
+        # 检查dpkg前端锁
+        if [ -f /var/lib/dpkg/lock-frontend ] && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+            locked=true
+        fi
+        
+        # 检查apt进程
+        if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1; then
+            locked=true
+        fi
+        
+        # 如果没有锁，退出循环
+        if [ "$locked" = "false" ]; then
+            break
+        fi
+        
+        # 检查是否超时
+        if [ $waited -ge $max_wait ]; then
+            log_message "ERROR" "等待apt锁超时 ($max_wait秒)"
+            return 1
+        fi
+        
         log_message "INFO" "等待apt锁释放... ($waited/$max_wait秒)"
-        sleep 5
-        ((waited+=5))
+        sleep $check_interval
+        ((waited+=$check_interval))
     done
     
-    [ $waited -gt 0 ] && log_message "INFO" "apt锁已释放"
+    if [ $waited -gt 0 ]; then
+        log_message "INFO" "apt锁已释放，等待了 $waited 秒"
+        # 额外等待一下，确保锁完全释放
+        sleep 2
+    fi
+    
     return 0
 }
 
@@ -401,7 +445,9 @@ update_system_install_dependencies() {
         sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd
 
-        # 单独处理iperf3
+        # 单独处理iperf3，等待一下避免apt锁冲突
+        log_message "INFO" "等待2秒后安装iperf3..."
+        sleep 2
         echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" iperf3
     else
@@ -994,15 +1040,49 @@ configure_security_audit() {
     
     log_message "INFO" "配置安全审计工具..."
     
-    # 安装auditd
-    if [ "$OS_TYPE" = "debian" ]; then
-        wait_for_apt && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y auditd
-    else
-        sudo yum install -y audit || sudo dnf install -y audit
-    fi
+    # 安装auditd（带重试机制）
+    local install_success=false
+    local retry_count=0
+    local max_retries=3
     
-    # 配置auditd规则
-    sudo tee /etc/audit/rules.d/audit.rules > /dev/null << 'EOF'
+    while [ $retry_count -lt $max_retries ] && [ "$install_success" = "false" ]; do
+        if [ "$OS_TYPE" = "debian" ]; then
+            # 等待apt锁释放
+            if ! wait_for_apt; then
+                log_message "ERROR" "等待apt锁失败，跳过安全审计工具安装"
+                return 1
+            fi
+            
+            # 尝试安装auditd
+            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y auditd; then
+                install_success=true
+                log_message "INFO" "auditd安装成功"
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    log_message "WARNING" "auditd安装失败，等待30秒后重试 ($retry_count/$max_retries)"
+                    sleep 30
+                else
+                    log_message "ERROR" "auditd安装失败，已重试 $max_retries 次"
+                fi
+            fi
+        else
+            if sudo yum install -y audit || sudo dnf install -y audit; then
+                install_success=true
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    log_message "WARNING" "audit安装失败，等待30秒后重试 ($retry_count/$max_retries)"
+                    sleep 30
+                fi
+            fi
+        fi
+    done
+    
+    # 只有在安装成功后才配置auditd
+    if [ "$install_success" = "true" ]; then
+        # 配置auditd规则
+        sudo tee /etc/audit/rules.d/audit.rules > /dev/null << 'EOF'
 -D
 -b 8192
 -w /usr/bin/sudo -p x -k sudo_usage
@@ -1012,27 +1092,97 @@ configure_security_audit() {
 -w /etc/ssh/sshd_config -p rw -k sshd_config_change
 -w /var/log -p rwa -k log_directory
 EOF
-    
-    sudo systemctl restart auditd
-    sudo systemctl enable auditd
-    
-    # 安装etckeeper
-    if [ "$OS_TYPE" = "debian" ]; then
-        wait_for_apt && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y etckeeper git
+        
+        # 重启auditd服务
+        if sudo systemctl restart auditd 2>/dev/null; then
+            sudo systemctl enable auditd
+            log_message "INFO" "auditd服务配置完成"
+        else
+            # 某些系统可能需要使用service命令重启auditd
+            if sudo service auditd restart 2>/dev/null; then
+                log_message "INFO" "auditd服务配置完成（使用service命令）"
+            else
+                log_message "WARNING" "auditd服务重启失败，可能需要手动重启"
+            fi
+        fi
     else
-        sudo yum install -y etckeeper git || sudo dnf install -y etckeeper git
+        log_message "ERROR" "auditd安装失败，跳过auditd配置"
     fi
     
-    # 配置git默认分支名，避免警告提示
-    sudo git config --global init.defaultBranch main
+    # 安装etckeeper（带重试机制）
+    install_success=false
+    retry_count=0
     
-    # 初始化etckeeper
-    if [ ! -d /etc/.git ]; then
-        sudo etckeeper init
-        sudo etckeeper commit "Initial commit - system setup"
+    # 在两个apt操作之间添加延迟
+    log_message "INFO" "等待5秒后继续安装etckeeper..."
+    sleep 5
+    
+    while [ $retry_count -lt $max_retries ] && [ "$install_success" = "false" ]; do
+        if [ "$OS_TYPE" = "debian" ]; then
+            # 等待apt锁释放
+            if ! wait_for_apt; then
+                log_message "ERROR" "等待apt锁失败，跳过etckeeper安装"
+                break
+            fi
+            
+            # 尝试安装etckeeper和git
+            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y etckeeper git; then
+                install_success=true
+                log_message "INFO" "etckeeper和git安装成功"
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    log_message "WARNING" "etckeeper安装失败，等待30秒后重试 ($retry_count/$max_retries)"
+                    sleep 30
+                else
+                    log_message "ERROR" "etckeeper安装失败，已重试 $max_retries 次"
+                fi
+            fi
+        else
+            if sudo yum install -y etckeeper git || sudo dnf install -y etckeeper git; then
+                install_success=true
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    log_message "WARNING" "etckeeper安装失败，等待30秒后重试 ($retry_count/$max_retries)"
+                    sleep 30
+                fi
+            fi
+        fi
+    done
+    
+    # 只有在安装成功后才配置etckeeper
+    if [ "$install_success" = "true" ]; then
+        # 配置git默认分支名，避免警告提示
+        sudo git config --global init.defaultBranch main
+        
+        # 初始化etckeeper
+        if [ ! -d /etc/.git ]; then
+            if sudo etckeeper init; then
+                sudo etckeeper commit "Initial commit - system setup" || true
+                log_message "INFO" "etckeeper初始化完成"
+            else
+                log_message "WARNING" "etckeeper初始化失败"
+            fi
+        else
+            log_message "INFO" "etckeeper已经初始化"
+        fi
+    else
+        log_message "ERROR" "etckeeper安装失败，跳过etckeeper配置"
     fi
     
-    log_message "INFO" "安全审计配置完成"
+    # 总结安装结果
+    if command -v auditctl &>/dev/null && command -v etckeeper &>/dev/null; then
+        log_message "INFO" "安全审计配置完成（auditd + etckeeper）"
+    elif command -v auditctl &>/dev/null; then
+        log_message "WARNING" "安全审计部分完成（仅auditd）"
+    elif command -v etckeeper &>/dev/null; then
+        log_message "WARNING" "安全审计部分完成（仅etckeeper）"
+    else
+        log_message "ERROR" "安全审计工具安装失败，建议手动安装"
+        log_message "INFO" "可以稍后手动执行以下命令安装："
+        log_message "INFO" "  sudo apt update && sudo apt install -y auditd etckeeper git"
+    fi
 }
 
 # 创建Cloudflare IP更新脚本
@@ -1442,20 +1592,40 @@ save_firewall_rules() {
     if [ "$OS_TYPE" = "debian" ]; then
         # 安装iptables-persistent
         if ! dpkg -l | grep -q iptables-persistent; then
-            wait_for_apt
-            echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | sudo debconf-set-selections
-            echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | sudo debconf-set-selections
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+            # 等待apt锁释放
+            if wait_for_apt; then
+                echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | sudo debconf-set-selections
+                echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | sudo debconf-set-selections
+                if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent; then
+                    log_message "INFO" "iptables-persistent安装成功"
+                else
+                    log_message "WARNING" "iptables-persistent安装失败，防火墙规则可能无法持久化"
+                fi
+            else
+                log_message "WARNING" "无法获取apt锁，跳过iptables-persistent安装"
+            fi
         fi
         
         sudo mkdir -p /etc/iptables
-        sudo iptables-save > /etc/iptables/rules.v4
+        if sudo iptables-save > /etc/iptables/rules.v4; then
+            log_message "INFO" "IPv4防火墙规则已保存"
+        else
+            log_message "WARNING" "无法保存IPv4防火墙规则"
+        fi
         # 只有在系统支持IPv6时才尝试保存IPv6规则
         if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
-            sudo ip6tables-save > /etc/iptables/rules.v6
+            if sudo ip6tables-save > /etc/iptables/rules.v6; then
+                log_message "INFO" "IPv6防火墙规则已保存"
+            else
+                log_message "WARNING" "无法保存IPv6防火墙规则"
+            fi
         fi
     else
-        sudo iptables-save > /etc/sysconfig/iptables
+        if sudo iptables-save > /etc/sysconfig/iptables; then
+            log_message "INFO" "防火墙规则已保存"
+        else
+            log_message "WARNING" "无法保存防火墙规则"
+        fi
     fi
 }
 
