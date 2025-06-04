@@ -664,23 +664,45 @@ configure_ssh() {
         fi
     fi
     
-        # 处理sshd_config.d目录 - 确保覆盖cloud-init等其他配置
-    if [ -d "$SSH_CONFIG_DIR" ]; then
-        # 检查是否存在cloud-init配置文件
-        if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
-            log_message "INFO" "检测到cloud-init SSH配置，将其禁用"
-            # 重命名cloud-init配置文件以禁用它
-            sudo mv "$SSH_CONFIG_DIR/50-cloud-init.conf" "$SSH_CONFIG_DIR/50-cloud-init.conf.disabled" 2>/dev/null || true
-        fi
-        
+        # 处理sshd_config.d目录 - 与cloud-init和谐共存
+        if [ -d "$SSH_CONFIG_DIR" ]; then
         # 创建99-security.conf以确保我们的配置优先级最高
         log_message "INFO" "创建SSH安全配置覆盖文件"
+        
+        # 从主配置文件中移除我们要管理的配置项，避免冲突
+        if [ -n "$SSH_PORT" ] || [ "$DISABLE_SSH_PASSWD" = "true" ]; then
+            log_message "INFO" "清理主配置文件中的冲突设置"
+            # 注释掉主配置中的这些设置，让sshd_config.d中的配置生效
+            sudo sed -i 's/^Port/#Port/' "$SSH_CONFIG"
+            sudo sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' "$SSH_CONFIG"
+            sudo sed -i 's/^PermitRootLogin/#PermitRootLogin/' "$SSH_CONFIG"
+            sudo sed -i 's/^PubkeyAuthentication/#PubkeyAuthentication/' "$SSH_CONFIG"
+            sudo sed -i 's/^ChallengeResponseAuthentication/#ChallengeResponseAuthentication/' "$SSH_CONFIG"
+            sudo sed -i 's/^KbdInteractiveAuthentication/#KbdInteractiveAuthentication/' "$SSH_CONFIG"
+            sudo sed -i 's/^X11Forwarding/#X11Forwarding/' "$SSH_CONFIG"
+            sudo sed -i 's/^ClientAliveInterval/#ClientAliveInterval/' "$SSH_CONFIG"
+            sudo sed -i 's/^ClientAliveCountMax/#ClientAliveCountMax/' "$SSH_CONFIG"
+            sudo sed -i 's/^UseDNS/#UseDNS/' "$SSH_CONFIG"
+            sudo sed -i 's/^Protocol/#Protocol/' "$SSH_CONFIG"
+        fi
+        
+        # 读取当前有效的配置值
+        local current_port=$(sshd -T 2>/dev/null | grep "^port" | awk '{print $2}' || echo "22")
+        local effective_port="${SSH_PORT:-$current_port}"
+        
+        # 获取当前的PermitRootLogin设置
+        local current_permit_root=$(sshd -T 2>/dev/null | grep "^permitrootlogin" | awk '{print $2}' || echo "yes")
+        # 如果主配置文件中有明确设置，使用该设置
+        if grep -q "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null; then
+            current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" | awk '{print $2}')
+        fi
+        
         sudo tee "$SSH_CONFIG_DIR/99-security.conf" > /dev/null << EOF
 # Security configuration by setup.sh
 # This file overrides any previous configurations
 
 # 基本设置
-Port ${SSH_PORT:-22}
+Port $effective_port
 Protocol 2
 
 # 认证设置
@@ -691,7 +713,7 @@ ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 
 # Root登录设置
-PermitRootLogin $(grep "^PermitRootLogin" "$SSH_CONFIG" | awk '{print $2}' || echo "no")
+PermitRootLogin $current_permit_root
 
 # 安全设置
 X11Forwarding no
@@ -702,6 +724,13 @@ ClientAliveCountMax 2
 # PAM设置
 UsePAM yes
 EOF
+        
+        # 如果存在cloud-init配置，记录信息
+        if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
+            log_message "INFO" "检测到cloud-init SSH配置，我们的99-security.conf将覆盖其设置"
+            log_message "INFO" "cloud-init配置内容："
+            cat "$SSH_CONFIG_DIR/50-cloud-init.conf" | sed 's/^/  /' >> "$LOG_FILE" 2>/dev/null || true
+        fi
     fi
     
     # 测试SSH配置
@@ -1006,27 +1035,31 @@ ensure_internal_rules() {
     for network in "${internal_networks[@]}"; do
         for port in 80 443; do
             # INPUT链
-            if ! iptables -C INPUT -p tcp -s "$network" --dport "$port" -j ACCEPT 2>/dev/null; then
+            if ! iptables -C INPUT -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
                 iptables -I INPUT 1 -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK"
                 log_message "添加INPUT内网规则: $network:$port"
-            fi
-            
-            # DOCKER-USER链
-            if iptables -L DOCKER-USER -n &>/dev/null; then
-                if ! iptables -C DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN 2>/dev/null; then
-                    # 在DOCKER-USER链开头插入内网规则
-                    iptables -I DOCKER-USER 1 -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK"
-                    log_message "添加DOCKER-USER内网规则: $network:$port"
-                fi
             fi
         done
     done
     
-    # 确保lo接口规则
+    # DOCKER-USER链
     if iptables -L DOCKER-USER -n &>/dev/null; then
-        if ! iptables -C DOCKER-USER -i lo -j RETURN 2>/dev/null; then
+        # 先处理lo接口规则
+        if ! iptables -C DOCKER-USER -i lo -j RETURN -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
             iptables -I DOCKER-USER 1 -i lo -j RETURN -m comment --comment "$INTERNAL_MARK"
+            log_message "添加DOCKER-USER lo接口规则"
         fi
+        
+        # 添加内网规则
+        for network in "${internal_networks[@]}"; do
+            for port in 80 443; do
+                if ! iptables -C DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
+                    # 使用追加而不是插入，因为lo规则应该在最前面
+                    iptables -A DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK"
+                    log_message "添加DOCKER-USER内网规则: $network:$port"
+                fi
+            done
+        done
     fi
 }
 
@@ -1091,13 +1124,14 @@ add_cloudflare_rules() {
     
     # 获取内网规则之后的位置（在内网规则之后插入）
     local insert_pos_input=$(iptables -L INPUT -n --line-numbers | grep -E "$INTERNAL_MARK|192.168.0.0/16.*tcp dpt:443" | tail -1 | awk '{print $1}')
-    [ -z "$insert_pos_input" ] && insert_pos_input=4  # 预留前面几个位置给内网规则
+    [ -z "$insert_pos_input" ] && insert_pos_input=8  # 预留前面几个位置给内网规则（4个网段×2个端口）
     
     # 获取DOCKER-USER链中内网规则之后的位置
     local insert_pos_docker=1
     if iptables -L DOCKER-USER -n &>/dev/null; then
-        insert_pos_docker=$(iptables -L DOCKER-USER -n --line-numbers | grep -E "$INTERNAL_MARK|192.168.0.0/16.*tcp dpt:443" | tail -1 | awk '{print $1}')
-        [ -z "$insert_pos_docker" ] && insert_pos_docker=5  # 预留前面几个位置给内网规则
+        # 计算内网规则数量：1个lo规则 + 4个网段×2个端口 = 9
+        insert_pos_docker=$(iptables -L DOCKER-USER -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
+        [ -z "$insert_pos_docker" ] && insert_pos_docker=9  # 预留前面几个位置给内网规则
     fi
     
     while IFS= read -r ip; do
@@ -1316,21 +1350,21 @@ configure_firewall() {
         for ip in "${IPS[@]}"; do
             ip=$(echo "$ip" | xargs)
             if validate_ip "$ip"; then
-                sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
-            else
+                    sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
+                else
                 log_message "WARNING" "跳过无效的IP地址: $ip"
             fi
         done
         
         # 拒绝其他SSH连接
-        sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
+            sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
     fi
     
     # 禁用ICMP
     if [ "$DISABLE_ICMP" = "true" ]; then
         log_message "INFO" "禁用ICMP..."
-        sudo iptables -A INPUT -p icmp -j DROP
-        sudo iptables -A OUTPUT -p icmp -j DROP
+            sudo iptables -A INPUT -p icmp -j DROP
+            sudo iptables -A OUTPUT -p icmp -j DROP
     fi
     
     # Web端口保护
@@ -1340,20 +1374,19 @@ configure_firewall() {
         # 清理现有规则
         while sudo iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:(80|443)" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do :; done
         
-        # 允许本地和内网访问
+        # 允许本地和内网访问（添加internal-network标记）
         for port in 80 443; do
-            sudo iptables -A INPUT -p tcp --dport $port -s 127.0.0.1 -j ACCEPT
-            sudo iptables -A INPUT -p tcp --dport $port -s 10.0.0.0/8 -j ACCEPT
-            sudo iptables -A INPUT -p tcp --dport $port -s 172.16.0.0/12 -j ACCEPT
-            sudo iptables -A INPUT -p tcp --dport $port -s 192.168.0.0/16 -j ACCEPT
+            sudo iptables -A INPUT -p tcp --dport $port -s 127.0.0.1 -j ACCEPT -m comment --comment "internal-network"
+            sudo iptables -A INPUT -p tcp --dport $port -s 10.0.0.0/8 -j ACCEPT -m comment --comment "internal-network"
+            sudo iptables -A INPUT -p tcp --dport $port -s 172.16.0.0/12 -j ACCEPT -m comment --comment "internal-network"
+            sudo iptables -A INPUT -p tcp --dport $port -s 192.168.0.0/16 -j ACCEPT -m comment --comment "internal-network"
         done
         
         # 创建Cloudflare IP更新脚本和定时任务
         create_cloudflare_update_script
         
-        # 拒绝其他访问
-        sudo iptables -A INPUT -p tcp --dport 80 -j DROP
-        sudo iptables -A INPUT -p tcp --dport 443 -j DROP
+        # 注意：这里不添加DROP规则，由Cloudflare更新脚本处理
+        # 这样可以避免重复的DROP规则
         
         # 如果Docker已安装，配置DOCKER-USER链
         if command -v docker &> /dev/null; then
@@ -1380,24 +1413,36 @@ configure_docker_firewall() {
         log_message "INFO" "DOCKER-USER链已存在"
     fi
     
-    # 清理旧规则
+    # 清理旧规则（包括所有Web端口相关规则）
     while sudo iptables -L DOCKER-USER -n --line-numbers | grep -E "dpt:(80|443)" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D DOCKER-USER 2>/dev/null; do :; done
     
-    # 允许本地和内网
-    sudo iptables -I DOCKER-USER -i lo -j RETURN
-    sudo iptables -A DOCKER-USER -s 127.0.0.1 -j RETURN
-    sudo iptables -A DOCKER-USER -s 10.0.0.0/8 -j RETURN
-    sudo iptables -A DOCKER-USER -s 172.16.0.0/12 -j RETURN
-    sudo iptables -A DOCKER-USER -s 192.168.0.0/16 -j RETURN
+    # 清理可能存在的旧的内网规则（没有标记的）
+    while sudo iptables -L DOCKER-USER -n --line-numbers | grep -E "(127.0.0.1|10.0.0.0/8|172.16.0.0/12|192.168.0.0/16)" | grep -v "internal-network" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D DOCKER-USER 2>/dev/null; do :; done
     
-    # Cloudflare IP会由更新脚本处理
+    # 允许本地和内网（添加internal-network标记）
+    # lo接口规则
+    if ! sudo iptables -C DOCKER-USER -i lo -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
+        sudo iptables -I DOCKER-USER -i lo -j RETURN -m comment --comment "internal-network"
+    fi
     
-    # 拒绝其他访问
-    sudo iptables -A DOCKER-USER -p tcp --dport 80 -j DROP
-    sudo iptables -A DOCKER-USER -p tcp --dport 443 -j DROP
+    # 为每个端口添加内网规则
+    for port in 80 443; do
+        if ! sudo iptables -C DOCKER-USER -s 127.0.0.1 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
+            sudo iptables -A DOCKER-USER -s 127.0.0.1 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
+        fi
+        if ! sudo iptables -C DOCKER-USER -s 10.0.0.0/8 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
+            sudo iptables -A DOCKER-USER -s 10.0.0.0/8 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
+        fi
+        if ! sudo iptables -C DOCKER-USER -s 172.16.0.0/12 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
+            sudo iptables -A DOCKER-USER -s 172.16.0.0/12 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
+        fi
+        if ! sudo iptables -C DOCKER-USER -s 192.168.0.0/16 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
+            sudo iptables -A DOCKER-USER -s 192.168.0.0/16 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
+        fi
+    done
     
-    # 允许其他流量
-    sudo iptables -A DOCKER-USER -j RETURN
+    # 注意：这里不添加DROP规则和最终的RETURN规则
+    # 它们将由Cloudflare更新脚本统一管理，避免重复
     
     log_message "INFO" "Docker防火墙配置完成"
 }
@@ -1453,9 +1498,9 @@ install_docker() {
     if [ "$script_size" -lt 1000 ]; then
         log_message "ERROR" "Docker安装脚本可能不完整"
         rm -f "$docker_script"
-        return 1
-    fi
-    
+            return 1
+        fi
+        
     # 设置脚本权限
     chmod 700 "$docker_script"
     
@@ -1473,7 +1518,7 @@ install_docker() {
         [ "$region" = "auto" ] && region=$(detect_server_region)
         
         if [ "$region" = "cn" ]; then
-            sudo mkdir -p /etc/docker
+    sudo mkdir -p /etc/docker
             sudo tee /etc/docker/daemon.json > /dev/null << EOF
 {
   "registry-mirrors": [
@@ -1488,19 +1533,19 @@ install_docker() {
   }
 }
 EOF
-            sudo systemctl daemon-reload
-            sudo systemctl restart docker
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
         fi
         
         log_message "INFO" "Docker安装完成"
     else
         log_message "ERROR" "Docker安装失败"
         rm -f "$docker_script"
-        return 1
+                return 1
     fi
 }
-
-# 显示配置总结
+    
+    # 显示配置总结
 show_summary() {
     local ssh_port="${SSH_PORT:-22}"
     [ -z "$SSH_PORT" ] && ssh_port=$(sudo ss -tlnp | grep sshd | head -1 | sed 's/.*:\([0-9]\+\) .*/\1/' || echo "22")
