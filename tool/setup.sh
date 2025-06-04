@@ -408,7 +408,7 @@ configure_ssh_keys() {
     [ -z "$SSH_KEY" ] && return 0
     
     # 验证SSH公钥格式
-    if ! echo "$SSH_KEY" | grep -qE '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/]+=* .*$'; then
+    if ! echo "$SSH_KEY" | grep -qE '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/]+=*'; then
         log_message "ERROR" "无效的SSH公钥格式"
         return 1
     fi
@@ -423,9 +423,9 @@ configure_ssh_keys() {
     # 添加SSH公钥
     if ! grep -qF "$SSH_KEY" "$auth_keys"; then
         echo "$SSH_KEY" >> "$auth_keys"
-        log_message "INFO" "SSH公钥已添加"
+        log_message "INFO" "SSH公钥已添加到 $(whoami) 用户 ($auth_keys)"
     else
-        log_message "INFO" "SSH公钥已存在"
+        log_message "INFO" "SSH公钥已存在于 $(whoami) 用户"
     fi
 }
 
@@ -664,31 +664,44 @@ configure_ssh() {
         fi
     fi
     
-    # 处理sshd_config.d目录 - 只在主配置中没有设置时才创建
+        # 处理sshd_config.d目录 - 确保覆盖cloud-init等其他配置
     if [ -d "$SSH_CONFIG_DIR" ]; then
-        # 先检查主配置文件中是否已经有这些设置
-        local need_config_d="false"
-        
-        # 如果端口在主配置中没有设置，才在config.d中设置
-        if [ -n "$SSH_PORT" ] && ! grep -q "^Port $SSH_PORT" "$SSH_CONFIG"; then
-            need_config_d="true"
+        # 检查是否存在cloud-init配置文件
+        if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
+            log_message "INFO" "检测到cloud-init SSH配置，将其禁用"
+            # 重命名cloud-init配置文件以禁用它
+            sudo mv "$SSH_CONFIG_DIR/50-cloud-init.conf" "$SSH_CONFIG_DIR/50-cloud-init.conf.disabled" 2>/dev/null || true
         fi
         
-        # 如果有需要在config.d中设置的内容
-        if [ "$need_config_d" = "true" ] || [ ! -f "$SSH_CONFIG_DIR/99-security.conf" ]; then
-            # 创建精简的配置文件，只包含必要的覆盖项
-            sudo tee "$SSH_CONFIG_DIR/99-security.conf" > /dev/null << EOF
-# Security configuration by setup.sh - Only overrides
+        # 创建99-security.conf以确保我们的配置优先级最高
+        log_message "INFO" "创建SSH安全配置覆盖文件"
+        sudo tee "$SSH_CONFIG_DIR/99-security.conf" > /dev/null << EOF
+# Security configuration by setup.sh
+# This file overrides any previous configurations
+
+# 基本设置
+Port ${SSH_PORT:-22}
+Protocol 2
+
+# 认证设置
+PubkeyAuthentication yes
+PasswordAuthentication $([ "$DISABLE_SSH_PASSWD" = "true" ] && echo "no" || echo "yes")
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+
+# Root登录设置
+PermitRootLogin $(grep "^PermitRootLogin" "$SSH_CONFIG" | awk '{print $2}' || echo "no")
+
+# 安全设置
+X11Forwarding no
+UseDNS no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# PAM设置
+UsePAM yes
 EOF
-            
-            # 只添加主配置中没有的设置
-            if [ -n "$SSH_PORT" ] && ! grep -q "^Port" "$SSH_CONFIG"; then
-                echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG_DIR/99-security.conf"
-            fi
-        else
-            # 如果不需要config.d配置，删除可能存在的旧文件
-            [ -f "$SSH_CONFIG_DIR/99-security.conf" ] && sudo rm -f "$SSH_CONFIG_DIR/99-security.conf"
-        fi
     fi
     
     # 测试SSH配置
@@ -700,9 +713,45 @@ EOF
     fi
     
     # 重启SSH服务
-    sudo systemctl restart ssh || sudo systemctl restart sshd
+    if sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null; then
+        log_message "INFO" "SSH服务重启成功"
+    else
+        log_message "ERROR" "SSH服务重启失败"
+        return 1
+    fi
     
+    # 等待SSH服务启动
+    sleep 2
+    
+    # 验证SSH服务状态
+    local ssh_port="${SSH_PORT:-22}"
+    if sudo ss -tlnp | grep -q ":$ssh_port"; then
+        log_message "INFO" "SSH服务正在监听端口 $ssh_port"
+    else
+        log_message "ERROR" "SSH服务未能在端口 $ssh_port 上启动"
+        return 1
+    fi
+    
+    # 显示SSH配置状态
     log_message "INFO" "SSH配置完成"
+    log_message "INFO" "当前SSH配置状态："
+    log_message "INFO" "  端口: $(grep "^Port" "$SSH_CONFIG" 2>/dev/null || echo "22")"
+    log_message "INFO" "  密码认证: $(grep "^PasswordAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PasswordAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+    log_message "INFO" "  公钥认证: $(grep "^PubkeyAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PubkeyAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+    log_message "INFO" "  Root登录: $(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+    
+    # 检查authorized_keys文件
+    if [ -n "$SSH_KEY" ]; then
+        log_message "INFO" "SSH密钥已配置的用户："
+        if [ -f "/root/.ssh/authorized_keys" ] && grep -qF "${SSH_KEY%% *}" "/root/.ssh/authorized_keys"; then
+            log_message "INFO" "  - root用户"
+        fi
+        if [ "$CREATE_DEVOPS_USER" = "true" ] && [ -f "/home/$SUDO_USERNAME/.ssh/authorized_keys" ]; then
+            if sudo grep -qF "${SSH_KEY%% *}" "/home/$SUDO_USERNAME/.ssh/authorized_keys"; then
+                log_message "INFO" "  - $SUDO_USERNAME用户"
+            fi
+        fi
+    fi
 }
 
 # 配置fail2ban
@@ -927,6 +976,7 @@ create_cloudflare_update_script() {
 # Cloudflare IP更新脚本
 LOG_FILE="/var/log/cloudflare-ip-update.log"
 COMMENT_MARK="cloudflare-auto"  # 用于标记Cloudflare规则
+INTERNAL_MARK="internal-network"  # 用于标记内网规则
 
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
@@ -945,6 +995,39 @@ get_cloudflare_ips() {
     
     echo "$ipv4_list"
     echo "$ipv6_list"
+}
+
+# 确保内网规则存在
+ensure_internal_rules() {
+    log_message "检查并确保内网规则存在..."
+    
+    local internal_networks=("127.0.0.1" "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16")
+    
+    for network in "${internal_networks[@]}"; do
+        for port in 80 443; do
+            # INPUT链
+            if ! iptables -C INPUT -p tcp -s "$network" --dport "$port" -j ACCEPT 2>/dev/null; then
+                iptables -I INPUT 1 -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK"
+                log_message "添加INPUT内网规则: $network:$port"
+            fi
+            
+            # DOCKER-USER链
+            if iptables -L DOCKER-USER -n &>/dev/null; then
+                if ! iptables -C DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN 2>/dev/null; then
+                    # 在DOCKER-USER链开头插入内网规则
+                    iptables -I DOCKER-USER 1 -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK"
+                    log_message "添加DOCKER-USER内网规则: $network:$port"
+                fi
+            fi
+        done
+    done
+    
+    # 确保lo接口规则
+    if iptables -L DOCKER-USER -n &>/dev/null; then
+        if ! iptables -C DOCKER-USER -i lo -j RETURN 2>/dev/null; then
+            iptables -I DOCKER-USER 1 -i lo -j RETURN -m comment --comment "$INTERNAL_MARK"
+        fi
+    fi
 }
 
 # 清理旧的Cloudflare规则（使用注释标记）
@@ -1006,9 +1089,16 @@ add_cloudflare_rules() {
     
     log_message "添加新的Cloudflare规则..."
     
-    # 获取内网和本地规则的位置（在这些规则之后插入）
-    local insert_pos_input=$(iptables -L INPUT -n --line-numbers | grep -E "192.168.0.0/16.*tcp dpt:443" | tail -1 | awk '{print $1}')
-    [ -z "$insert_pos_input" ] && insert_pos_input=1
+    # 获取内网规则之后的位置（在内网规则之后插入）
+    local insert_pos_input=$(iptables -L INPUT -n --line-numbers | grep -E "$INTERNAL_MARK|192.168.0.0/16.*tcp dpt:443" | tail -1 | awk '{print $1}')
+    [ -z "$insert_pos_input" ] && insert_pos_input=4  # 预留前面几个位置给内网规则
+    
+    # 获取DOCKER-USER链中内网规则之后的位置
+    local insert_pos_docker=1
+    if iptables -L DOCKER-USER -n &>/dev/null; then
+        insert_pos_docker=$(iptables -L DOCKER-USER -n --line-numbers | grep -E "$INTERNAL_MARK|192.168.0.0/16.*tcp dpt:443" | tail -1 | awk '{print $1}')
+        [ -z "$insert_pos_docker" ] && insert_pos_docker=5  # 预留前面几个位置给内网规则
+    fi
     
     while IFS= read -r ip; do
         # 跳过空行和非IP格式的行
@@ -1029,10 +1119,10 @@ add_cloudflare_rules() {
                     fi
                 fi
                 
-                # DOCKER-USER链
+                # DOCKER-USER链 - 使用插入而不是追加
                 if iptables -L DOCKER-USER -n &>/dev/null; then
                     if ! rule_exists DOCKER-USER "$ip" "$port"; then
-                        if iptables -A DOCKER-USER -s "$ip" -p tcp --dport "$port" -j RETURN -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
+                        if iptables -I DOCKER-USER $((++insert_pos_docker)) -s "$ip" -p tcp --dport "$port" -j RETURN -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
                             ((count++))
                         else
                             ((errors++))
@@ -1092,14 +1182,30 @@ ensure_drop_rules_last() {
 # 验证防火墙规则
 verify_rules() {
     local cf_rules=$(iptables -L INPUT -n | grep -c "$COMMENT_MARK" || echo 0)
-    local docker_rules=0
+    local internal_rules=$(iptables -L INPUT -n | grep -c "$INTERNAL_MARK" || echo 0)
+    local docker_cf_rules=0
+    local docker_internal_rules=0
     
     if iptables -L DOCKER-USER -n &>/dev/null; then
-        docker_rules=$(iptables -L DOCKER-USER -n | grep -c "$COMMENT_MARK" || echo 0)
+        docker_cf_rules=$(iptables -L DOCKER-USER -n | grep -c "$COMMENT_MARK" || echo 0)
+        docker_internal_rules=$(iptables -L DOCKER-USER -n | grep -c "$INTERNAL_MARK" || echo 0)
     fi
     
-    log_message "验证: INPUT链中有 $cf_rules 条Cloudflare规则"
-    [ $docker_rules -gt 0 ] && log_message "验证: DOCKER-USER链中有 $docker_rules 条Cloudflare规则"
+    log_message "验证: INPUT链中有 $internal_rules 条内网规则，$cf_rules 条Cloudflare规则"
+    if [ $docker_cf_rules -gt 0 ] || [ $docker_internal_rules -gt 0 ]; then
+        log_message "验证: DOCKER-USER链中有 $docker_internal_rules 条内网规则，$docker_cf_rules 条Cloudflare规则"
+    fi
+    
+    # 验证规则顺序
+    log_message "验证规则顺序..."
+    local first_drop=$(iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:(80|443).*DROP" | head -1 | awk '{print $1}')
+    local last_accept=$(iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:(80|443).*ACCEPT" | tail -1 | awk '{print $1}')
+    
+    if [ -n "$first_drop" ] && [ -n "$last_accept" ] && [ "$last_accept" -gt "$first_drop" ]; then
+        log_message "警告: 发现ACCEPT规则在DROP规则之后，可能存在安全风险"
+    else
+        log_message "验证: 规则顺序正确"
+    fi
 }
 
 # 主函数
@@ -1119,6 +1225,9 @@ main() {
         log_message "信息: 未检测到IPv6支持，仅配置IPv4规则"
     fi
     
+    # 首先确保内网规则存在
+    ensure_internal_rules
+    
     # 获取最新的Cloudflare IP
     local cf_ips=$(get_cloudflare_ips)
     
@@ -1127,10 +1236,10 @@ main() {
         exit 1
     fi
     
-    # 清理旧规则
+    # 清理旧的Cloudflare规则
     clean_old_rules
     
-    # 添加新规则
+    # 添加新的Cloudflare规则
     add_cloudflare_rules "$cf_ips"
     
     # 验证规则
@@ -1156,7 +1265,7 @@ mkdir -p $(dirname "$LOG_FILE")
 touch "$LOG_FILE"
 
 # 捕获错误
-trap 'log_message "错误: 脚本异常退出 (行号: \$LINENO)"' ERR
+trap 'log_message "错误: 脚本异常退出 (行号: $LINENO)"' ERR
 
 # 执行主函数
 main
@@ -1246,8 +1355,8 @@ configure_firewall() {
         sudo iptables -A INPUT -p tcp --dport 80 -j DROP
         sudo iptables -A INPUT -p tcp --dport 443 -j DROP
         
-        # 如果Docker已安装或将要安装，配置DOCKER-USER链
-        if command -v docker &> /dev/null || [ "$INSTALL_DOCKER" = "true" ]; then
+        # 如果Docker已安装，配置DOCKER-USER链
+        if command -v docker &> /dev/null; then
             configure_docker_firewall
         fi
     fi
@@ -1263,10 +1372,13 @@ configure_docker_firewall() {
     log_message "INFO" "配置Docker防火墙规则..."
     
     # 确保DOCKER-USER链存在
-    sudo iptables -L DOCKER-USER -n &>/dev/null || {
+    if ! sudo iptables -L DOCKER-USER -n &>/dev/null 2>&1; then
+        log_message "INFO" "创建DOCKER-USER链"
         sudo iptables -N DOCKER-USER
         sudo iptables -I FORWARD -j DOCKER-USER
-    }
+    else
+        log_message "INFO" "DOCKER-USER链已存在"
+    fi
     
     # 清理旧规则
     while sudo iptables -L DOCKER-USER -n --line-numbers | grep -E "dpt:(80|443)" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D DOCKER-USER 2>/dev/null; do :; done
@@ -1321,14 +1433,7 @@ install_docker() {
     log_message "INFO" "安装Docker..."
     
     if command -v docker &> /dev/null; then
-        log_message "INFO" " Docker已安装"
-        
-        # 如果启用了Web保护，重新运行Cloudflare更新脚本以配置DOCKER-USER链
-        if [ "$PROTECT_WEB_PORTS" = "true" ] && [ -f "$CF_UPDATE_SCRIPT" ]; then
-            log_message "INFO" "更新Docker防火墙规则..."
-            sudo "$CF_UPDATE_SCRIPT"
-        fi
-        
+        log_message "INFO" "Docker已安装"
         return 0
     fi
     
@@ -1388,12 +1493,6 @@ EOF
         fi
         
         log_message "INFO" "Docker安装完成"
-        
-        # 如果启用了Web保护，重新运行Cloudflare更新脚本以配置DOCKER-USER链
-        if [ "$PROTECT_WEB_PORTS" = "true" ] && [ -f "$CF_UPDATE_SCRIPT" ]; then
-            log_message "INFO" "更新Docker防火墙规则..."
-            sudo "$CF_UPDATE_SCRIPT"
-        fi
     else
         log_message "ERROR" "Docker安装失败"
         rm -f "$docker_script"
@@ -1444,9 +1543,24 @@ show_summary() {
     echo "配置备份: $CONFIG_BACKUP_DIR"
     [ "$PROTECT_WEB_PORTS" = "true" ] && echo "CF更新脚本: $CF_UPDATE_SCRIPT"
     echo "--------------------------------------------------"
-    echo "SSH登录命令: ssh -p $ssh_port 用户名@服务器IP"
+    echo "SSH登录命令:"
+    if [ "$CREATE_DEVOPS_USER" = "true" ]; then
+        echo "  ssh -p $ssh_port $SUDO_USERNAME@服务器IP"
+    fi
+    if [ -f "/root/.ssh/authorized_keys" ] && [ -s "/root/.ssh/authorized_keys" ]; then
+        local root_login=$(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}' || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}' || echo "yes")
+        if [ "$root_login" != "no" ]; then
+            echo "  ssh -p $ssh_port root@服务器IP"
+        fi
+    fi
+    echo ""
     
-    [ "$DISABLE_SSH_PASSWD" = "true" ] && echo -e "\n注意: 请确保已保存SSH密钥，密码登录已禁用！"
+    # 诊断信息
+    if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf.disabled" ]; then
+        echo "注意: cloud-init SSH配置已禁用"
+    fi
+    
+    [ "$DISABLE_SSH_PASSWD" = "true" ] && echo -e "警告: 密码登录已禁用，请确保已保存SSH密钥！"
 }
 
 # 主脚本的主函数
@@ -1472,10 +1586,10 @@ main() {
     configure_system_optimization
     configure_security_audit
     
-    # Docker安装
+    # Docker安装（在防火墙配置之前）
     install_docker
     
-    # 防火墙配置
+    # 防火墙配置（在Docker安装之后，这样可以一次性配置所有规则）
     configure_firewall
     
     # 显示配置总结
