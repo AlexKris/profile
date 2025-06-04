@@ -11,7 +11,12 @@ readonly DEFAULT_SSH_PORT="22"
 readonly MIN_PORT=1024
 readonly MAX_PORT=65535
 # 获取脚本所在目录
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # 如果通过管道执行，使用当前目录
+    SCRIPT_DIR="$(pwd)"
+fi
 # 添加时间戳到配置备份目录名
 readonly TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 readonly CONFIG_BACKUP_DIR="$SCRIPT_DIR/ssh_backups_$TIMESTAMP"
@@ -730,6 +735,13 @@ EOF
             log_message "INFO" "检测到cloud-init SSH配置，我们的99-security.conf将覆盖其设置"
             log_message "INFO" "cloud-init配置内容："
             cat "$SSH_CONFIG_DIR/50-cloud-init.conf" | sed 's/^/  /' >> "$LOG_FILE" 2>/dev/null || true
+            
+            # 强制确保cloud-init的设置不会生效
+            # 方法1：直接修改50-cloud-init.conf，注释掉冲突的设置
+            if grep -q "^PasswordAuthentication" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
+                log_message "INFO" "注释掉cloud-init中的PasswordAuthentication设置"
+                sudo sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
+            fi
         fi
     fi
     
@@ -985,6 +997,9 @@ EOF
     else
         sudo yum install -y etckeeper git || sudo dnf install -y etckeeper git
     fi
+    
+    # 配置git默认分支名，避免警告提示
+    sudo git config --global init.defaultBranch main
     
     # 初始化etckeeper
     if [ ! -d /etc/.git ]; then
@@ -1282,6 +1297,7 @@ main() {
     # 保存iptables规则
     if [ -f /etc/debian_version ]; then
         if command -v iptables-save &>/dev/null; then
+            mkdir -p /etc/iptables 2>/dev/null
             iptables-save > /etc/iptables/rules.v4 2>/dev/null || log_message "警告: 无法保存IPv4规则"
             ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || log_message "警告: 无法保存IPv6规则"
         fi
