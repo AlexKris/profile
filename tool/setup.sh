@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.1.0"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -52,6 +52,8 @@ PROTECT_WEB_PORTS="false"
 ENABLE_SECURITY_AUDIT="true"  # 默认启用安全审计
 # Docker相关
 INSTALL_DOCKER="false"
+# 新增：控制是否禁用root登录
+DISABLE_ROOT_LOGIN="false"
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -209,6 +211,7 @@ usage() {
     echo "  --protect_web             保护Web端口(80/443)，仅允许Cloudflare和内网访问"
     echo "  --disable_audit           禁用安全审计（默认启用auditd和etckeeper）"
     echo "  --install_docker          安装Docker并自动配置防火墙规则"
+    echo "  --disable_root_login      禁用root用户SSH登录（建议在创建管理员用户后使用）"
     echo ""
     echo "地区说明:"
     echo "  auto - 自动检测地区（推荐）"
@@ -226,6 +229,7 @@ usage() {
     echo "  $0 --create_user devops --ssh_key \"ssh-rsa AAAA...\" --disable_ssh_pwd"
     echo "  $0 --ssh_whitelist \"1.2.3.4,5.6.7.8/24\" --disable_icmp --protect_web"
     echo "  $0 --install_docker --protect_web --region cn"
+    echo "  $0 --create_user admin --ssh_key \"ssh-rsa AAAA...\" --disable_root_login --disable_ssh_pwd"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
 }
@@ -312,6 +316,8 @@ parse_args() {
                 ENABLE_SECURITY_AUDIT="false" ;;
             --install_docker)
                 INSTALL_DOCKER="true" ;;
+            --disable_root_login)
+                DISABLE_ROOT_LOGIN="true" ;;
             *) echo "未知选项: $1"; usage; exit 1 ;;
         esac
         shift
@@ -593,7 +599,21 @@ configure_ssh() {
     grep -q "^PubkeyAuthentication" "$SSH_CONFIG" || echo "PubkeyAuthentication yes" | sudo tee -a "$SSH_CONFIG"
     
     # 处理root登录设置
-    if [ "$can_disable_root" = "true" ]; then
+    # 如果用户明确设置了--disable_root_login参数，优先使用该设置
+    if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
+        # 安全检查：确保有其他管理员用户或SSH密钥配置
+        if [ "$has_sudo_user" = "true" ] || [ "$has_root_ssh_key" = "true" ] || [ "$CREATE_DEVOPS_USER" = "true" ]; then
+            log_message "INFO" "根据用户要求禁用root登录"
+            sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
+            grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
+        else
+            log_message "ERROR" "无法禁用root登录：未检测到其他管理员账户"
+            log_message "ERROR" "请先创建具有sudo权限的用户或配置SSH密钥"
+            log_message "ERROR" "使用 --create_user USERNAME --ssh_key \"KEY\" 创建管理员用户"
+            return 1
+        fi
+    elif [ "$can_disable_root" = "true" ]; then
+        # 自动逻辑：如果检测到其他管理员账户，可以安全禁用root登录
         log_message "INFO" "检测到其他管理员账户，可以安全禁用root登录"
         sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
         grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
@@ -700,6 +720,11 @@ configure_ssh() {
         # 如果主配置文件中有明确设置，使用该设置
         if grep -q "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null; then
             current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" | awk '{print $2}')
+        fi
+        
+        # 如果用户明确设置了--disable_root_login，确保在99-security.conf中也体现
+        if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
+            current_permit_root="no"
         fi
         
         sudo tee "$SSH_CONFIG_DIR/99-security.conf" > /dev/null << EOF
