@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="2.1.1"
+readonly SCRIPT_VERSION="2.1.3"
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -1153,9 +1153,6 @@ EOF
     
     # 只有在安装成功后才配置etckeeper
     if [ "$install_success" = "true" ]; then
-        # 配置git默认分支名，避免警告提示
-        sudo git config --global init.defaultBranch main
-        
         # 初始化etckeeper
         if [ ! -d /etc/.git ]; then
             if sudo etckeeper init; then
