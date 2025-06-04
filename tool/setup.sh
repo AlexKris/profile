@@ -362,7 +362,7 @@ fix_sudo_issue() {
     if ! command -v sudo &> /dev/null; then
         log_message "INFO" "安装sudo..."
         if [ "$OS_TYPE" = "debian" ]; then
-            wait_for_apt && apt-get update -y && apt-get install -y sudo
+            wait_for_apt && apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
         else
             yum install -y sudo || dnf install -y sudo
         fi
@@ -387,12 +387,12 @@ update_system_install_dependencies() {
         wait_for_apt || return 1
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update
-        sudo apt-get upgrade -y
-        sudo apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd
+        sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd
 
         # 单独处理iperf3
         echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
-        sudo apt-get install -y -o Dpkg::Options::="--force-confdef" iperf3
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" iperf3
     else
         local pkg_manager="yum"
         command -v dnf &> /dev/null && pkg_manager="dnf"
@@ -778,7 +778,7 @@ configure_timezone_ntp() {
     if [ "$OS_TYPE" = "debian" ]; then
         if [ "$NTP_SERVICE" = "chrony" ] || ([ "$NTP_SERVICE" = "auto" ] && command -v chronyd &> /dev/null); then
             # 使用chrony
-            wait_for_apt && sudo apt-get install -y chrony
+            wait_for_apt && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y chrony
             sudo systemctl stop systemd-timesyncd 2>/dev/null || true
             sudo systemctl disable systemd-timesyncd 2>/dev/null || true
             
@@ -881,7 +881,7 @@ configure_security_audit() {
     
     # 安装auditd
     if [ "$OS_TYPE" = "debian" ]; then
-        wait_for_apt && sudo apt-get install -y auditd
+        wait_for_apt && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y auditd
     else
         sudo yum install -y audit || sudo dnf install -y audit
     fi
@@ -903,7 +903,7 @@ EOF
     
     # 安装etckeeper
     if [ "$OS_TYPE" = "debian" ]; then
-        wait_for_apt && sudo apt-get install -y etckeeper git
+        wait_for_apt && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y etckeeper git
     else
         sudo yum install -y etckeeper git || sudo dnf install -y etckeeper git
     fi
@@ -1300,7 +1300,7 @@ save_firewall_rules() {
             wait_for_apt
             echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | sudo debconf-set-selections
             echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | sudo debconf-set-selections
-            sudo apt-get install -y iptables-persistent
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
         fi
         
         sudo mkdir -p /etc/iptables
