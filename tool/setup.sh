@@ -1344,7 +1344,7 @@ EOF
 configure_firewall() {
     log_message "INFO" "配置防火墙规则..."
     
-    # 首先确保SSH端口始终可访问（除非配置了白名单）
+    # SSH端口规则（这个保留在setup脚本中，因为是独立的）
     local ssh_port="${SSH_PORT:-22}"
     if [ "$ENABLE_SSH_WHITELIST" != "true" ]; then
         # 确保SSH端口开放
@@ -1366,47 +1366,41 @@ configure_firewall() {
         for ip in "${IPS[@]}"; do
             ip=$(echo "$ip" | xargs)
             if validate_ip "$ip"; then
-                    sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
-                else
+                sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
+            else
                 log_message "WARNING" "跳过无效的IP地址: $ip"
             fi
         done
         
         # 拒绝其他SSH连接
-            sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
+        sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
     fi
     
     # 禁用ICMP
     if [ "$DISABLE_ICMP" = "true" ]; then
         log_message "INFO" "禁用ICMP..."
-            sudo iptables -A INPUT -p icmp -j DROP
-            sudo iptables -A OUTPUT -p icmp -j DROP
+        sudo iptables -A INPUT -p icmp -j DROP
+        sudo iptables -A OUTPUT -p icmp -j DROP
     fi
     
-    # Web端口保护
+    # Web端口保护 - 改为由定时任务脚本统一处理
     if [ "$PROTECT_WEB_PORTS" = "true" ]; then
         log_message "INFO" "配置Web端口保护..."
         
-        # 清理现有规则
-        while sudo iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:(80|443)" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do :; done
-        
-        # 允许本地和内网访问（添加internal-network标记）
-        for port in 80 443; do
-            sudo iptables -A INPUT -p tcp --dport $port -s 127.0.0.1 -j ACCEPT -m comment --comment "internal-network"
-            sudo iptables -A INPUT -p tcp --dport $port -s 10.0.0.0/8 -j ACCEPT -m comment --comment "internal-network"
-            sudo iptables -A INPUT -p tcp --dport $port -s 172.16.0.0/12 -j ACCEPT -m comment --comment "internal-network"
-            sudo iptables -A INPUT -p tcp --dport $port -s 192.168.0.0/16 -j ACCEPT -m comment --comment "internal-network"
-        done
-        
-        # 创建Cloudflare IP更新脚本和定时任务
+        # 创建Cloudflare IP更新脚本
         create_cloudflare_update_script
         
-        # 注意：这里不添加DROP规则，由Cloudflare更新脚本处理
-        # 这样可以避免重复的DROP规则
-        
-        # 如果Docker已安装，配置DOCKER-USER链
-        if command -v docker &> /dev/null; then
-            configure_docker_firewall
+        # 立即执行一次脚本来配置所有Web相关的防火墙规则
+        # 包括内网规则、Cloudflare规则和DOCKER-USER链
+        log_message "INFO" "执行防火墙规则配置..."
+        if [ -f "$CF_UPDATE_SCRIPT" ]; then
+            sudo "$CF_UPDATE_SCRIPT" || {
+                log_message "ERROR" "防火墙规则配置失败"
+                return 1
+            }
+        else
+            log_message "ERROR" "防火墙配置脚本不存在"
+            return 1
         fi
     fi
     
@@ -1414,53 +1408,6 @@ configure_firewall() {
     save_firewall_rules
     
     log_message "INFO" "防火墙配置完成"
-}
-
-# 配置Docker防火墙
-configure_docker_firewall() {
-    log_message "INFO" "配置Docker防火墙规则..."
-    
-    # 确保DOCKER-USER链存在
-    if ! sudo iptables -L DOCKER-USER -n &>/dev/null 2>&1; then
-        log_message "INFO" "创建DOCKER-USER链"
-        sudo iptables -N DOCKER-USER
-        sudo iptables -I FORWARD -j DOCKER-USER
-    else
-        log_message "INFO" "DOCKER-USER链已存在"
-    fi
-    
-    # 清理旧规则（包括所有Web端口相关规则）
-    while sudo iptables -L DOCKER-USER -n --line-numbers | grep -E "dpt:(80|443)" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D DOCKER-USER 2>/dev/null; do :; done
-    
-    # 清理可能存在的旧的内网规则（没有标记的）
-    while sudo iptables -L DOCKER-USER -n --line-numbers | grep -E "(127.0.0.1|10.0.0.0/8|172.16.0.0/12|192.168.0.0/16)" | grep -v "internal-network" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D DOCKER-USER 2>/dev/null; do :; done
-    
-    # 允许本地和内网（添加internal-network标记）
-    # lo接口规则
-    if ! sudo iptables -C DOCKER-USER -i lo -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
-        sudo iptables -I DOCKER-USER -i lo -j RETURN -m comment --comment "internal-network"
-    fi
-    
-    # 为每个端口添加内网规则
-    for port in 80 443; do
-        if ! sudo iptables -C DOCKER-USER -s 127.0.0.1 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
-            sudo iptables -A DOCKER-USER -s 127.0.0.1 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
-        fi
-        if ! sudo iptables -C DOCKER-USER -s 10.0.0.0/8 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
-            sudo iptables -A DOCKER-USER -s 10.0.0.0/8 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
-        fi
-        if ! sudo iptables -C DOCKER-USER -s 172.16.0.0/12 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
-            sudo iptables -A DOCKER-USER -s 172.16.0.0/12 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
-        fi
-        if ! sudo iptables -C DOCKER-USER -s 192.168.0.0/16 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network" 2>/dev/null; then
-            sudo iptables -A DOCKER-USER -s 192.168.0.0/16 -p tcp --dport "$port" -j RETURN -m comment --comment "internal-network"
-        fi
-    done
-    
-    # 注意：这里不添加DROP规则和最终的RETURN规则
-    # 它们将由Cloudflare更新脚本统一管理，避免重复
-    
-    log_message "INFO" "Docker防火墙配置完成"
 }
 
 # 保存防火墙规则
