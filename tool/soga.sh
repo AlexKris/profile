@@ -5,8 +5,16 @@ set -euo pipefail
 
 BASE_DIR="/root/soga"
 CONFIG_DIR="/etc/soga"
-DOCKER_IMAGE="vaxilu/soga:latest"
+DOCKER_IMAGE="vaxilu/soga"
+IMAGE_TAG="latest"
 DOCKER_COMPOSE_CMD="docker compose"
+
+# 默认参数值
+CONTAINER_NAME=""
+PANEL_URL=""
+PANEL_KEY=""
+NODE_ID=""
+ACTION=""
 
 # Function for logging
 log() {
@@ -162,13 +170,14 @@ config_run_soga(){
 # 配置并运行 soga_compose
 config_run_soga_compose() {
     log "info" "开始配置 soga..."
+    log "info" "使用镜像标签: $IMAGE_TAG"
     mkdir -p "$BASE_DIR"
     mkdir -p "$CONFIG_DIR"
 
     cat > "$BASE_DIR/docker-compose.yml" <<EOF
 services:
   ${CONTAINER_NAME}:
-    image: $DOCKER_IMAGE
+    image: $DOCKER_IMAGE:$IMAGE_TAG
     container_name: ${CONTAINER_NAME}
     restart: on-failure
     network_mode: host
@@ -192,6 +201,9 @@ EOF
 
     if [ $? -eq 0 ]; then
         log "info" "soga 已经成功安装并启动"
+        log "info" "容器名称: $CONTAINER_NAME"
+        log "info" "镜像版本: $DOCKER_IMAGE:$IMAGE_TAG"
+        log "info" "节点ID: $NODE_ID"
     else
         log "error" "服务启动失败，请检查日志."
     fi
@@ -230,45 +242,157 @@ stop_soga() {
 
 # 显示使用帮助
 show_help() {
-    echo "用法: $0 {update|install|restart|stop}"
-    echo " - 更新系统:  $0 update"
-    echo " - 安装soga: $0 install <CONTAINER_NAME> <PANEL_URL> <PANEL_KEY> <NODE_ID>"
-    echo " - 重启soga: $0 restart"
-    echo " - 停止soga: $0 stop"
+    cat << EOF
+用法: $0 [操作] [选项]
+
+操作:
+  --update              更新系统
+  --install             安装soga
+  --restart             重启soga
+  --stop                停止soga
+  --help                显示此帮助信息
+
+安装选项:
+  --container-name NAME 容器名称 (必需)
+  --panel-url URL       面板URL地址 (必需)
+  --panel-key KEY       面板API密钥 (必需)
+  --node-id ID          节点ID (必需)
+  --image-tag TAG       Docker镜像标签 (默认: latest)
+
+示例:
+  $0 --update
+  $0 --install --container-name soga1 --panel-url https://example.com --panel-key your_key --node-id 1
+  $0 --install --container-name soga1 --panel-url https://example.com --panel-key your_key --node-id 1 --image-tag v1.7.11
+  $0 --restart
+  $0 --stop
+EOF
 }
 
-# 根据命令行参数执行不同功能
-case "$1" in
-    update)
-        check_privileges
-        update_system
-        ;;
-    install)
-        # Moved parameter assignment here
-        CONTAINER_NAME="${2:-}"
-        PANEL_URL="${3:-}"
-        PANEL_KEY="${4:-}"
-        NODE_ID="${5:-}"
+# 解析命令行参数
+parse_arguments() {
+    if [ $# -eq 0 ]; then
+        show_help
+        exit 1
+    fi
 
-        if [ -z "${CONTAINER_NAME}" ] || [ -z "${PANEL_URL}" ] || [ -z "${PANEL_KEY}" ] || [ -z "${NODE_ID}" ]; then
-            log "error" "安装soga需要提供所有参数: CONTAINER_NAME, PANEL_URL, PANEL_KEY, NODE_ID"
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --update)
+                ACTION="update"
+                shift
+                ;;
+            --install)
+                ACTION="install"
+                shift
+                ;;
+            --restart)
+                ACTION="restart"
+                shift
+                ;;
+            --stop)
+                ACTION="stop"
+                shift
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            --container-name)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    CONTAINER_NAME="$2"
+                    shift 2
+                else
+                    log "error" "--container-name 需要提供容器名称"
+                    exit 1
+                fi
+                ;;
+            --panel-url)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    PANEL_URL="$2"
+                    shift 2
+                else
+                    log "error" "--panel-url 需要提供面板URL"
+                    exit 1
+                fi
+                ;;
+            --panel-key)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    PANEL_KEY="$2"
+                    shift 2
+                else
+                    log "error" "--panel-key 需要提供面板密钥"
+                    exit 1
+                fi
+                ;;
+            --node-id)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    NODE_ID="$2"
+                    shift 2
+                else
+                    log "error" "--node-id 需要提供节点ID"
+                    exit 1
+                fi
+                ;;
+            --image-tag)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    IMAGE_TAG="$2"
+                    shift 2
+                else
+                    log "error" "--image-tag 需要提供镜像标签"
+                    exit 1
+                fi
+                ;;
+            *)
+                log "error" "未知参数: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+
+    # 验证必需的操作参数
+    if [[ -z "$ACTION" ]]; then
+        log "error" "必须指定一个操作 (--update, --install, --restart, --stop)"
+        show_help
+        exit 1
+    fi
+
+    # 如果是安装操作，验证必需的参数
+    if [[ "$ACTION" == "install" ]]; then
+        if [[ -z "$CONTAINER_NAME" || -z "$PANEL_URL" || -z "$PANEL_KEY" || -z "$NODE_ID" ]]; then
+            log "error" "安装操作需要提供所有必需参数: --container-name, --panel-url, --panel-key, --node-id"
             show_help
             exit 1
         fi
-        install_soga
-        ;;
-    restart)
-        check_privileges
-        restart_soga
-        ;;
-    stop)
-        check_privileges
-        stop_soga
-        ;;
-    *)
-        show_help
-        exit 1
-        ;;
-esac
+    fi
+}
+
+# 主程序入口
+main() {
+    # 解析命令行参数
+    parse_arguments "$@"
+
+    # 根据操作执行相应功能
+    case "$ACTION" in
+        update)
+            check_privileges
+            update_system
+            ;;
+        install)
+            install_soga
+            ;;
+        restart)
+            check_privileges
+            restart_soga
+            ;;
+        stop)
+            check_privileges
+            stop_soga
+            ;;
+    esac
+}
+
+# 调用主程序
+main "$@"
 
 exit 0
