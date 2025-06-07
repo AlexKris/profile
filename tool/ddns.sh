@@ -146,7 +146,7 @@ if [ "$WAN_IP" = "$OLD_WAN_IP" ] && [ "$FORCE" = "false" ]; then
 fi
 
 # Handle FQDN
-if [ "$CFRECORD_NAME" != "$CFZONE_NAME" ] && ! [[ "$CFRECORD_NAME" == *"$CFZONE_NAME" ]]; then
+if [ "$CFRECORD_NAME" != "$CFZONE_NAME" ] && [[ "$CFRECORD_NAME" != *"$CFZONE_NAME" ]]; then
     CFRECORD_NAME="$CFRECORD_NAME.$CFZONE_NAME"
 fi
 
@@ -205,15 +205,25 @@ fi
 EOF
 
     # Replace placeholders
-    sed -i.bak \
-        -e "s|__TOKEN__|$token|g" \
-        -e "s|__ZONE__|$zone|g" \
-        -e "s|__HOSTNAME__|$hostname|g" \
-        -e "s|__RECORD_TYPE__|$record_type|g" \
-        -e "s|__TTL__|$ttl|g" \
-        "$exec_script"
-    
-    rm -f "$exec_script.bak"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS sed syntax
+        sed -i '' \
+            -e "s|__TOKEN__|$token|g" \
+            -e "s|__ZONE__|$zone|g" \
+            -e "s|__HOSTNAME__|$hostname|g" \
+            -e "s|__RECORD_TYPE__|$record_type|g" \
+            -e "s|__TTL__|$ttl|g" \
+            "$exec_script"
+    else
+        # Linux sed syntax
+        sed -i \
+            -e "s|__TOKEN__|$token|g" \
+            -e "s|__ZONE__|$zone|g" \
+            -e "s|__HOSTNAME__|$hostname|g" \
+            -e "s|__RECORD_TYPE__|$record_type|g" \
+            -e "s|__TTL__|$ttl|g" \
+            "$exec_script"
+    fi
     chmod +x "$exec_script"
     echo "$exec_script"
 }
@@ -265,7 +275,10 @@ install_ddns() {
     fi
     
     # Add new entry
-    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
+    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab - 2>/dev/null || {
+        echo "警告: 无法设置定时任务，可能需要手动添加:"
+        echo "$cron_cmd"
+    }
     
     echo "安装完成！"
     echo "执行脚本: $exec_script"
@@ -350,14 +363,20 @@ show_status() {
         # Extract configuration from script
         if grep -q "CFRECORD_NAME=" "$exec_script"; then
             local hostname
-            hostname=$(grep "CFRECORD_NAME=" "$exec_script" | cut -d'"' -f2)
+            hostname=$(grep "^CFRECORD_NAME=" "$exec_script" | head -1 | cut -d'"' -f2)
             echo "  域名: $hostname"
         fi
         
         if grep -q "CFRECORD_TYPE=" "$exec_script"; then
             local record_type
-            record_type=$(grep "CFRECORD_TYPE=" "$exec_script" | cut -d'"' -f2)
+            record_type=$(grep "^CFRECORD_TYPE=" "$exec_script" | head -1 | cut -d'"' -f2)
             echo "  记录类型: $record_type"
+        fi
+        
+        if grep -q "CFTTL=" "$exec_script"; then
+            local ttl
+            ttl=$(grep "^CFTTL=" "$exec_script" | head -1 | cut -d'=' -f2)
+            echo "  TTL: $ttl"
         fi
     else
         echo "✗ 执行脚本不存在"
