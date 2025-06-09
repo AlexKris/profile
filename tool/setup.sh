@@ -55,6 +55,16 @@ INSTALL_DOCKER="false"
 # 新增：控制是否禁用root登录
 DISABLE_ROOT_LOGIN="false"
 
+# 辅助函数：根据用户权限自动添加sudo
+run_cmd() {
+    local current_user=$(whoami)
+    if [ "$current_user" = "root" ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 # 设置安全的临时文件处理
 cleanup() {
     # 删除所有临时文件
@@ -413,23 +423,56 @@ wait_for_cloud_init() {
 
 # 修复sudo问题
 fix_sudo_issue() {
+    # 检查当前用户是否为root
+    local current_user=$(whoami)
+    
     # 确保sudo已安装
     if ! command -v sudo &> /dev/null; then
         log_message "INFO" "安装sudo..."
         if [ "$OS_TYPE" = "debian" ]; then
-            wait_for_apt && apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+            if [ "$current_user" = "root" ]; then
+                # 如果是root用户，直接使用apt-get
+                wait_for_apt && apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+            else
+                log_message "ERROR" "当前用户不是root，且系统未安装sudo，无法继续"
+                exit 1
+            fi
         else
-            yum install -y sudo || dnf install -y sudo
+            if [ "$current_user" = "root" ]; then
+                # 如果是root用户，直接使用包管理器
+                yum install -y sudo || dnf install -y sudo
+            else
+                log_message "ERROR" "当前用户不是root，且系统未安装sudo，无法继续"
+                exit 1
+            fi
+        fi
+    fi
+    
+    # 如果当前用户不是root，检查sudo权限
+    if [ "$current_user" != "root" ]; then
+        if ! sudo -n true 2>/dev/null; then
+            log_message "ERROR" "当前用户没有sudo权限，请使用root用户运行脚本或配置sudo权限"
+            exit 1
         fi
     fi
     
     # 修复hostname解析问题
-    if sudo -v 2>&1 | grep -q "unable to resolve host"; then
-        log_message "INFO" "修复sudo主机名解析问题..."
-        # 安全地获取和处理hostname
-        local hostname=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
-        if [ -n "$hostname" ] && ! grep -q "$hostname" /etc/hosts; then
-            echo "127.0.1.1   $hostname" | sudo tee -a /etc/hosts >/dev/null
+    if [ "$current_user" = "root" ]; then
+        # root用户直接检查并修复
+        if hostname &>/dev/null; then
+            local host_name=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
+            if [ -n "$host_name" ] && ! grep -q "$host_name" /etc/hosts; then
+                echo "127.0.1.1   $host_name" >> /etc/hosts
+            fi
+        fi
+    else
+        # 非root用户使用sudo
+        if sudo -v 2>&1 | grep -q "unable to resolve host"; then
+            log_message "INFO" "修复sudo主机名解析问题..."
+            local host_name=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
+            if [ -n "$host_name" ] && ! grep -q "$host_name" /etc/hosts; then
+                echo "127.0.1.1   $host_name" | sudo tee -a /etc/hosts >/dev/null
+            fi
         fi
     fi
 }
@@ -441,20 +484,20 @@ update_system_install_dependencies() {
     if [ "$OS_TYPE" = "debian" ]; then
         wait_for_apt || return 1
         export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update
-        sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd
+        run_cmd apt-get update
+        run_cmd apt-get upgrade -y
+        run_cmd apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd
 
         # 单独处理iperf3，等待一下避免apt锁冲突
         log_message "INFO" "等待2秒后安装iperf3..."
         sleep 2
-        echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" iperf3
+        echo 'iperf3 iperf3/autostart boolean false' | run_cmd debconf-set-selections
+        run_cmd apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" iperf3
     else
         local pkg_manager="yum"
         command -v dnf &> /dev/null && pkg_manager="dnf"
-        sudo $pkg_manager update -y
-        sudo $pkg_manager install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc
+        run_cmd $pkg_manager update -y
+        run_cmd $pkg_manager install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc
     fi
     
     log_message "INFO" "系统更新和软件安装完成"
