@@ -98,15 +98,19 @@ IPV4_SERVICES=(
 # Function to get IP address with fallback services
 get_wan_ip() {
     local services=()
+    local curl_protocol_flag=""
+    
     if [ "$CFRECORD_TYPE" = "AAAA" ]; then
         services=("${IPV6_SERVICES[@]}")
+        curl_protocol_flag="-6"
     else
         services=("${IPV4_SERVICES[@]}")
+        curl_protocol_flag="-4"
     fi
     
     for service in "${services[@]}"; do
         local ip
-        if ip=$(curl -s --connect-timeout 5 --max-time 10 "$service" 2>/dev/null); then
+        if ip=$(curl $curl_protocol_flag -s --connect-timeout 5 --max-time 10 "$service" 2>/dev/null); then
             if [ -n "$ip" ]; then
                 echo "$ip"
                 return 0
