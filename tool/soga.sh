@@ -179,7 +179,7 @@ services:
   ${CONTAINER_NAME}:
     image: $DOCKER_IMAGE:$IMAGE_TAG
     container_name: ${CONTAINER_NAME}
-    restart: on-failure
+    restart: unless-stopped
     network_mode: host
     environment:
       TZ: Asia/Hong_Kong
