@@ -64,38 +64,6 @@ execute_cmd() {
     return 0
 }
 
-# 更新系统包
-update_system() {
-    check_root
-    
-    # 检测操作系统类型
-    if command -v apt-get &>/dev/null; then
-        log_info "检测到 Debian/Ubuntu 系统..."
-        
-        execute_cmd "更新软件包列表" sudo apt-get update
-        execute_cmd "升级软件包" sudo apt-get upgrade -y
-        execute_cmd "完全升级软件包" sudo apt-get full-upgrade -y
-        execute_cmd "清理无用软件包" sudo apt-get autoclean -y
-        execute_cmd "删除不再需要的依赖" sudo apt-get autoremove -y
-        
-        log_info "正在安装必要软件包..."
-        execute_cmd "安装依赖包" sudo apt-get install -y wget unzip curl
-    elif command -v dnf &>/dev/null; then
-        log_info "检测到 RHEL/CentOS 8+ 系统..."
-        execute_cmd "更新软件包" sudo dnf update -y
-        execute_cmd "安装依赖包" sudo dnf install -y wget unzip curl
-    elif command -v yum &>/dev/null; then
-        log_info "检测到 RHEL/CentOS 系统..."
-        execute_cmd "更新软件包" sudo yum update -y
-        execute_cmd "安装依赖包" sudo yum install -y wget unzip curl
-    else
-        log_error "不支持的操作系统，只支持Debian/Ubuntu和CentOS/RHEL。"
-        exit 1
-    fi
-    
-    log_info "系统更新完成。"
-}
-
 # 验证下载文件
 verify_download() {
     local file="$1"
@@ -398,7 +366,6 @@ show_help() {
 用法: $SCRIPT_NAME {update|install|restart|stop|status|uninstall}
 
 命令:
-  update                   更新系统包
   install <版本> <架构> <端口> <密钥>  安装Snell服务
   restart                  重启Snell服务
   stop                     停止Snell服务
@@ -418,9 +385,6 @@ EOF
 
 # 根据命令行参数执行不同功能
 case "${1:-}" in
-    update)
-        update_system
-        ;;
     install)
         SNELL_VERSION="${2:-}"
         SNELL_ARCH="${3:-}"
