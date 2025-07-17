@@ -4,9 +4,9 @@ set -o nounset
 set -o pipefail
 
 # CloudFlare DDNS Management Script
-# Enhanced version with separate execution script generation
+# Enhanced version with separate execution script generation and Telegram notifications
 
-SCRIPT_VERSION="2.0"
+SCRIPT_VERSION="2.1"
 SCRIPT_NAME="cf-ddns"
 
 # Function to show usage
@@ -29,6 +29,8 @@ show_usage() {
     echo "  -l TTL       TTL value (120-86400), default: 120"
     echo "  -i INTERVAL  Crontab interval in minutes, default: 5"
     echo "  -d DIR       Installation directory, default: ~/.local/bin"
+    echo "  -b BOT_TOKEN Telegram Bot Token (optional)"
+    echo "  -c CHAT_ID   Telegram Chat ID (optional)"
     echo ""
     echo "Run Options:"
     echo "  -f FORCE     Force update (true/false), default: false"
@@ -36,6 +38,8 @@ show_usage() {
     echo "Examples:"
     echo "  # 安装 DDNS 服务"
     echo "  $0 install -k your_api_token -z example.com -h server.example.com"
+    echo "  # 安装 DDNS 服务并启用 Telegram 通知"
+    echo "  $0 install -k your_api_token -z example.com -h server.example.com -b bot_token -c chat_id"
     echo "  # 手动执行更新"
     echo "  $0 run"
     echo "  # 强制更新"
@@ -53,6 +57,8 @@ create_execution_script() {
     local hostname="$4"
     local record_type="$5"
     local ttl="$6"
+    local bot_token="${7:-}"
+    local chat_id="${8:-}"
     
     local exec_script="$install_dir/${SCRIPT_NAME}-exec.sh"
     
@@ -73,12 +79,44 @@ CFRECORD_TYPE="__RECORD_TYPE__"
 CFTTL=__TTL__
 FORCE=false
 
+# Telegram Configuration
+TG_BOT_TOKEN="__BOT_TOKEN__"
+TG_CHAT_ID="__CHAT_ID__"
+
 # Parse force flag if provided
 while getopts f: opts 2>/dev/null; do
     case ${opts} in
         f) FORCE=${OPTARG} ;;
     esac
 done
+
+# Function to send Telegram message
+send_telegram_message() {
+    local message="$1"
+    local success="${2:-true}"
+    
+    # Skip if Telegram not configured
+    [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ] && return 0
+    
+    # Choose emoji based on success status
+    local emoji="✅"
+    [ "$success" = "false" ] && emoji="❌"
+    
+    local full_message="${emoji} DDNS 通知
+
+🌐 域名: $CFRECORD_NAME
+📍 IP地址: ${WAN_IP:-未知}
+⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')
+
+📝 消息: $message"
+    
+    # Send message via Telegram API
+    curl -s -X POST "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage" \
+        -d "chat_id=$TG_CHAT_ID" \
+        -d "text=$full_message" \
+        -d "parse_mode=HTML" \
+        >/dev/null 2>&1 || true
+}
 
 # IPv6 services list for better reliability
 IPV6_SERVICES=(
@@ -127,11 +165,13 @@ mkdir -p "$DDNS_DIR"
 # Get current IP
 WAN_IP=$(get_wan_ip || {
     echo "$(date): 错误: 无法获取公网 IP 地址" >&2
+    send_telegram_message "无法获取公网 IP 地址" "false"
     exit 1
 })
 
 if [ -z "$WAN_IP" ]; then
     echo "$(date): 错误: 获取到的 IP 地址为空" >&2
+    send_telegram_message "获取到的 IP 地址为空" "false"
     exit 1
 fi
 
@@ -170,6 +210,7 @@ else
     
     if [ -z "$CFZONE_ID" ]; then
         echo "$(date): 错误: 无法获取区域 ID" >&2
+        send_telegram_message "无法获取 CloudFlare 区域 ID" "false"
         exit 1
     fi
     
@@ -181,6 +222,7 @@ else
     
     if [ -z "$CFRECORD_ID" ]; then
         echo "$(date): 错误: 无法获取记录 ID" >&2
+        send_telegram_message "无法获取 DNS 记录 ID" "false"
         exit 1
     fi
     
@@ -202,8 +244,16 @@ RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$CFZONE_ID
 if echo "$RESPONSE" | grep -q '"success":true'; then
     echo "$(date): DNS 更新成功: $CFRECORD_NAME -> $WAN_IP"
     echo "$WAN_IP" > "$WAN_IP_FILE"
+    
+    # Send success notification
+    if [ -n "$OLD_WAN_IP" ] && [ "$OLD_WAN_IP" != "$WAN_IP" ]; then
+        send_telegram_message "DNS 记录更新成功！IP 地址从 $OLD_WAN_IP 变更为 $WAN_IP" "true"
+    elif [ "$FORCE" = "true" ]; then
+        send_telegram_message "强制更新 DNS 记录成功！" "true"
+    fi
 else
     echo "$(date): DNS 更新失败: $RESPONSE" >&2
+    send_telegram_message "DNS 更新失败: $(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)" "false"
     exit 1
 fi
 EOF
@@ -217,6 +267,8 @@ EOF
             -e "s|__HOSTNAME__|$hostname|g" \
             -e "s|__RECORD_TYPE__|$record_type|g" \
             -e "s|__TTL__|$ttl|g" \
+            -e "s|__BOT_TOKEN__|$bot_token|g" \
+            -e "s|__CHAT_ID__|$chat_id|g" \
             "$exec_script"
     else
         # Linux sed syntax
@@ -226,6 +278,8 @@ EOF
             -e "s|__HOSTNAME__|$hostname|g" \
             -e "s|__RECORD_TYPE__|$record_type|g" \
             -e "s|__TTL__|$ttl|g" \
+            -e "s|__BOT_TOKEN__|$bot_token|g" \
+            -e "s|__CHAT_ID__|$chat_id|g" \
             "$exec_script"
     fi
     chmod +x "$exec_script"
@@ -235,9 +289,10 @@ EOF
 # Function to install DDNS service
 install_ddns() {
     local token="" zone="" hostname="" record_type="A" ttl=120 interval=5 install_dir="$HOME/.local/bin"
+    local bot_token="" chat_id=""
     
     # Parse arguments
-    while getopts k:z:h:t:l:i:d: opts; do
+    while getopts k:z:h:t:l:i:d:b:c: opts; do
         case ${opts} in
             k) token=${OPTARG} ;;
             z) zone=${OPTARG} ;;
@@ -246,6 +301,8 @@ install_ddns() {
             l) ttl=${OPTARG} ;;
             i) interval=${OPTARG} ;;
             d) install_dir=${OPTARG} ;;
+            b) bot_token=${OPTARG} ;;
+            c) chat_id=${OPTARG} ;;
         esac
     done
     
@@ -261,13 +318,22 @@ install_ddns() {
         exit 1
     fi
     
+    # Validate Telegram parameters (both or neither)
+    if [ -n "$bot_token" ] && [ -z "$chat_id" ]; then
+        echo "错误: 设置了 Bot Token 但缺少 Chat ID (-c)"
+        exit 1
+    elif [ -z "$bot_token" ] && [ -n "$chat_id" ]; then
+        echo "错误: 设置了 Chat ID 但缺少 Bot Token (-b)"
+        exit 1
+    fi
+    
     # Create installation directory
     mkdir -p "$install_dir"
     
     # Create execution script
     echo "正在创建执行脚本..."
     local exec_script
-    exec_script=$(create_execution_script "$install_dir" "$token" "$zone" "$hostname" "$record_type" "$ttl")
+    exec_script=$(create_execution_script "$install_dir" "$token" "$zone" "$hostname" "$record_type" "$ttl" "$bot_token" "$chat_id")
     
     # Create crontab entry
     echo "正在设置定时任务..."
@@ -288,6 +354,12 @@ install_ddns() {
     echo "执行脚本: $exec_script"
     echo "定时任务: 每 $interval 分钟执行一次"
     echo "域名记录: $hostname -> $record_type"
+    
+    if [ -n "$bot_token" ] && [ -n "$chat_id" ]; then
+        echo "Telegram 通知: 已启用"
+    else
+        echo "Telegram 通知: 未启用"
+    fi
     
     # Test execution
     echo ""
@@ -394,6 +466,15 @@ show_status() {
         echo "  定时规则: $cron_line"
     else
         echo "✗ 定时任务未设置"
+    fi
+    
+    # Check Telegram configuration
+    if [ -f "$exec_script" ]; then
+        if grep -q 'TG_BOT_TOKEN=""' "$exec_script"; then
+            echo "✗ Telegram 通知: 未配置"
+        else
+            echo "✓ Telegram 通知: 已配置"
+        fi
     fi
     
     # Check cache files
