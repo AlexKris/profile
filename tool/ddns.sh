@@ -470,10 +470,10 @@ show_status() {
     
     # Check Telegram configuration
     if [ -f "$exec_script" ]; then
-        if grep -q 'TG_BOT_TOKEN=""' "$exec_script"; then
-            echo "✗ Telegram 通知: 未配置"
-        else
+        if grep -q "^TG_BOT_TOKEN=" "$exec_script" && ! grep -q 'TG_BOT_TOKEN=""' "$exec_script"; then
             echo "✓ Telegram 通知: 已配置"
+        else
+            echo "✗ Telegram 通知: 未配置"
         fi
     fi
     
