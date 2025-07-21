@@ -26,6 +26,7 @@ show_usage() {
     echo "  -s SCRIPT    更换IP的脚本路径 (与-u互斥)"
     echo "  -v VM        VM标识名称 (required)"
     echo "  -i INTERVAL  定时检测间隔(分钟), 默认: 30"
+    echo "  -w COOLDOWN  更换IP冷却时间(分钟), 默认: 0 (不启用)"
     echo "  -d DIR       安装目录, 默认: ~/.local/bin"
     echo "  -b BOT_TOKEN Telegram Bot Token (可选)"
     echo "  -c CHAT_ID   Telegram Chat ID (可选)"
@@ -39,6 +40,8 @@ show_usage() {
     echo "  $0 install -s \"/path/to/change-ip.sh\" -v \"Server01\""
     echo "  # 安装并启用 Telegram 通知"
     echo "  $0 install -u \"https://api.example.com/change-ip\" -v \"Server01\" -b bot_token -c chat_id"
+    echo "  # 如需防止频繁调用，可设置冷却时间"
+    echo "  $0 install -u \"https://api.example.com/change-ip\" -v \"Server01\" -w 15"
     echo "  # 手动执行检测"
     echo "  $0 run"
     echo "  # 移除服务"
@@ -53,8 +56,9 @@ create_execution_script() {
     local change_target="$3"  # URL或脚本路径
     local vm_name="$4"
     local ipv="$5"
-    local bot_token="${6:-}"
-    local chat_id="${7:-}"
+    local cooldown_minutes="$6"  # 冷却时间(分钟)
+    local bot_token="${7:-}"
+    local chat_id="${8:-}"
     
     local exec_script="$install_dir/${SCRIPT_NAME}-exec.sh"
     
@@ -70,6 +74,7 @@ url="https://www.netflix.com/title/70143836"
 change_method="__CHANGE_METHOD__"  # "url" 或 "script"
 change_target="__CHANGE_TARGET__"  # URL或脚本路径
 VM="__VM_NAME__"
+COOLDOWN_MINUTES="__COOLDOWN_MINUTES__"  # 冷却时间(分钟)
 
 # Telegram 配置
 TG_BOT_TOKEN="__BOT_TOKEN__"
@@ -141,19 +146,69 @@ main() {
     
     if [ "$code" = "404" ]; then
         # Netflix非自制剧不可用，需要更换IP
-        echo "${current_time} ${VM} 当前IP不解锁Netflix非自制剧 当前IP: ${current_ip} 正在尝试更换IP..." | tee -a "$log"
+        echo "${current_time} ${VM} 当前IP不解锁Netflix非自制剧 当前IP: ${current_ip}" | tee -a "$log"
+        
+        # 检查冷却时间（仅在启用时检查）
+        if [ "$COOLDOWN_MINUTES" -gt 0 ]; then
+            local last_change_file="$WORK_DIR/.last_ip_change"
+            local current_timestamp=$(date +%s)
+            local cooldown_seconds=$((COOLDOWN_MINUTES * 60))
+            
+            if [ -f "$last_change_file" ]; then
+                local last_change_timestamp=$(cat "$last_change_file" 2>/dev/null || echo 0)
+                local time_diff=$((current_timestamp - last_change_timestamp))
+                
+                if [ "$time_diff" -lt "$cooldown_seconds" ]; then
+                    local remaining_minutes=$(( (cooldown_seconds - time_diff) / 60 ))
+                    local remaining_seconds=$(( (cooldown_seconds - time_diff) % 60 ))
+                    echo "${current_time} ${VM} 更换IP冷却中，还需等待 ${remaining_minutes}分${remaining_seconds}秒" | tee -a "$log"
+                    send_telegram_message "检测到Netflix非自制剧不可用，但在冷却期内（还需${remaining_minutes}分${remaining_seconds}秒）" "false"
+                    exit 0
+                fi
+            fi
+        fi
+        
+        echo "${current_time} ${VM} 开始尝试更换IP..." | tee -a "$log"
         
         # 根据配置的方法更换IP
         local change_result
         if [ "$change_method" = "script" ]; then
             # 使用脚本方式更换IP
             if [ -f "$change_target" ] && [ -x "$change_target" ]; then
+                echo "${current_time} ${VM} 开始执行更换IP脚本: $change_target" | tee -a "$log"
                 if change_result=$("$change_target" 2>&1); then
-                    echo "${current_time} ${VM} 执行更换IP脚本成功: $change_result" | tee -a "$log"
+                    echo "${current_time} ${VM} 更换IP脚本执行完成: $change_result" | tee -a "$log"
                 else
                     echo "${current_time} ${VM} 执行更换IP脚本失败: $change_result" | tee -a "$log"
                     send_telegram_message "执行更换IP脚本失败: $change_result" "false"
                     exit 1
+                fi
+                
+                # 脚本执行完成后，等待网络和IP恢复
+                echo "${current_time} ${VM} 更换IP脚本执行完成，等待网络恢复..." | tee -a "$log"
+                
+                # 等待网络恢复，最多等待3分钟
+                local wait_count=0
+                local max_wait=36  # 36 * 5秒 = 3分钟
+                while [ $wait_count -lt $max_wait ]; do
+                    sleep 5
+                    wait_count=$((wait_count + 1))
+                    
+                    # 尝试获取新IP
+                    local test_ip
+                    test_ip=$(get_current_ip 2>/dev/null)
+                    if [ -n "$test_ip" ]; then
+                        echo "${current_time} ${VM} 网络已恢复，当前IP: $test_ip" | tee -a "$log"
+                        break
+                    fi
+                    
+                    echo "${current_time} ${VM} 等待网络恢复中... ($((wait_count * 5))秒)" | tee -a "$log"
+                done
+                
+                # 检查是否成功恢复网络
+                if [ $wait_count -ge $max_wait ]; then
+                    echo "${current_time} ${VM} 等待网络恢复超时，但继续尝试检测..." | tee -a "$log"
+                    send_telegram_message "更换IP脚本执行完成，但网络恢复超时" "false"
                 fi
             else
                 echo "${current_time} ${VM} 更换IP脚本不存在或无执行权限: $change_target" | tee -a "$log"
@@ -162,42 +217,105 @@ main() {
             fi
         else
             # 使用API方式更换IP
-            if change_result=$(curl -s "${change_target}" 2>&1); then
-                echo "${current_time} ${VM} 调用更换IP接口成功: $change_result" | tee -a "$log"
-            else
-                echo "${current_time} ${VM} 调用更换IP接口失败: $change_result" | tee -a "$log"
-                send_telegram_message "调用更换IP接口失败: $change_result" "false"
+            echo "${current_time} ${VM} 开始调用更换IP接口: $change_target" | tee -a "$log"
+            
+            # API调用重试机制
+            local api_retry_count=0
+            local max_api_retries=3
+            local api_success=false
+            
+            while [ $api_retry_count -lt $max_api_retries ] && [ "$api_success" = "false" ]; do
+                api_retry_count=$((api_retry_count + 1))
+                echo "${current_time} ${VM} 调用更换IP接口 (第${api_retry_count}次尝试)" | tee -a "$log"
+                
+                # 使用curl调用API，设置超时时间
+                if change_result=$(curl -s --connect-timeout 10 --max-time 30 "${change_target}" 2>&1); then
+                    # 检查HTTP状态码
+                    local http_code
+                    http_code=$(curl -s --connect-timeout 10 --max-time 30 -w "%{http_code}" -o /dev/null "${change_target}" 2>/dev/null)
+                    
+                    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+                        echo "${current_time} ${VM} API调用成功 (HTTP $http_code): $change_result" | tee -a "$log"
+                        api_success=true
+                    else
+                        echo "${current_time} ${VM} API返回错误状态码 (HTTP $http_code): $change_result" | tee -a "$log"
+                    fi
+                else
+                    echo "${current_time} ${VM} API调用失败: $change_result" | tee -a "$log"
+                fi
+                
+                # 如果不是最后一次尝试且失败了，等待后重试
+                if [ "$api_success" = "false" ] && [ $api_retry_count -lt $max_api_retries ]; then
+                    echo "${current_time} ${VM} API调用失败，15秒后重试..." | tee -a "$log"
+                    sleep 15
+                fi
+            done
+            
+            # 检查API调用是否最终成功
+            if [ "$api_success" = "false" ]; then
+                echo "${current_time} ${VM} API调用最终失败，已重试${max_api_retries}次" | tee -a "$log"
+                send_telegram_message "更换IP接口调用失败，已重试${max_api_retries}次" "false"
                 exit 1
             fi
+            
+            # API调用成功后，等待IP更换生效
+            echo "${current_time} ${VM} API调用成功，等待IP更换生效..." | tee -a "$log"
+            sleep 15  # API方式等待更长时间确保IP更换生效
         fi
         
-        # 等待几秒让IP生效
-        sleep 5
+        # 记录更换IP的时间戳（仅在启用冷却时记录）
+        if [ "$COOLDOWN_MINUTES" -gt 0 ]; then
+            echo "$current_timestamp" > "$last_change_file"
+            echo "${current_time} ${VM} 已记录IP更换时间戳" | tee -a "$log"
+        fi
             
-            # 获取新IP
-            local new_ip
-            new_ip=$(get_current_ip)
+            # 获取新IP，增加重试机制
+            local new_ip=""
+            local retry_count=0
+            local max_retries=6  # 最多重试6次，每次间隔10秒
             
-            if [ -n "$new_ip" ] && [ "$new_ip" != "$current_ip" ]; then
-                echo "${current_time} ${VM} IP更换成功 原IP: ${current_ip} 新IP: ${new_ip}" | tee -a "$log"
-                send_telegram_message "检测到Netflix非自制剧不可用，已成功更换IP
+            while [ $retry_count -lt $max_retries ] && [ -z "$new_ip" ]; do
+                retry_count=$((retry_count + 1))
+                echo "${current_time} ${VM} 尝试获取新IP地址 (第${retry_count}次)" | tee -a "$log"
+                
+                new_ip=$(get_current_ip 2>/dev/null)
+                if [ -n "$new_ip" ]; then
+                    break
+                fi
+                
+                if [ $retry_count -lt $max_retries ]; then
+                    echo "${current_time} ${VM} 获取IP失败，10秒后重试..." | tee -a "$log"
+                    sleep 10
+                fi
+            done
+            
+            if [ -n "$new_ip" ]; then
+                if [ "$new_ip" != "$current_ip" ]; then
+                    echo "${current_time} ${VM} IP更换成功 原IP: ${current_ip} 新IP: ${new_ip}" | tee -a "$log"
+                    send_telegram_message "检测到Netflix非自制剧不可用，已成功更换IP
 原IP: ${current_ip}
 新IP: ${new_ip}" "true"
-                
-                # 再次检测新IP是否解锁
-                sleep 2
-                local new_code
-                new_code=$(check_nf)
-                if [ "$new_code" != "404" ]; then
-                    echo "${current_time} ${VM} 新IP解锁Netflix非自制剧成功 新IP: ${new_ip}" | tee -a "$log"
-                    send_telegram_message "新IP解锁Netflix非自制剧成功！✨" "true"
+                    
+                    # 再次检测新IP是否解锁，等待更长时间确保IP完全生效
+                    echo "${current_time} ${VM} 等待新IP完全生效..." | tee -a "$log"
+                    sleep 10
+                    
+                    local new_code
+                    new_code=$(check_nf 2>/dev/null)
+                    if [ "$new_code" != "404" ]; then
+                        echo "${current_time} ${VM} 新IP解锁Netflix非自制剧成功 新IP: ${new_ip} 状态码: ${new_code}" | tee -a "$log"
+                        send_telegram_message "新IP解锁Netflix非自制剧成功！✨" "true"
+                    else
+                        echo "${current_time} ${VM} 新IP仍不解锁Netflix非自制剧 新IP: ${new_ip}" | tee -a "$log"
+                        send_telegram_message "新IP仍不解锁Netflix非自制剧，可能需要手动处理" "false"
+                    fi
                 else
-                    echo "${current_time} ${VM} 新IP仍不解锁Netflix非自制剧 新IP: ${new_ip}" | tee -a "$log"
-                    send_telegram_message "新IP仍不解锁Netflix非自制剧，可能需要手动处理" "false"
+                    echo "${current_time} ${VM} IP未发生变化 当前IP: ${current_ip}" | tee -a "$log"
+                    send_telegram_message "IP更换命令执行完成，但IP未发生变化" "false"
                 fi
             else
-                echo "${current_time} ${VM} IP更换失败或未变化 当前IP: ${current_ip}" | tee -a "$log"
-                send_telegram_message "IP更换失败或未变化" "false"
+                echo "${current_time} ${VM} 无法获取新IP地址，网络可能仍有问题" | tee -a "$log"
+                send_telegram_message "IP更换完成但无法获取新IP地址，网络可能仍有问题" "false"
             fi
     else
         # Netflix非自制剧可用
@@ -218,26 +336,37 @@ main() {
 main
 EOF
 
-    # 替换占位符
+    # 替换占位符（转义特殊字符以避免sed问题）
+    local escaped_change_target
+    escaped_change_target=$(printf '%s\n' "$change_target" | sed 's|[[\.*^$()+?{|&/]|\\&|g')
+    local escaped_vm_name
+    escaped_vm_name=$(printf '%s\n' "$vm_name" | sed 's|[[\.*^$()+?{|&/]|\\&|g')
+    local escaped_bot_token
+    escaped_bot_token=$(printf '%s\n' "$bot_token" | sed 's|[[\.*^$()+?{|&/]|\\&|g')
+    local escaped_chat_id
+    escaped_chat_id=$(printf '%s\n' "$chat_id" | sed 's|[[\.*^$()+?{|&/]|\\&|g')
+    
     if [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS sed语法
         sed -i '' \
             -e "s|__IPV__|$ipv|g" \
             -e "s|__CHANGE_METHOD__|$change_method|g" \
-            -e "s|__CHANGE_TARGET__|$change_target|g" \
-            -e "s|__VM_NAME__|$vm_name|g" \
-            -e "s|__BOT_TOKEN__|$bot_token|g" \
-            -e "s|__CHAT_ID__|$chat_id|g" \
+            -e "s|__CHANGE_TARGET__|$escaped_change_target|g" \
+            -e "s|__VM_NAME__|$escaped_vm_name|g" \
+            -e "s|__COOLDOWN_MINUTES__|$cooldown_minutes|g" \
+            -e "s|__BOT_TOKEN__|$escaped_bot_token|g" \
+            -e "s|__CHAT_ID__|$escaped_chat_id|g" \
             "$exec_script"
     else
         # Linux sed语法
         sed -i \
             -e "s|__IPV__|$ipv|g" \
             -e "s|__CHANGE_METHOD__|$change_method|g" \
-            -e "s|__CHANGE_TARGET__|$change_target|g" \
-            -e "s|__VM_NAME__|$vm_name|g" \
-            -e "s|__BOT_TOKEN__|$bot_token|g" \
-            -e "s|__CHAT_ID__|$chat_id|g" \
+            -e "s|__CHANGE_TARGET__|$escaped_change_target|g" \
+            -e "s|__VM_NAME__|$escaped_vm_name|g" \
+            -e "s|__COOLDOWN_MINUTES__|$cooldown_minutes|g" \
+            -e "s|__BOT_TOKEN__|$escaped_bot_token|g" \
+            -e "s|__CHAT_ID__|$escaped_chat_id|g" \
             "$exec_script"
     fi
     
@@ -247,16 +376,17 @@ EOF
 
 # 安装Netflix检测服务
 install_nf_check() {
-    local change_ip_url="" change_script="" vm_name="" interval=30 install_dir="$HOME/.local/bin"
+    local change_ip_url="" change_script="" vm_name="" interval=30 cooldown_minutes=0 install_dir="$HOME/.local/bin"
     local bot_token="" chat_id="" ipv="4"
     
     # 解析参数
-    while getopts u:s:v:i:d:b:c:46 opts; do
+    while getopts u:s:v:i:w:d:b:c:46 opts; do
         case ${opts} in
             u) change_ip_url=${OPTARG} ;;
             s) change_script=${OPTARG} ;;
             v) vm_name=${OPTARG} ;;
             i) interval=${OPTARG} ;;
+            w) cooldown_minutes=${OPTARG} ;;
             d) install_dir=${OPTARG} ;;
             b) bot_token=${OPTARG} ;;
             c) chat_id=${OPTARG} ;;
@@ -304,6 +434,12 @@ install_nf_check() {
         exit 1
     fi
     
+    # 验证冷却时间参数
+    if ! [[ "$cooldown_minutes" =~ ^[0-9]+$ ]] || [ "$cooldown_minutes" -lt 0 ] || [ "$cooldown_minutes" -gt 1440 ]; then
+        echo "错误: 冷却时间必须是0-1440之间的整数（分钟），0表示不启用冷却"
+        exit 1
+    fi
+    
     # 验证Telegram参数（要么都有要么都没有）
     if [ -n "$bot_token" ] && [ -z "$chat_id" ]; then
         echo "错误: 设置了 Bot Token 但缺少 Chat ID (-c)"
@@ -319,7 +455,7 @@ install_nf_check() {
     # 创建执行脚本
     echo "正在创建Netflix检测脚本..."
     local exec_script
-    exec_script=$(create_execution_script "$install_dir" "$change_method" "$change_target" "$vm_name" "$ipv" "$bot_token" "$chat_id")
+    exec_script=$(create_execution_script "$install_dir" "$change_method" "$change_target" "$vm_name" "$ipv" "$cooldown_minutes" "$bot_token" "$chat_id")
     
     # 创建定时任务
     echo "正在设置定时任务..."
@@ -339,6 +475,11 @@ install_nf_check() {
     echo "安装完成！"
     echo "执行脚本: $exec_script"
     echo "定时任务: 每 $interval 分钟执行一次"
+    if [ "$cooldown_minutes" -gt 0 ]; then
+        echo "冷却时间: $cooldown_minutes 分钟"
+    else
+        echo "冷却时间: 未启用"
+    fi
     echo "服务器标识: $vm_name"
     echo "IP版本: IPv$ipv"
     if [ "$change_method" = "script" ]; then
@@ -435,6 +576,13 @@ show_status() {
             change_method=$(grep "^change_method=" "$exec_script" | head -1 | cut -d'"' -f2)
             local change_target
             change_target=$(grep "^change_target=" "$exec_script" | head -1 | cut -d'"' -f2)
+            local cooldown_minutes
+            cooldown_minutes=$(grep "^COOLDOWN_MINUTES=" "$exec_script" | head -1 | cut -d'"' -f2)
+            if [ "$cooldown_minutes" -gt 0 ]; then
+                echo "  冷却时间: $cooldown_minutes 分钟"
+            else
+                echo "  冷却时间: 未启用"
+            fi
             if [ "$change_method" = "script" ]; then
                 echo "  更换IP方式: 执行脚本"
                 echo "  更换IP脚本: $change_target"
@@ -470,6 +618,35 @@ show_status() {
     local work_dir="$HOME/.nf_check"
     if [ -d "$work_dir" ]; then
         echo "✓ 工作目录: $work_dir"
+        
+        # 检查冷却状态（仅在启用时显示）
+        if [ -f "$exec_script" ] && grep -q "^COOLDOWN_MINUTES=" "$exec_script"; then
+            local cooldown_minutes
+            cooldown_minutes=$(grep "^COOLDOWN_MINUTES=" "$exec_script" | head -1 | cut -d'"' -f2)
+            
+            if [ "$cooldown_minutes" -gt 0 ]; then
+                local last_change_file="$work_dir/.last_ip_change"
+                
+                if [ -f "$last_change_file" ]; then
+                    local last_change_timestamp=$(cat "$last_change_file" 2>/dev/null || echo 0)
+                    local current_timestamp=$(date +%s)
+                    local time_diff=$((current_timestamp - last_change_timestamp))
+                    local cooldown_seconds=$((cooldown_minutes * 60))
+                    
+                    if [ "$time_diff" -lt "$cooldown_seconds" ]; then
+                        local remaining_minutes=$(( (cooldown_seconds - time_diff) / 60 ))
+                        local remaining_seconds=$(( (cooldown_seconds - time_diff) % 60 ))
+                        echo "🕐 冷却状态: 冷却中（还需${remaining_minutes}分${remaining_seconds}秒）"
+                    else
+                        echo "✅ 冷却状态: 可执行更换IP"
+                    fi
+                    echo "  上次更换: $(date -d "@$last_change_timestamp" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "时间解析失败")"
+                else
+                    echo "✅ 冷却状态: 可执行更换IP（未曾执行过）"
+                fi
+            fi
+        fi
+        
         if [ -f "$work_dir/ip.txt" ]; then
             echo "  日志文件: $work_dir/ip.txt"
             local log_lines
