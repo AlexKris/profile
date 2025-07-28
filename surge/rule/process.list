@@ -19,6 +19,8 @@ PROCESS-NAME,BestTrace
 PROCESS-NAME,SecureCRT
 # > SecureFX
 PROCESS-NAME,SecureFX
+# > Termius
+PROCESS-NAME,Termius
 # > Nutstore
 PROCESS-NAME,Nutstore
 # > Citrix Viewer
