@@ -341,41 +341,208 @@ parse_args() {
     log_message "INFO" "脚本开始执行，日志文件: $LOG_FILE"
 }
 
-# 等待apt锁释放（优化后的版本）
+# 带重试机制的apt安装函数
+apt_install_with_retry() {
+    local packages="$1"
+    local max_retries=${2:-3}
+    local retry_delay=${3:-30}
+    local retry_count=0
+    
+    [ "$OS_TYPE" != "debian" ] && return 0
+    
+    while [ $retry_count -lt $max_retries ]; do
+        # 等待apt锁释放
+        if ! wait_for_apt; then
+            log_message "ERROR" "等待apt锁失败，重试 $((retry_count + 1))/$max_retries"
+            ((retry_count++))
+            if [ $retry_count -lt $max_retries ]; then
+                sleep $retry_delay
+                continue
+            else
+                return 1
+            fi
+        fi
+        
+        # 尝试安装包
+        log_message "INFO" "尝试安装包: $packages (第 $((retry_count + 1)) 次)"
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $packages; then
+            log_message "INFO" "包安装成功: $packages"
+            return 0
+        else
+            local exit_code=$?
+            log_message "WARNING" "包安装失败: $packages (错误码: $exit_code)"
+            ((retry_count++))
+            
+            if [ $retry_count -lt $max_retries ]; then
+                log_message "INFO" "等待 $retry_delay 秒后重试..."
+                sleep $retry_delay
+                
+                # 尝试修复损坏的包
+                log_message "INFO" "尝试修复包管理器状态..."
+                sudo dpkg --configure -a 2>/dev/null || true
+                sudo apt-get -f install -y 2>/dev/null || true
+            else
+                log_message "ERROR" "包安装失败，已重试 $max_retries 次: $packages"
+                return $exit_code
+            fi
+        fi
+    done
+    
+    return 1
+}
+
+# 检测并处理特殊的锁定情况
+handle_special_lock_cases() {
+    [ "$OS_TYPE" != "debian" ] && return 0
+    
+    log_message "INFO" "检查特殊锁定情况..."
+    
+    # 检查unattended-upgrades是否在运行
+    if pgrep -f "unattended-upgrade" >/dev/null 2>&1; then
+        log_message "INFO" "检测到unattended-upgrades正在运行，等待其完成..."
+        # 等待unattended-upgrades完成，最多等待20分钟
+        local wait_time=0
+        while pgrep -f "unattended-upgrade" >/dev/null 2>&1 && [ $wait_time -lt 1200 ]; do
+            sleep 30
+            ((wait_time += 30))
+            log_message "INFO" "unattended-upgrades仍在运行... ($wait_time/1200秒)"
+        done
+        
+        if pgrep -f "unattended-upgrade" >/dev/null 2>&1; then
+            log_message "WARNING" "unattended-upgrades运行时间过长，可能需要手动干预"
+        else
+            log_message "INFO" "unattended-upgrades已完成"
+        fi
+    fi
+    
+    # 检查是否有僵尸dpkg进程
+    if pgrep -x "dpkg" >/dev/null 2>&1; then
+        log_message "INFO" "检测到dpkg进程，检查是否为僵尸进程..."
+        # 等待一段时间看进程是否自然结束
+        sleep 10
+        if pgrep -x "dpkg" >/dev/null 2>&1; then
+            log_message "WARNING" "发现可能的僵尸dpkg进程"
+            # 尝试修复
+            sudo dpkg --configure -a 2>/dev/null || true
+        fi
+    fi
+    
+    # 检查损坏的锁文件
+    local lock_files=(
+        "/var/lib/dpkg/lock"
+        "/var/lib/dpkg/lock-frontend"
+        "/var/lib/apt/lists/lock"
+        "/var/cache/apt/archives/lock"
+    )
+    
+    for lock_file in "${lock_files[@]}"; do
+        if [ -f "$lock_file" ]; then
+            # 检查锁文件是否被占用
+            if ! fuser "$lock_file" >/dev/null 2>&1; then
+                # 文件存在但没有进程使用，可能是残留锁文件
+                local file_age=$(stat -c %Y "$lock_file" 2>/dev/null || echo 0)
+                local current_time=$(date +%s)
+                local age_diff=$((current_time - file_age))
+                
+                # 如果锁文件超过30分钟没有被修改，可能是残留文件
+                if [ $age_diff -gt 1800 ]; then
+                    log_message "WARNING" "发现可能的残留锁文件: $lock_file (年龄: ${age_diff}秒)"
+                    log_message "INFO" "考虑手动删除该锁文件"
+                fi
+            fi
+        fi
+    done
+    
+    return 0
+}
+
+# 诊断和修复包管理器问题
+diagnose_and_fix_package_manager() {
+    [ "$OS_TYPE" != "debian" ] && return 0
+    
+    log_message "INFO" "诊断包管理器状态..."
+    
+    # 检查磁盘空间
+    local available_space=$(df /var/cache/apt/archives | awk 'NR==2 {print $4}')
+    if [ "$available_space" -lt 1000000 ]; then  # 少于1GB
+        log_message "WARNING" "磁盘空间不足 (可用: ${available_space}KB)，清理apt缓存..."
+        sudo apt-get clean || true
+    fi
+    
+    # 检查包数据库完整性
+    log_message "INFO" "检查包数据库完整性..."
+    if ! sudo dpkg --audit; then
+        log_message "WARNING" "发现包数据库问题，尝试修复..."
+        sudo dpkg --configure -a || true
+        sudo apt-get -f install -y || true
+    fi
+    
+    # 检查apt源配置
+    if [ -f /etc/apt/sources.list ]; then
+        if ! grep -q "^deb " /etc/apt/sources.list && ! find /etc/apt/sources.list.d/ -name "*.list" -exec grep -q "^deb " {} \; 2>/dev/null; then
+            log_message "ERROR" "未找到有效的apt源配置"
+            return 1
+        fi
+    fi
+    
+    # 测试网络连接到apt仓库
+    log_message "INFO" "测试网络连接..."
+    if ! timeout 10 wget -q --spider http://security.debian.org/ 2>/dev/null && \
+       ! timeout 10 wget -q --spider http://deb.debian.org/ 2>/dev/null; then
+        log_message "WARNING" "无法连接到Debian仓库，可能存在网络问题"
+    fi
+    
+    return 0
+}
+
+# 等待apt锁释放（增强版本）
 wait_for_apt() {
     [ "$OS_TYPE" != "debian" ] && return 0
     
-    local max_wait=600  # 增加到10分钟
+    local max_wait=900  # 增加到15分钟
     local waited=0
     local check_interval=5
+    local first_wait=true
     
-    # 检查所有可能的apt锁文件
+    # 检查所有可能的apt锁文件和进程
     while true; do
         local locked=false
+        local lock_sources=()
         
         # 检查dpkg锁
         if fuser /var/lib/dpkg/lock* >/dev/null 2>&1; then
             locked=true
+            lock_sources+=("dpkg-lock")
         fi
         
         # 检查apt锁
         if fuser /var/lib/apt/lists/lock* >/dev/null 2>&1; then
             locked=true
+            lock_sources+=("apt-lists-lock")
         fi
         
         # 检查apt缓存锁
         if fuser /var/cache/apt/archives/lock* >/dev/null 2>&1; then
             locked=true
+            lock_sources+=("apt-cache-lock")
         fi
         
         # 检查dpkg前端锁
         if [ -f /var/lib/dpkg/lock-frontend ] && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
             locked=true
+            lock_sources+=("dpkg-frontend-lock")
         fi
         
         # 检查apt进程
-        if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1; then
+        if pgrep -x "apt|apt-get|dpkg|aptitude|unattended-upgrade" >/dev/null 2>&1; then
             locked=true
+            lock_sources+=("apt-processes")
+        fi
+        
+        # 检查cloud-init中的包管理器
+        if pgrep -f "cloud-init.*apt" >/dev/null 2>&1; then
+            locked=true
+            lock_sources+=("cloud-init-apt")
         fi
         
         # 如果没有锁，退出循环
@@ -383,13 +550,24 @@ wait_for_apt() {
             break
         fi
         
+        # 第一次检测到锁时显示详细信息
+        if [ "$first_wait" = "true" ]; then
+            log_message "INFO" "检测到包管理器锁定源: ${lock_sources[*]}"
+            first_wait=false
+        fi
+        
         # 检查是否超时
         if [ $waited -ge $max_wait ]; then
-            log_message "ERROR" "等待apt锁超时 ($max_wait秒)"
+            log_message "ERROR" "等待apt锁超时 ($max_wait秒)，当前锁定源: ${lock_sources[*]}"
+            log_message "ERROR" "可能需要手动清理锁文件或重启系统"
             return 1
         fi
         
-        log_message "INFO" "等待apt锁释放... ($waited/$max_wait秒)"
+        # 每分钟显示一次进度
+        if [ $((waited % 60)) -eq 0 ] || [ $waited -lt 60 ]; then
+            log_message "INFO" "等待apt锁释放... ($waited/$max_wait秒) - 锁定源: ${lock_sources[*]}"
+        fi
+        
         sleep $check_interval
         ((waited+=$check_interval))
     done
@@ -397,7 +575,7 @@ wait_for_apt() {
     if [ $waited -gt 0 ]; then
         log_message "INFO" "apt锁已释放，等待了 $waited 秒"
         # 额外等待一下，确保锁完全释放
-        sleep 2
+        sleep 3
     fi
     
     return 0
@@ -417,7 +595,11 @@ fix_sudo_issue() {
     if ! command -v sudo &> /dev/null; then
         log_message "INFO" "安装sudo..."
         if [ "$OS_TYPE" = "debian" ]; then
-            wait_for_apt && apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+            if ! wait_for_apt; then
+                log_message "ERROR" "等待apt锁失败，无法安装sudo"
+                return 1
+            fi
+            apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
         else
             yum install -y sudo || dnf install -y sudo
         fi
@@ -443,13 +625,18 @@ update_system_install_dependencies() {
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update
         sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd
+        # 使用重试机制安装基础软件包
+        if ! apt_install_with_retry "wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd"; then
+            log_message "ERROR" "基础软件包安装失败"
+            return 1
+        fi
 
-        # 单独处理iperf3，等待一下避免apt锁冲突
-        log_message "INFO" "等待2秒后安装iperf3..."
-        sleep 2
+        # 单独处理iperf3，使用重试机制
+        log_message "INFO" "安装iperf3..."
         echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" iperf3
+        if ! apt_install_with_retry "iperf3"; then
+            log_message "WARNING" "iperf3安装失败，但不影响主要功能"
+        fi
     else
         local pkg_manager="yum"
         command -v dnf &> /dev/null && pkg_manager="dnf"
@@ -939,7 +1126,14 @@ configure_timezone_ntp() {
     if [ "$OS_TYPE" = "debian" ]; then
         if [ "$NTP_SERVICE" = "chrony" ] || ([ "$NTP_SERVICE" = "auto" ] && command -v chronyd &> /dev/null); then
             # 使用chrony
-            wait_for_apt && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y chrony
+            if ! wait_for_apt; then
+                log_message "ERROR" "等待apt锁失败，跳过chrony安装"
+                return 1
+            fi
+            if ! apt_install_with_retry "chrony"; then
+                log_message "ERROR" "chrony安装失败"
+                return 1
+            fi
             sudo systemctl stop systemd-timesyncd 2>/dev/null || true
             sudo systemctl disable systemd-timesyncd 2>/dev/null || true
             
@@ -1054,14 +1248,14 @@ configure_security_audit() {
             fi
             
             # 尝试安装auditd
-            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y auditd; then
+            if apt_install_with_retry "auditd" 2 45; then
                 install_success=true
                 log_message "INFO" "auditd安装成功"
+                break
             else
                 ((retry_count++))
                 if [ $retry_count -lt $max_retries ]; then
-                    log_message "WARNING" "auditd安装失败，等待30秒后重试 ($retry_count/$max_retries)"
-                    sleep 30
+                    log_message "WARNING" "auditd安装失败，将在下次循环重试 ($retry_count/$max_retries)"
                 else
                     log_message "ERROR" "auditd安装失败，已重试 $max_retries 次"
                 fi
@@ -1126,14 +1320,14 @@ EOF
             fi
             
             # 尝试安装etckeeper和git
-            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y etckeeper git; then
+            if apt_install_with_retry "etckeeper git" 2 45; then
                 install_success=true
                 log_message "INFO" "etckeeper和git安装成功"
+                break
             else
                 ((retry_count++))
                 if [ $retry_count -lt $max_retries ]; then
-                    log_message "WARNING" "etckeeper安装失败，等待30秒后重试 ($retry_count/$max_retries)"
-                    sleep 30
+                    log_message "WARNING" "etckeeper安装失败，将在下次循环重试 ($retry_count/$max_retries)"
                 else
                     log_message "ERROR" "etckeeper安装失败，已重试 $max_retries 次"
                 fi
@@ -1593,7 +1787,7 @@ save_firewall_rules() {
             if wait_for_apt; then
                 echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | sudo debconf-set-selections
                 echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | sudo debconf-set-selections
-                if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent; then
+                if apt_install_with_retry "iptables-persistent"; then
                     log_message "INFO" "iptables-persistent安装成功"
                 else
                     log_message "WARNING" "iptables-persistent安装失败，防火墙规则可能无法持久化"
@@ -1771,6 +1965,12 @@ main() {
     check_compatibility || { log_message "ERROR" "系统兼容性检查失败"; exit 1; }
     wait_for_cloud_init
     fix_sudo_issue
+    
+    # 检查并处理特殊锁定情况
+    handle_special_lock_cases
+    
+    # 诊断和修复包管理器问题
+    diagnose_and_fix_package_manager
     
     # 系统更新和软件安装
     update_system_install_dependencies
