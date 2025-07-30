@@ -397,18 +397,18 @@ handle_special_lock_cases() {
     
     log_message "INFO" "检查特殊锁定情况..."
     
-    # 检查unattended-upgrades是否在运行（排除常驻的shutdown进程）
-    if pgrep -f "unattended-upgrade" | grep -v "shutdown.*wait-for-signal" >/dev/null 2>&1; then
+    # 检查unattended-upgrades是否在运行（只检测真正的更新进程）
+    if pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
         log_message "INFO" "检测到unattended-upgrades正在运行，等待其完成..."
         # 等待unattended-upgrades完成，最多等待20分钟
         local wait_time=0
-        while pgrep -f "unattended-upgrade" | grep -v "shutdown.*wait-for-signal" >/dev/null 2>&1 && [ $wait_time -lt 1200 ]; do
+        while pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1 && [ $wait_time -lt 1200 ]; do
             sleep 30
             ((wait_time += 30))
             log_message "INFO" "unattended-upgrades仍在运行... ($wait_time/1200秒)"
         done
         
-        if pgrep -f "unattended-upgrade" | grep -v "shutdown.*wait-for-signal" >/dev/null 2>&1; then
+        if pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
             log_message "WARNING" "unattended-upgrades运行时间过长，可能需要手动干预"
         else
             log_message "INFO" "unattended-upgrades已完成"
@@ -533,9 +533,10 @@ wait_for_apt() {
             lock_sources+=("dpkg-frontend-lock")
         fi
         
-        # 检查apt进程（排除常驻的shutdown进程）
+        # 检查apt进程（只检测真正的更新进程）
         if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1 || \
-           (pgrep -f "unattended-upgrade" | grep -v "shutdown.*wait-for-signal" >/dev/null 2>&1); then
+           pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || \
+           pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
             locked=true
             lock_sources+=("apt-processes")
         fi
