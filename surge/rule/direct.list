@@ -1,4 +1,6 @@
 # > Nexitally
 DOMAIN-SUFFIX,myguyo.xyz
 # > Dler
-DOMAIN,dler.cloud
+DOMAIN-SUFFIX,dler.cloud
+# > Mkcloud
+DOMAIN-SUFFIX,mkcloud.net
