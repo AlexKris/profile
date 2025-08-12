@@ -25,3 +25,5 @@ PROCESS-NAME,Termius
 PROCESS-NAME,Nutstore
 # > Citrix Viewer
 PROCESS-NAME,Citrix Viewer
+# > iPerf
+PROCESS-NAME,iperf3-darwin
