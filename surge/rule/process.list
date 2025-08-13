@@ -13,17 +13,7 @@ PROCESS-NAME,Transmission
 PROCESS-NAME,uTorrent
 PROCESS-NAME,WebTorrent
 PROCESS-NAME,WebTorrent Helper
-# > BestTrace
-PROCESS-NAME,BestTrace
-# > SecureCRT
-PROCESS-NAME,SecureCRT
-# > SecureFX
-PROCESS-NAME,SecureFX
-# > Termius
-PROCESS-NAME,Termius Helper (Renderer)
 # > Nutstore
 PROCESS-NAME,Nutstore
-# > Citrix Viewer
-PROCESS-NAME,Citrix Viewer
 # > iPerf
 PROCESS-NAME,iperf3-darwin
