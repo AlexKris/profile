@@ -20,7 +20,7 @@ PROCESS-NAME,SecureCRT
 # > SecureFX
 PROCESS-NAME,SecureFX
 # > Termius
-PROCESS-NAME,Termius
+PROCESS-NAME,Termius Helper
 # > Nutstore
 PROCESS-NAME,Nutstore
 # > Citrix Viewer
