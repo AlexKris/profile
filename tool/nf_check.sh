@@ -118,15 +118,45 @@ check_nf() {
     curl -${IPv}fsL -A "${UA_Browser}" -w %{http_code} -o /dev/null -m 10 "${url}" 2>&1
 }
 
-# 获取当前IP地址
+# IPv6 服务列表
+IPV6_SERVICES=(
+    "https://api64.ipify.org"
+    "https://ipv6.icanhazip.com"
+    "https://ident.me"
+    "https://ifconfig.me"
+)
+
+# IPv4 服务列表
+IPV4_SERVICES=(
+    "https://api.ipify.org"
+    "https://ipv4.icanhazip.com"
+    "https://ident.me"
+    "https://ifconfig.me"
+)
+
+# 获取当前IP地址（增强的多服务fallback机制）
 get_current_ip() {
+    local services=()
+    local curl_flag=""
+    
     if [ "$IPv" = "6" ]; then
-        curl -6 -s --connect-timeout 5 --max-time 10 ipv6.ip.sb 2>/dev/null || \
-        curl -6 -s --connect-timeout 5 --max-time 10 api64.ipify.org 2>/dev/null
+        services=("${IPV6_SERVICES[@]}")
+        curl_flag="-6"
     else
-        curl -4 -s --connect-timeout 5 --max-time 10 ipv4.ip.sb 2>/dev/null || \
-        curl -4 -s --connect-timeout 5 --max-time 10 api.ipify.org 2>/dev/null
+        services=("${IPV4_SERVICES[@]}")
+        curl_flag="-4"
     fi
+    
+    for service in "${services[@]}"; do
+        local ip
+        if ip=$(curl $curl_flag -s --connect-timeout 5 --max-time 10 "$service" 2>/dev/null); then
+            if [ -n "$ip" ]; then
+                echo "$ip"
+                return 0
+            fi
+        fi
+    done
+    return 1
 }
 
 # 主要检测逻辑
