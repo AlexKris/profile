@@ -650,9 +650,22 @@ show_status() {
         timer_status=$(systemctl --user is-active "${SCRIPT_NAME}.timer" 2>/dev/null || echo "inactive")
         echo "  状态: $timer_status"
         if [ "$timer_status" = "active" ]; then
-            local next_run
-            next_run=$(systemctl --user list-timers "${SCRIPT_NAME}.timer" --no-pager --no-legend 2>/dev/null | awk '{print $1, $2}')
-            [ -n "$next_run" ] && echo "  下次运行: $next_run"
+            # 获取详细的timer信息
+            local timer_info
+            timer_info=$(systemctl --user list-timers "${SCRIPT_NAME}.timer" --no-pager --no-legend 2>/dev/null)
+            if [ -n "$timer_info" ]; then
+                local next_run=$(echo "$timer_info" | awk '{print $1, $2}')
+                local left_time=$(echo "$timer_info" | awk '{print $3, $4}')
+                [ -n "$next_run" ] && echo "  下次运行: $next_run"
+                [ -n "$left_time" ] && echo "  剩余时间: $left_time"
+            fi
+            
+            # 从timer文件中读取执行间隔
+            local timer_file="$HOME/.config/systemd/user/${SCRIPT_NAME}.timer"
+            if [ -f "$timer_file" ]; then
+                local interval=$(grep "OnCalendar=" "$timer_file" | cut -d'=' -f2 | sed 's/\*:0\//每/' | sed 's/$/分钟/')
+                [ -n "$interval" ] && echo "  执行间隔: $interval"
+            fi
         fi
         has_scheduler=true
     fi
