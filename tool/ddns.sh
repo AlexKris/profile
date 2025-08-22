@@ -654,10 +654,18 @@ show_status() {
             local timer_info
             timer_info=$(systemctl --user list-timers "${SCRIPT_NAME}.timer" --no-pager --no-legend 2>/dev/null)
             if [ -n "$timer_info" ]; then
+                # systemctl list-timers 输出格式: NEXT LEFT LAST PASSED UNIT ACTIVATES
+                # 需要正确解析字段位置
                 local next_run=$(echo "$timer_info" | awk '{print $1, $2}')
-                local left_time=$(echo "$timer_info" | awk '{print $3, $4}')
-                [ -n "$next_run" ] && echo "  下次运行: $next_run"
-                [ -n "$left_time" ] && echo "  剩余时间: $left_time"
+                local left_time=$(echo "$timer_info" | awk '{print $3}')
+                
+                # 只有当解析到有效内容时才显示
+                if [ -n "$next_run" ] && [ "$next_run" != "- -" ]; then
+                    echo "  下次运行: $next_run"
+                fi
+                if [ -n "$left_time" ] && [ "$left_time" != "-" ]; then
+                    echo "  剩余时间: $left_time"
+                fi
             fi
             
             # 从timer文件中读取执行间隔
