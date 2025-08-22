@@ -49,6 +49,193 @@ show_usage() {
     exit 1
 }
 
+# Function to check and setup scheduler
+setup_scheduler() {
+    local exec_script="$1"
+    local interval="$2"
+    local service_name="$3"
+    
+    echo "正在检测可用的定时任务方案..."
+    
+    # 方案1: systemd user timer (推荐，现代Linux系统)
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user list-timers >/dev/null 2>&1; then
+        echo "检测到systemd用户服务支持，使用systemd timer"
+        if create_systemd_timer "$exec_script" "$interval" "$service_name"; then
+            echo "✓ systemd timer 设置成功"
+            return 0
+        else
+            echo "✗ systemd timer 设置失败，尝试cron方案"
+        fi
+    fi
+    
+    # 方案2: crontab (传统方案，容器和老系统兼容)
+    echo "尝试使用cron定时任务..."
+    if setup_cron_with_checks "$exec_script" "$interval"; then
+        echo "✓ cron 定时任务设置成功"
+        return 0
+    fi
+    
+    # 方案3: 手动方案提示
+    echo "⚠️  无法自动设置定时任务，请手动配置："
+    show_manual_setup_guide "$exec_script" "$interval" "$service_name"
+    return 1
+}
+
+# Function to create systemd timer
+create_systemd_timer() {
+    local exec_script="$1"
+    local interval="$2"
+    local service_name="$3"
+    
+    local user_systemd_dir="$HOME/.config/systemd/user"
+    
+    # 创建systemd用户目录
+    if ! mkdir -p "$user_systemd_dir" 2>/dev/null; then
+        echo "错误: 无法创建systemd用户目录"
+        return 1
+    fi
+    
+    # 创建service文件
+    cat > "$user_systemd_dir/${service_name}.service" << EOF
+[Unit]
+Description=${service_name} execution service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$exec_script
+StandardOutput=journal
+StandardError=journal
+User=$USER
+Environment=HOME=$HOME
+EOF
+
+    # 创建timer文件
+    cat > "$user_systemd_dir/${service_name}.timer" << EOF
+[Unit]
+Description=${service_name} timer
+Requires=${service_name}.service
+
+[Timer]
+OnCalendar=*:0/${interval}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # 重载systemd配置并启用timer
+    if systemctl --user daemon-reload 2>/dev/null && \
+       systemctl --user enable "$service_name.timer" 2>/dev/null && \
+       systemctl --user start "$service_name.timer" 2>/dev/null; then
+        echo "systemd timer 已创建并启动: $service_name.timer"
+        echo "查看状态: systemctl --user status $service_name.timer"
+        echo "查看日志: journalctl --user -u $service_name.service"
+        return 0
+    else
+        echo "错误: systemd timer 启动失败"
+        return 1
+    fi
+}
+
+# Function to setup cron with comprehensive checks
+setup_cron_with_checks() {
+    local exec_script="$1"
+    local interval="$2"
+    local cron_cmd="*/$interval * * * * $exec_script >/dev/null 2>&1"
+    
+    # 1. 检查cron命令是否可用
+    if ! command -v crontab >/dev/null 2>&1; then
+        echo "错误: 系统未安装cron服务"
+        return 1
+    fi
+    
+    # 2. 检查cron服务状态
+    local cron_running=false
+    if systemctl is-active crond >/dev/null 2>&1 || \
+       systemctl is-active cron >/dev/null 2>&1 || \
+       service cron status >/dev/null 2>&1 || \
+       pgrep -x "crond\|cron" >/dev/null 2>&1; then
+        cron_running=true
+    fi
+    
+    if [ "$cron_running" = "false" ]; then
+        echo "警告: cron服务可能未运行"
+        echo "请尝试启动: sudo systemctl start crond 或 sudo systemctl start cron"
+    fi
+    
+    # 3. 测试crontab权限
+    if ! crontab -l >/dev/null 2>&1; then
+        echo "警告: 当前用户可能没有crontab权限"
+        echo "请检查 /etc/cron.allow 和 /etc/cron.deny 文件"
+    fi
+    
+    # 4. 移除现有的相同脚本定时任务
+    if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
+        crontab -l 2>/dev/null | grep -v -F "$exec_script" | crontab - 2>/dev/null
+    fi
+    
+    # 5. 添加新的定时任务
+    if (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab - 2>/dev/null; then
+        echo "cron 定时任务: 每 $interval 分钟执行一次"
+        echo "查看任务: crontab -l"
+        return 0
+    else
+        echo "错误: 无法设置cron定时任务"
+        return 1
+    fi
+}
+
+# Function to show manual setup guide
+show_manual_setup_guide() {
+    local exec_script="$1"
+    local interval="$2"
+    local service_name="$3"
+    
+    echo ""
+    echo "==================== 手动配置指南 ===================="
+    echo ""
+    echo "方案1: 手动添加cron任务"
+    echo "  运行: crontab -e"
+    echo "  添加: */$interval * * * * $exec_script"
+    echo ""
+    echo "方案2: 创建systemd用户timer"
+    echo "  1. mkdir -p ~/.config/systemd/user"
+    echo "  2. 创建 ~/.config/systemd/user/${service_name}.service"
+    echo "  3. 创建 ~/.config/systemd/user/${service_name}.timer"
+    echo "  4. systemctl --user enable ${service_name}.timer"
+    echo "  5. systemctl --user start ${service_name}.timer"
+    echo ""
+    echo "方案3: 使用系统任务计划程序或其他调度工具"
+    echo ""
+    echo "=================================================="
+}
+
+# Function to remove systemd timer
+remove_systemd_timer() {
+    local service_name="$1"
+    
+    if systemctl --user is-enabled "$service_name.timer" >/dev/null 2>&1; then
+        systemctl --user stop "$service_name.timer" 2>/dev/null
+        systemctl --user disable "$service_name.timer" 2>/dev/null
+        echo "已停止并禁用 systemd timer: $service_name.timer"
+    fi
+    
+    local user_systemd_dir="$HOME/.config/systemd/user"
+    if [ -f "$user_systemd_dir/${service_name}.service" ]; then
+        rm -f "$user_systemd_dir/${service_name}.service"
+        echo "已删除 systemd service 文件"
+    fi
+    
+    if [ -f "$user_systemd_dir/${service_name}.timer" ]; then
+        rm -f "$user_systemd_dir/${service_name}.timer"
+        echo "已删除 systemd timer 文件"
+    fi
+    
+    systemctl --user daemon-reload 2>/dev/null
+}
+
 # 创建Netflix检测执行脚本
 create_execution_script() {
     local install_dir="$1"
@@ -487,20 +674,12 @@ install_nf_check() {
     local exec_script
     exec_script=$(create_execution_script "$install_dir" "$change_method" "$change_target" "$vm_name" "$ipv" "$cooldown_minutes" "$bot_token" "$chat_id")
     
-    # 创建定时任务
+    # Setup scheduled task using enhanced scheduler
     echo "正在设置定时任务..."
-    local cron_cmd="*/$interval * * * * $exec_script >/dev/null 2>&1"
-    
-    # 移除现有的相同脚本定时任务
-    if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
-        crontab -l 2>/dev/null | grep -v -F "$exec_script" | crontab -
+    if ! setup_scheduler "$exec_script" "$interval" "$SCRIPT_NAME"; then
+        echo "定时任务设置遇到问题，但脚本安装已完成"
+        echo "可以手动运行测试: $0 run"
     fi
-    
-    # 添加新的定时任务
-    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab - 2>/dev/null || {
-        echo "警告: 无法设置定时任务，可能需要手动添加:"
-        echo "$cron_cmd"
-    }
     
     echo "安装完成！"
     echo "执行脚本: $exec_script"
@@ -561,10 +740,13 @@ remove_nf_check() {
     
     echo "正在移除Netflix检测服务..."
     
-    # 移除定时任务
+    # Remove systemd timer if exists
+    remove_systemd_timer "$SCRIPT_NAME"
+    
+    # 移除cron定时任务
     if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
         crontab -l 2>/dev/null | grep -v -F "$exec_script" | crontab -
-        echo "已移除定时任务"
+        echo "已移除 cron 定时任务"
     fi
     
     # 删除执行脚本
@@ -625,14 +807,34 @@ show_status() {
         echo "✗ 执行脚本不存在"
     fi
     
-    # 检查定时任务
+    # Check scheduled tasks
+    local has_scheduler=false
+    
+    # Check systemd timer
+    if systemctl --user is-enabled "${SCRIPT_NAME}.timer" >/dev/null 2>&1; then
+        echo "✓ systemd timer 已设置"
+        local timer_status
+        timer_status=$(systemctl --user is-active "${SCRIPT_NAME}.timer" 2>/dev/null || echo "inactive")
+        echo "  状态: $timer_status"
+        if [ "$timer_status" = "active" ]; then
+            local next_run
+            next_run=$(systemctl --user list-timers "${SCRIPT_NAME}.timer" --no-pager --no-legend 2>/dev/null | awk '{print $1, $2}')
+            [ -n "$next_run" ] && echo "  下次运行: $next_run"
+        fi
+        has_scheduler=true
+    fi
+    
+    # Check crontab
     if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
-        echo "✓ 定时任务已设置"
+        echo "✓ cron 定时任务已设置"
         local cron_line
         cron_line=$(crontab -l 2>/dev/null | grep -F "$exec_script")
         echo "  定时规则: $cron_line"
-    else
-        echo "✗ 定时任务未设置"
+        has_scheduler=true
+    fi
+    
+    if [ "$has_scheduler" = "false" ]; then
+        echo "✗ 未发现定时任务配置"
     fi
     
     # 检查Telegram配置
