@@ -6,7 +6,7 @@ set -o pipefail
 # Netflix 检测管理脚本
 # Cron-first版本，自动安装cron服务，增强稳定性和日志记录
 
-SCRIPT_VERSION="2.0"
+SCRIPT_VERSION="2.1"
 SCRIPT_NAME="nf-check"
 
 # 显示使用说明
@@ -348,8 +348,30 @@ create_execution_script() {
     
     cat > "$exec_script" << 'EOF'
 #!/bin/bash
-# Netflix 检测执行脚本 (自动生成)
+# Netflix 检测执行脚本 (自动生成)  
 # 检测Netflix是否可以观看非自制剧，如果不能则更换IP
+
+# Function to rotate logs if they get too large
+rotate_logs_if_needed() {
+    local log_file="$1"
+    local max_lines="${2:-2000}"  # Netflix日志更详细，允许更多行
+    local keep_lines="${3:-1000}"
+    
+    # Check if log file exists and has content
+    if [ -f "$log_file" ]; then
+        local current_lines
+        current_lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+        
+        # If log file exceeds max_lines, rotate it
+        if [ "$current_lines" -gt "$max_lines" ]; then
+            # Create a backup and keep only the most recent lines
+            if tail -n "$keep_lines" "$log_file" > "${log_file}.tmp" 2>/dev/null; then
+                mv "${log_file}.tmp" "$log_file" 2>/dev/null
+                echo "$(date '+%Y-%m-%d %H:%M:%S') $VM 日志已轮转，从 $current_lines 行减少到 $keep_lines 行" >> "$log_file"
+            fi
+        fi
+    fi
+}
 
 # 配置参数 (请勿修改)
 IPv="__IPV__"
@@ -368,6 +390,18 @@ TG_CHAT_ID="__CHAT_ID__"
 WORK_DIR="$HOME/.nf_check"
 mkdir -p "$WORK_DIR"
 log="$WORK_DIR/ip.txt"
+
+# Rotate logs if needed (check both cron logs and application logs)
+# 1. Rotate cron logs (priority: /var/log/nf_check.log -> ~/.nf_check/nf_check.log)
+for potential_log in "/var/log/nf_check.log" "$WORK_DIR/nf_check.log"; do
+    if [ -f "$potential_log" ] || [ -d "$(dirname "$potential_log")" ]; then
+        rotate_logs_if_needed "$potential_log" 2000 1000
+        break
+    fi
+done
+
+# 2. Rotate application log (ip.txt)
+rotate_logs_if_needed "$log" 2000 1000
 
 # 发送Telegram消息函数
 send_telegram_message() {

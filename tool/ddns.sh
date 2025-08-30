@@ -6,7 +6,7 @@ set -o pipefail
 # CloudFlare DDNS Management Script
 # Cron-first version with enhanced reliability and logging
 
-SCRIPT_VERSION="2.4"
+SCRIPT_VERSION="2.5"
 SCRIPT_NAME="cf-ddns"
 
 # Function to show usage
@@ -355,6 +355,28 @@ set -o pipefail
 # CloudFlare DDNS Execution Script (Auto-generated)
 # This script only performs DNS updates, no management functions
 
+# Function to rotate logs if they get too large
+rotate_logs_if_needed() {
+    local log_file="$1"
+    local max_lines="${2:-1000}"
+    local keep_lines="${3:-500}"
+    
+    # Check if log file exists and has content
+    if [ -f "$log_file" ]; then
+        local current_lines
+        current_lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+        
+        # If log file exceeds max_lines, rotate it
+        if [ "$current_lines" -gt "$max_lines" ]; then
+            # Create a backup and keep only the most recent lines
+            if tail -n "$keep_lines" "$log_file" > "${log_file}.tmp" 2>/dev/null; then
+                mv "${log_file}.tmp" "$log_file" 2>/dev/null
+                echo "$(date '+%Y-%m-%d %H:%M:%S'): 日志已轮转，从 $current_lines 行减少到 $keep_lines 行" >> "$log_file"
+            fi
+        fi
+    fi
+}
+
 # Configuration (DO NOT MODIFY)
 CFTOKEN="__TOKEN__"
 CFZONE_NAME="__ZONE__"
@@ -445,6 +467,15 @@ get_wan_ip() {
 # Create directory for cache files
 DDNS_DIR="$HOME/.ddns"
 mkdir -p "$DDNS_DIR"
+
+# Rotate logs if needed (check common log locations)
+# Priority: /var/log/ddns.log -> ~/.ddns/ddns.log -> skip if neither exists
+for potential_log in "/var/log/ddns.log" "$HOME/.ddns/ddns.log"; do
+    if [ -f "$potential_log" ] || [ -d "$(dirname "$potential_log")" ]; then
+        rotate_logs_if_needed "$potential_log" 1000 500
+        break
+    fi
+done
 
 # Get current IP
 WAN_IP=$(get_wan_ip || {
