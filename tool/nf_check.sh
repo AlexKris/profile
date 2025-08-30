@@ -4,9 +4,9 @@ set -o nounset
 set -o pipefail
 
 # Netflix 检测管理脚本
-# 类似于ddns.sh的结构，用于自动创建Netflix检测脚本和定时任务
+# Cron-first版本，自动安装cron服务，增强稳定性和日志记录
 
-SCRIPT_VERSION="1.0"
+SCRIPT_VERSION="2.0"
 SCRIPT_NAME="nf-check"
 
 # 显示使用说明
@@ -16,7 +16,7 @@ show_usage() {
     echo "Usage: $0 [COMMAND] [OPTIONS]"
     echo ""
     echo "Commands:"
-    echo "  install   安装 Netflix 检测服务（创建检测脚本和定时任务）"
+    echo "  install   安装 Netflix 检测服务（自动安装cron，创建检测脚本和定时任务）"
     echo "  run       手动执行一次 Netflix 检测"
     echo "  remove    移除 Netflix 检测服务（删除定时任务和脚本）"
     echo "  status    查看 Netflix 检测服务状态"
@@ -49,33 +49,107 @@ show_usage() {
     exit 1
 }
 
-# Function to check and setup scheduler
+# Function to auto-install cron service
+install_cron_service() {
+    echo "正在检测系统类型并安装cron..."
+    
+    # 检测包管理器并安装cron
+    if command -v apt-get >/dev/null 2>&1; then
+        # Debian/Ubuntu系统
+        echo "检测到Debian/Ubuntu系统，使用apt安装cron"
+        if sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y cron >/dev/null 2>&1; then
+            sudo systemctl enable cron >/dev/null 2>&1
+            sudo systemctl start cron >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v yum >/dev/null 2>&1; then
+        # RHEL/CentOS 7及以下
+        echo "检测到RHEL/CentOS系统，使用yum安装cronie"
+        if sudo yum install -y cronie >/dev/null 2>&1; then
+            sudo systemctl enable crond >/dev/null 2>&1
+            sudo systemctl start crond >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
+        # Fedora/RHEL 8+
+        echo "检测到Fedora/RHEL 8+系统，使用dnf安装cronie"
+        if sudo dnf install -y cronie >/dev/null 2>&1; then
+            sudo systemctl enable crond >/dev/null 2>&1
+            sudo systemctl start crond >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v pacman >/dev/null 2>&1; then
+        # Arch Linux
+        echo "检测到Arch Linux系统，使用pacman安装cronie"
+        if sudo pacman -S --noconfirm cronie >/dev/null 2>&1; then
+            sudo systemctl enable cronie >/dev/null 2>&1
+            sudo systemctl start cronie >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v apk >/dev/null 2>&1; then
+        # Alpine Linux (常见于Docker容器)
+        echo "检测到Alpine Linux系统，使用apk安装dcron"
+        if sudo apk add --no-cache dcron >/dev/null 2>&1; then
+            sudo rc-update add dcron default >/dev/null 2>&1
+            sudo rc-service dcron start >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v zypper >/dev/null 2>&1; then
+        # openSUSE
+        echo "检测到openSUSE系统，使用zypper安装cron"
+        if sudo zypper install -y cron >/dev/null 2>&1; then
+            sudo systemctl enable cron >/dev/null 2>&1
+            sudo systemctl start cron >/dev/null 2>&1
+            return 0
+        fi
+    else
+        echo "无法识别的包管理器，请手动安装cron服务"
+        return 1
+    fi
+    
+    echo "cron安装失败，可能需要管理员权限或网络连接"
+    return 1
+}
+
+# Function to start cron service
+start_cron_service() {
+    # 尝试启动cron服务（适配不同系统）
+    if systemctl start crond >/dev/null 2>&1 || \
+       systemctl start cron >/dev/null 2>&1 || \
+       service cron start >/dev/null 2>&1 || \
+       rc-service dcron start >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# Function to check and setup scheduler (Cron-first approach)
 setup_scheduler() {
     local exec_script="$1"
     local interval="$2"
     local service_name="$3"
     
-    echo "正在检测可用的定时任务方案..."
+    echo "正在设置定时任务..."
     
-    # 方案1: systemd user timer (推荐，现代Linux系统)
-    if command -v systemctl >/dev/null 2>&1 && systemctl --user list-timers >/dev/null 2>&1; then
-        echo "检测到systemd用户服务支持，使用systemd timer"
-        if create_systemd_timer "$exec_script" "$interval" "$service_name"; then
-            echo "✓ systemd timer 设置成功"
-            return 0
-        else
-            echo "✗ systemd timer 设置失败，尝试cron方案"
-        fi
-    fi
-    
-    # 方案2: crontab (传统方案，容器和老系统兼容)
-    echo "尝试使用cron定时任务..."
+    # 优先使用cron (推荐，兼容性最好)
+    echo "使用cron定时任务（推荐方案）..."
     if setup_cron_with_checks "$exec_script" "$interval"; then
         echo "✓ cron 定时任务设置成功"
         return 0
     fi
     
-    # 方案3: 手动方案提示
+    # 备选方案: systemd user timer
+    echo "cron设置失败，尝试systemd timer..."
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user list-timers >/dev/null 2>&1; then
+        if create_systemd_timer "$exec_script" "$interval" "$service_name"; then
+            echo "✓ systemd timer 设置成功"
+            return 0
+        else
+            echo "✗ systemd timer 设置失败"
+        fi
+    fi
+    
+    # 手动方案提示
     echo "⚠️  无法自动设置定时任务，请手动配置："
     show_manual_setup_guide "$exec_script" "$interval" "$service_name"
     return 1
@@ -143,15 +217,20 @@ EOF
 setup_cron_with_checks() {
     local exec_script="$1"
     local interval="$2"
-    local cron_cmd="*/$interval * * * * $exec_script >/dev/null 2>&1"
+    local log_file="/var/log/nf_check.log"
+    local cron_cmd="*/$interval * * * * $exec_script >> $log_file 2>&1"
     
-    # 1. 检查cron命令是否可用
+    # 1. 检查cron命令是否可用，如果没有则尝试安装
     if ! command -v crontab >/dev/null 2>&1; then
-        echo "错误: 系统未安装cron服务"
-        return 1
+        echo "检测到系统未安装cron服务，尝试自动安装..."
+        if ! install_cron_service; then
+            echo "错误: cron服务安装失败，请手动安装后重试"
+            return 1
+        fi
+        echo "✓ cron服务安装成功"
     fi
     
-    # 2. 检查cron服务状态
+    # 2. 检查cron服务状态，如果未运行则尝试启动
     local cron_running=false
     if systemctl is-active crond >/dev/null 2>&1 || \
        systemctl is-active cron >/dev/null 2>&1 || \
@@ -161,8 +240,13 @@ setup_cron_with_checks() {
     fi
     
     if [ "$cron_running" = "false" ]; then
-        echo "警告: cron服务可能未运行"
-        echo "请尝试启动: sudo systemctl start crond 或 sudo systemctl start cron"
+        echo "检测到cron服务未运行，尝试启动..."
+        if start_cron_service; then
+            echo "✓ cron服务启动成功"
+        else
+            echo "警告: 无法自动启动cron服务"
+            echo "请手动启动: sudo systemctl start crond 或 sudo systemctl start cron"
+        fi
     fi
     
     # 3. 测试crontab权限
@@ -176,10 +260,23 @@ setup_cron_with_checks() {
         crontab -l 2>/dev/null | grep -v -F "$exec_script" | crontab - 2>/dev/null
     fi
     
-    # 5. 添加新的定时任务
+    # 5. 创建日志文件目录
+    local log_dir=$(dirname "$log_file")
+    if [ ! -d "$log_dir" ]; then
+        if ! mkdir -p "$log_dir" 2>/dev/null; then
+            echo "警告: 无法创建日志目录 $log_dir，使用 ~/.nf_check/nf_check.log"
+            log_file="$HOME/.nf_check/nf_check.log"
+            cron_cmd="*/$interval * * * * $exec_script >> $log_file 2>&1"
+            mkdir -p "$(dirname "$log_file")"
+        fi
+    fi
+    
+    # 6. 添加新的定时任务
     if (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab - 2>/dev/null; then
         echo "cron 定时任务: 每 $interval 分钟执行一次"
+        echo "日志文件: $log_file"
         echo "查看任务: crontab -l"
+        echo "查看日志: tail -f $log_file"
         return 0
     else
         echo "错误: 无法设置cron定时任务"
@@ -196,9 +293,9 @@ show_manual_setup_guide() {
     echo ""
     echo "==================== 手动配置指南 ===================="
     echo ""
-    echo "方案1: 手动添加cron任务"
+    echo "方案1: 手动添加cron任务（推荐）"
     echo "  运行: crontab -e"
-    echo "  添加: */$interval * * * * $exec_script"
+    echo "  添加: */$interval * * * * $exec_script >> /var/log/nf_check.log 2>&1"
     echo ""
     echo "方案2: 创建systemd用户timer"
     echo "  1. mkdir -p ~/.config/systemd/user"
@@ -810,9 +907,29 @@ show_status() {
     # Check scheduled tasks
     local has_scheduler=false
     
-    # Check systemd timer
+    # Check crontab first (preferred method)
+    if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
+        echo "✓ cron 定时任务已设置（推荐方案）"
+        local cron_line
+        cron_line=$(crontab -l 2>/dev/null | grep -F "$exec_script")
+        echo "  定时规则: $cron_line"
+        
+        # Parse interval from cron line
+        local interval=$(echo "$cron_line" | awk '{print $1}' | sed 's/\*//' | sed 's|/||')
+        [ -n "$interval" ] && echo "  执行间隔: 每 $interval 分钟"
+        
+        # Check log file
+        local log_file=$(echo "$cron_line" | grep -o '>>[^2]*' | sed 's/>>//' | xargs)
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+            echo "  日志文件: $log_file ($(wc -l < "$log_file") 行)"
+            echo "  最后执行: $(stat -c %y "$log_file" 2>/dev/null | cut -d. -f1)"
+        fi
+        has_scheduler=true
+    fi
+    
+    # Check systemd timer (backup method)
     if systemctl --user is-enabled "${SCRIPT_NAME}.timer" >/dev/null 2>&1; then
-        echo "✓ systemd timer 已设置"
+        echo "✓ systemd timer 已设置（备选方案）"
         local timer_status
         timer_status=$(systemctl --user is-active "${SCRIPT_NAME}.timer" 2>/dev/null || echo "inactive")
         echo "  状态: $timer_status"
@@ -821,12 +938,9 @@ show_status() {
             local timer_info
             timer_info=$(systemctl --user list-timers "${SCRIPT_NAME}.timer" --no-pager --no-legend 2>/dev/null)
             if [ -n "$timer_info" ]; then
-                # systemctl list-timers 输出格式: NEXT LEFT LAST PASSED UNIT ACTIVATES
-                # 需要正确解析字段位置
                 local next_run=$(echo "$timer_info" | awk '{print $1, $2}')
                 local left_time=$(echo "$timer_info" | awk '{print $3}')
                 
-                # 只有当解析到有效内容时才显示
                 if [ -n "$next_run" ] && [ "$next_run" != "- -" ]; then
                     echo "  下次运行: $next_run"
                 fi
@@ -834,23 +948,7 @@ show_status() {
                     echo "  剩余时间: $left_time"
                 fi
             fi
-            
-            # 从timer文件中读取执行间隔
-            local timer_file="$HOME/.config/systemd/user/${SCRIPT_NAME}.timer"
-            if [ -f "$timer_file" ]; then
-                local interval=$(grep "OnCalendar=" "$timer_file" | cut -d'=' -f2 | sed 's/\*:0\//每/' | sed 's/$/分钟/')
-                [ -n "$interval" ] && echo "  执行间隔: $interval"
-            fi
         fi
-        has_scheduler=true
-    fi
-    
-    # Check crontab
-    if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
-        echo "✓ cron 定时任务已设置"
-        local cron_line
-        cron_line=$(crontab -l 2>/dev/null | grep -F "$exec_script")
-        echo "  定时规则: $cron_line"
         has_scheduler=true
     fi
     
