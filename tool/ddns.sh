@@ -6,7 +6,7 @@ set -o pipefail
 # CloudFlare DDNS Management Script
 # Cron-first version with enhanced reliability and logging
 
-SCRIPT_VERSION="2.3"
+SCRIPT_VERSION="2.4"
 SCRIPT_NAME="cf-ddns"
 
 # Function to show usage
@@ -798,13 +798,84 @@ show_status() {
         fi
     fi
     
+    # Check current IP status
+    if [ -f "$exec_script" ]; then
+        echo ""
+        echo "📍 IP 状态信息:"
+        
+        # Get current IP from multiple sources
+        local current_ip=""
+        local ip_services=("https://api.ipify.org" "https://ipv4.icanhazip.com" "https://ident.me")
+        for service in "${ip_services[@]}"; do
+            if current_ip=$(curl -4 -s --connect-timeout 5 --max-time 10 "$service" 2>/dev/null); then
+                if [ -n "$current_ip" ]; then
+                    echo "  当前公网IP: $current_ip"
+                    break
+                fi
+            fi
+        done
+        
+        if [ -z "$current_ip" ]; then
+            echo "  当前公网IP: 无法获取"
+        fi
+        
+        # Check cached IP and show comparison
+        local hostname
+        if hostname=$(grep "^CFRECORD_NAME=" "$exec_script" | head -1 | cut -d'"' -f2 2>/dev/null); then
+            local ddns_dir="$HOME/.ddns"
+            local ip_cache_file="$ddns_dir/.cf-wan_ip_$hostname.txt"
+            
+            if [ -f "$ip_cache_file" ]; then
+                local cached_ip
+                cached_ip=$(cat "$ip_cache_file" 2>/dev/null)
+                if [ -n "$cached_ip" ]; then
+                    echo "  DNS记录IP: $cached_ip"
+                    
+                    # Compare IPs
+                    if [ -n "$current_ip" ]; then
+                        if [ "$current_ip" = "$cached_ip" ]; then
+                            echo "  IP状态: ✓ 同步（无需更新）"
+                        else
+                            echo "  IP状态: ⚠️  不同步（需要更新）"
+                        fi
+                    fi
+                    
+                    # Show last update time
+                    local last_update
+                    last_update=$(stat -c %y "$ip_cache_file" 2>/dev/null | cut -d. -f1)
+                    [ -n "$last_update" ] && echo "  最后更新: $last_update"
+                fi
+            else
+                echo "  DNS记录IP: 未缓存"
+                echo "  IP状态: ⚠️  首次运行或缓存丢失"
+            fi
+        fi
+    fi
+    
     # Check cache files
     local ddns_dir="$HOME/.ddns"
     if [ -d "$ddns_dir" ]; then
+        echo ""
         echo "✓ 缓存目录: $ddns_dir"
         local ip_files
         ip_files=$(find "$ddns_dir" -name ".cf-wan_ip_*.txt" 2>/dev/null | wc -l)
         echo "  IP 缓存文件: $ip_files 个"
+        
+        # Show cache file details
+        if [ "$ip_files" -gt 0 ]; then
+            echo "  缓存详情:"
+            find "$ddns_dir" -name ".cf-wan_ip_*.txt" 2>/dev/null | while read -r cache_file; do
+                if [ -f "$cache_file" ]; then
+                    local domain_name
+                    domain_name=$(basename "$cache_file" | sed 's/^\.cf-wan_ip_//' | sed 's/\.txt$//')
+                    local cached_ip
+                    cached_ip=$(cat "$cache_file" 2>/dev/null)
+                    local cache_time
+                    cache_time=$(stat -c %y "$cache_file" 2>/dev/null | cut -d. -f1)
+                    echo "    - $domain_name: $cached_ip ($cache_time)"
+                fi
+            done
+        fi
     else
         echo "✗ 缓存目录不存在"
     fi
