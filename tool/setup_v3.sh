@@ -33,15 +33,11 @@ DISABLE_SSH_PWD="false"
 DISABLE_ROOT_PWD="false"
 # 系统配置
 SERVER_REGION="auto"
-NTP_SERVICE="auto"
+NTP_SERVICE="chrony"  # 默认使用chrony，更现代稳定
 # 功能开关
 INSTALL_DOCKER="false"
-ENABLE_AUDIT="false"
-ENABLE_MONITORING="false"
 IS_NAT_VPS="false"
 IS_GATEWAY="false"
-SKIP_MODULES=""
-SYSLOG_SERVER=""
 # 检测结果
 TOTAL_MEMORY=0
 CPU_CORES=0
@@ -239,10 +235,6 @@ detect_vps_type() {
 
 # 系统更新模块
 module_system_update() {
-    if [[ "$SKIP_MODULES" == *"update"* ]]; then
-        log_message "INFO" "跳过系统更新"
-        return
-    fi
     
     log_message "INFO" "更新系统包..."
     
@@ -291,10 +283,6 @@ module_system_update() {
 
 # SSH配置模块
 module_ssh_configuration() {
-    if [[ "$SKIP_MODULES" == *"ssh"* ]]; then
-        log_message "INFO" "跳过SSH配置"
-        return
-    fi
     
     log_message "INFO" "配置SSH安全..."
     
@@ -401,10 +389,6 @@ EOF
 
 # 网络优化模块
 module_network_optimization() {
-    if [[ "$SKIP_MODULES" == *"network"* ]]; then
-        log_message "INFO" "跳过网络优化"
-        return
-    fi
     
     log_message "INFO" "应用通用网络优化..."
     
@@ -518,10 +502,6 @@ module_firewall_configuration() {
 
 # Fail2ban配置模块
 module_fail2ban_configuration() {
-    if [[ "$SKIP_MODULES" == *"fail2ban"* ]]; then
-        log_message "INFO" "跳过Fail2ban配置"
-        return
-    fi
     
     log_message "INFO" "配置Fail2ban..."
     
@@ -628,10 +608,6 @@ EOF
 
 # 时区和NTP配置
 module_timezone_configuration() {
-    if [[ "$SKIP_MODULES" == *"timezone"* ]]; then
-        log_message "INFO" "跳过时区配置"
-        return
-    fi
     
     log_message "INFO" "配置时区和NTP..."
     
@@ -658,14 +634,23 @@ module_timezone_configuration() {
     timedatectl set-timezone "$timezone"
     log_message "INFO" "时区设置为: $timezone"
     
-    # 配置NTP
-    if [ "$NTP_SERVICE" = "chrony" ] || [ "$NTP_SERVICE" = "auto" ] && command -v chrony &>/dev/null; then
+    # 配置NTP（默认使用chrony）
+    if [ "$NTP_SERVICE" = "timesyncd" ]; then
+        # 用户明确指定使用systemd-timesyncd
+        timedatectl set-ntp true
+        log_message "INFO" "使用systemd-timesyncd同步时间"
+    else
+        # 默认使用chrony（更稳定精确）
+        if ! command -v chrony &>/dev/null; then
+            apt-get install -y chrony || {
+                log_message "WARNING" "chrony安装失败，回退到systemd-timesyncd"
+                timedatectl set-ntp true
+                return
+            }
+        fi
         systemctl enable chrony
         systemctl restart chrony
         log_message "INFO" "使用chrony同步时间"
-    else
-        timedatectl set-ntp true
-        log_message "INFO" "使用systemd-timesyncd同步时间"
     fi
     
     log_message "SUCCESS" "时区和NTP配置完成"
@@ -673,7 +658,7 @@ module_timezone_configuration() {
 
 # Docker安装模块（可选）
 module_docker_installation() {
-    if [ "$INSTALL_DOCKER" != "true" ] || [[ "$SKIP_MODULES" == *"docker"* ]]; then
+    if [ "$INSTALL_DOCKER" != "true" ]; then
         log_message "INFO" "跳过Docker安装"
         return
     fi
@@ -731,10 +716,6 @@ module_security_audit() {
 
 # 系统限制优化
 module_system_limits() {
-    if [[ "$SKIP_MODULES" == *"limits"* ]]; then
-        log_message "INFO" "跳过系统限制优化"
-        return
-    fi
     
     log_message "INFO" "优化系统限制..."
     
@@ -810,18 +791,6 @@ parse_arguments() {
                 INSTALL_DOCKER="true"
                 shift
                 ;;
-            --enable_audit)
-                # 已禁用
-                shift
-                ;;
-            --enable_monitoring)
-                # 已禁用
-                shift
-                ;;
-            --syslog_server)
-                # 已禁用
-                shift 2
-                ;;
             --nat)
                 IS_NAT_VPS="true"
                 shift
@@ -829,10 +798,6 @@ parse_arguments() {
             --gateway)
                 IS_GATEWAY="true"
                 shift
-                ;;
-            --skip)
-                SKIP_MODULES="$SKIP_MODULES $2"
-                shift 2
                 ;;
             --help)
                 show_usage
@@ -865,20 +830,10 @@ ${YELLOW}基础选项:${NC}
     --disable_ssh_pwd    禁用所有SSH密码登录
     --disable_root_pwd   仅禁用root密码登录（允许密钥）
     --region <地区>      服务器地区（cn/hk/jp/kr/us/eu/auto）
-    --ntp_service <ntp>  NTP服务（chrony/timesyncd/auto）
+    --ntp_service <ntp>  NTP服务（默认chrony，可选timesyncd）
 
-${YELLOW}功能选项:${NC}
+${YELLOW}可选功能:${NC}
     --install_docker     安装Docker
-    --skip <模块>        跳过指定模块
-
-${YELLOW}可跳过的模块:${NC}
-    update              系统更新
-    ssh                 SSH配置
-    network             网络优化
-    fail2ban            Fail2ban
-    timezone            时区配置
-    docker              Docker安装
-    limits              系统限制
 
 ${YELLOW}使用示例:${NC}
     # NAT VPS
