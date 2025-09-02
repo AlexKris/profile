@@ -821,8 +821,9 @@ ${YELLOW}用法:${NC}
     curl -sL <url> | bash -s -- [选项]
 
 ${YELLOW}VPS类型:${NC}
-    --nat               NAT VPS（禁用tw_reuse，保守端口范围）
-    --gateway           网关/中转机（启用IP转发和连接跟踪优化）
+    --nat               NAT VPS（共享IP，端口受限，禁用tw_reuse）
+    --gateway           中转/网关（启用IP转发，优化连接跟踪）
+                        注：可同时使用 --nat --gateway
 
 ${YELLOW}基础选项:${NC}
     --port <端口>        SSH端口（默认: 22）
