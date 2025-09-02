@@ -26,8 +26,6 @@ set -euo pipefail
 trap 'error_handler $? $LINENO' ERR
 
 # ========== 全局变量 ==========
-# 预设模板
-PRESET=""
 # SSH配置
 SSH_PORT="22"
 SSH_KEY=""
@@ -237,58 +235,6 @@ detect_vps_type() {
     log_message "INFO" "VPS类型: $VPS_TYPE"
 }
 
-# ========== 预设模板 ==========
-apply_preset() {
-    local preset=$1
-    log_message "INFO" "应用预设模板: $preset"
-    
-    case $preset in
-        minimal)
-            # 最小化配置（NAT/小内存VPS）
-            export NETWORK_BUFFER_SIZE="small"
-            export NETWORK_QUEUE_SIZE="small"
-            export SKIP_DOCKER="true"
-            export SKIP_AUDIT="true"
-            export OPTIMIZE_LEVEL="basic"
-            ;;
-            
-        standard)
-            # 标准配置（普通VPS）
-            export NETWORK_BUFFER_SIZE="medium"
-            export NETWORK_QUEUE_SIZE="medium"
-            export OPTIMIZE_LEVEL="standard"
-            ;;
-            
-        performance)
-            # 高性能配置（大内存VPS）
-            export NETWORK_BUFFER_SIZE="large"
-            export NETWORK_QUEUE_SIZE="large"
-            export OPTIMIZE_LEVEL="advanced"
-            INSTALL_DOCKER="true"
-            ;;
-            
-        gateway)
-            # 网关/中转配置
-            export NETWORK_BUFFER_SIZE="medium"
-            export NETWORK_QUEUE_SIZE="large"
-            export OPTIMIZE_FORWARD="true"
-            export OPTIMIZE_LEVEL="gateway"
-            ;;
-            
-        auto)
-            # 自动检测并选择
-            detect_system_resources
-            detect_vps_type
-            apply_preset "$VPS_TYPE"
-            ;;
-            
-        *)
-            log_message "WARNING" "未知预设: $preset，使用standard"
-            apply_preset "standard"
-            ;;
-    esac
-}
-
 # ========== 核心功能模块 ==========
 
 # 系统更新模块
@@ -329,8 +275,8 @@ module_system_update() {
     # 基础软件包
     local packages="curl wget vim git htop net-tools fail2ban rsync jq"
     
-    # 根据预设添加额外包
-    if [ "${OPTIMIZE_LEVEL:-basic}" != "basic" ]; then
+    # 根据内存添加额外包
+    if [ "$TOTAL_MEMORY" -ge 2048 ]; then
         packages="$packages iotop iftop nethogs sysstat"
     fi
     
@@ -792,13 +738,13 @@ module_system_limits() {
     
     log_message "INFO" "优化系统限制..."
     
-    # 根据预设确定限制值
+    # 根据内存确定限制值
     local nofile_soft="65535"
     local nofile_hard="65535"
     local nproc_soft="32768"
     local nproc_hard="32768"
     
-    if [ "${OPTIMIZE_LEVEL:-basic}" = "advanced" ]; then
+    if [ "$TOTAL_MEMORY" -ge 4096 ]; then
         nofile_soft="131072"
         nofile_hard="131072"
         nproc_soft="65536"
@@ -836,10 +782,6 @@ EOF
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --preset)
-                PRESET="$2"
-                shift 2
-                ;;
             --port)
                 SSH_PORT="$2"
                 shift 2
@@ -916,11 +858,6 @@ ${YELLOW}用法:${NC}
 ${YELLOW}VPS类型:${NC}
     --nat               NAT VPS（禁用tw_reuse，保守端口范围）
     --gateway           网关/中转机（启用IP转发和连接跟踪优化）
-    --preset <模板>     预设模板（可选，用于自动配置）
-        minimal         最小化配置
-        standard        标准配置
-        performance     高性能配置
-        auto           自动检测
 
 ${YELLOW}基础选项:${NC}
     --port <端口>        SSH端口（默认: 22）
@@ -953,8 +890,8 @@ ${YELLOW}使用示例:${NC}
     # 网关/中转机
     ... | bash -s -- --gateway --region hk --port 27732
     
-    # 高性能VPS完整安装
-    ... | bash -s -- --preset performance --install_docker --enable_monitoring
+    # 完整安装
+    ... | bash -s -- --install_docker --region cn
 
 EOF
 }
@@ -966,7 +903,7 @@ show_summary() {
     echo -e "${CYAN}系统信息:${NC}"
     echo "  内存: ${TOTAL_MEMORY}MB"
     echo "  CPU: ${CPU_CORES}核"
-    echo "  预设: ${PRESET:-auto}"
+    echo "  VPS类型: ${VPS_TYPE:-standard}"
     echo ""
     echo -e "${CYAN}网络配置:${NC}"
     echo "  BBR: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
@@ -1013,12 +950,8 @@ main() {
     # 检测系统资源
     detect_system_resources
     
-    # 应用预设模板
-    if [ -n "$PRESET" ]; then
-        apply_preset "$PRESET"
-    else
-        apply_preset "auto"
-    fi
+    # 检测VPS类型
+    detect_vps_type
     
     # 执行核心模块（添加错误检查）
     module_system_update || log_message "WARNING" "系统更新模块失败，继续..."
