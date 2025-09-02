@@ -290,6 +290,36 @@ module_ssh_configuration() {
     backup_config "/etc/ssh/sshd_config"
     backup_config "/etc/ssh/sshd_config.d/99-setup-v3.conf"
     
+    # 处理cloud-init配置冲突
+    if [ -f "/etc/ssh/sshd_config.d/50-cloud-init.conf" ]; then
+        log_message "WARNING" "检测到cloud-init SSH配置，将注释其冲突设置"
+        backup_config "/etc/ssh/sshd_config.d/50-cloud-init.conf"
+        
+        # 注释掉cloud-init中的冲突设置，而不是删除文件
+        if grep -q "^PasswordAuthentication" /etc/ssh/sshd_config.d/50-cloud-init.conf; then
+            sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' /etc/ssh/sshd_config.d/50-cloud-init.conf
+            log_message "INFO" "已注释cloud-init中的PasswordAuthentication"
+        fi
+        if grep -q "^PermitRootLogin" /etc/ssh/sshd_config.d/50-cloud-init.conf; then
+            sed -i 's/^PermitRootLogin/#PermitRootLogin/' /etc/ssh/sshd_config.d/50-cloud-init.conf
+            log_message "INFO" "已注释cloud-init中的PermitRootLogin"
+        fi
+    fi
+    
+    # 注释掉主配置文件中的冲突项
+    if grep -q "^PasswordAuthentication" /etc/ssh/sshd_config; then
+        sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' /etc/ssh/sshd_config
+        log_message "INFO" "已注释主配置文件中的PasswordAuthentication"
+    fi
+    if grep -q "^PermitRootLogin" /etc/ssh/sshd_config; then
+        sed -i 's/^PermitRootLogin/#PermitRootLogin/' /etc/ssh/sshd_config
+        log_message "INFO" "已注释主配置文件中的PermitRootLogin"
+    fi
+    if grep -q "^Port" /etc/ssh/sshd_config; then
+        sed -i 's/^Port/#Port/' /etc/ssh/sshd_config
+        log_message "INFO" "已注释主配置文件中的Port"
+    fi
+    
     # 记录当前SSH端口
     local old_port=$(grep -E "^Port" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
     old_port=${old_port:-22}
@@ -863,7 +893,8 @@ show_summary() {
     echo ""
     echo -e "${CYAN}网络配置:${NC}"
     echo "  BBR: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
-    echo "  缓冲区: ${NETWORK_BUFFER_SIZE:-medium}"
+    echo "  TIME_WAIT复用: $(sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null)"
+    [ "$IS_GATEWAY" = "true" ] && echo "  IP转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null)"
     echo ""
     echo -e "${CYAN}SSH配置:${NC}"
     echo "  端口: $SSH_PORT"
