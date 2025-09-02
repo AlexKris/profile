@@ -4,9 +4,9 @@ set -o nounset
 set -o pipefail
 
 # CloudFlare DDNS Management Script
-# Enhanced version with separate execution script generation and Telegram notifications
+# Cron-first version with enhanced reliability and logging
 
-SCRIPT_VERSION="2.1"
+SCRIPT_VERSION="2.5"
 SCRIPT_NAME="cf-ddns"
 
 # Function to show usage
@@ -16,7 +16,7 @@ show_usage() {
     echo "Usage: $0 [COMMAND] [OPTIONS]"
     echo ""
     echo "Commands:"
-    echo "  install   安装 DDNS 服务（创建执行脚本和定时任务）"
+    echo "  install   安装 DDNS 服务（自动安装cron，创建执行脚本和定时任务）"
     echo "  run       手动执行一次 DDNS 更新"
     echo "  remove    移除 DDNS 服务（删除定时任务和执行脚本）"
     echo "  status    查看 DDNS 服务状态"
@@ -49,33 +49,107 @@ show_usage() {
     exit 1
 }
 
-# Function to check and setup scheduler
+# Function to auto-install cron service
+install_cron_service() {
+    echo "正在检测系统类型并安装cron..."
+    
+    # 检测包管理器并安装cron
+    if command -v apt-get >/dev/null 2>&1; then
+        # Debian/Ubuntu系统
+        echo "检测到Debian/Ubuntu系统，使用apt安装cron"
+        if sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y cron >/dev/null 2>&1; then
+            sudo systemctl enable cron >/dev/null 2>&1
+            sudo systemctl start cron >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v yum >/dev/null 2>&1; then
+        # RHEL/CentOS 7及以下
+        echo "检测到RHEL/CentOS系统，使用yum安装cronie"
+        if sudo yum install -y cronie >/dev/null 2>&1; then
+            sudo systemctl enable crond >/dev/null 2>&1
+            sudo systemctl start crond >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
+        # Fedora/RHEL 8+
+        echo "检测到Fedora/RHEL 8+系统，使用dnf安装cronie"
+        if sudo dnf install -y cronie >/dev/null 2>&1; then
+            sudo systemctl enable crond >/dev/null 2>&1
+            sudo systemctl start crond >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v pacman >/dev/null 2>&1; then
+        # Arch Linux
+        echo "检测到Arch Linux系统，使用pacman安装cronie"
+        if sudo pacman -S --noconfirm cronie >/dev/null 2>&1; then
+            sudo systemctl enable cronie >/dev/null 2>&1
+            sudo systemctl start cronie >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v apk >/dev/null 2>&1; then
+        # Alpine Linux (常见于Docker容器)
+        echo "检测到Alpine Linux系统，使用apk安装dcron"
+        if sudo apk add --no-cache dcron >/dev/null 2>&1; then
+            sudo rc-update add dcron default >/dev/null 2>&1
+            sudo rc-service dcron start >/dev/null 2>&1
+            return 0
+        fi
+    elif command -v zypper >/dev/null 2>&1; then
+        # openSUSE
+        echo "检测到openSUSE系统，使用zypper安装cron"
+        if sudo zypper install -y cron >/dev/null 2>&1; then
+            sudo systemctl enable cron >/dev/null 2>&1
+            sudo systemctl start cron >/dev/null 2>&1
+            return 0
+        fi
+    else
+        echo "无法识别的包管理器，请手动安装cron服务"
+        return 1
+    fi
+    
+    echo "cron安装失败，可能需要管理员权限或网络连接"
+    return 1
+}
+
+# Function to start cron service
+start_cron_service() {
+    # 尝试启动cron服务（适配不同系统）
+    if systemctl start crond >/dev/null 2>&1 || \
+       systemctl start cron >/dev/null 2>&1 || \
+       service cron start >/dev/null 2>&1 || \
+       rc-service dcron start >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# Function to check and setup scheduler (Cron-first approach)
 setup_scheduler() {
     local exec_script="$1"
     local interval="$2"
     local service_name="$3"
     
-    echo "正在检测可用的定时任务方案..."
+    echo "正在设置定时任务..."
     
-    # 方案1: systemd user timer (推荐，现代Linux系统)
-    if command -v systemctl >/dev/null 2>&1 && systemctl --user list-timers >/dev/null 2>&1; then
-        echo "检测到systemd用户服务支持，使用systemd timer"
-        if create_systemd_timer "$exec_script" "$interval" "$service_name"; then
-            echo "✓ systemd timer 设置成功"
-            return 0
-        else
-            echo "✗ systemd timer 设置失败，尝试cron方案"
-        fi
-    fi
-    
-    # 方案2: crontab (传统方案，容器和老系统兼容)
-    echo "尝试使用cron定时任务..."
+    # 优先使用cron (推荐，兼容性最好)
+    echo "使用cron定时任务（推荐方案）..."
     if setup_cron_with_checks "$exec_script" "$interval"; then
         echo "✓ cron 定时任务设置成功"
         return 0
     fi
     
-    # 方案3: 手动方案提示
+    # 备选方案: systemd user timer
+    echo "cron设置失败，尝试systemd timer..."
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user list-timers >/dev/null 2>&1; then
+        if create_systemd_timer "$exec_script" "$interval" "$service_name"; then
+            echo "✓ systemd timer 设置成功"
+            return 0
+        else
+            echo "✗ systemd timer 设置失败"
+        fi
+    fi
+    
+    # 手动方案提示
     echo "⚠️  无法自动设置定时任务，请手动配置："
     show_manual_setup_guide "$exec_script" "$interval" "$service_name"
     return 1
@@ -143,15 +217,20 @@ EOF
 setup_cron_with_checks() {
     local exec_script="$1"
     local interval="$2"
-    local cron_cmd="*/$interval * * * * $exec_script >/dev/null 2>&1"
+    local log_file="/var/log/ddns.log"
+    local cron_cmd="*/$interval * * * * $exec_script >> $log_file 2>&1"
     
-    # 1. 检查cron命令是否可用
+    # 1. 检查cron命令是否可用，如果没有则尝试安装
     if ! command -v crontab >/dev/null 2>&1; then
-        echo "错误: 系统未安装cron服务"
-        return 1
+        echo "检测到系统未安装cron服务，尝试自动安装..."
+        if ! install_cron_service; then
+            echo "错误: cron服务安装失败，请手动安装后重试"
+            return 1
+        fi
+        echo "✓ cron服务安装成功"
     fi
     
-    # 2. 检查cron服务状态
+    # 2. 检查cron服务状态，如果未运行则尝试启动
     local cron_running=false
     if systemctl is-active crond >/dev/null 2>&1 || \
        systemctl is-active cron >/dev/null 2>&1 || \
@@ -161,8 +240,13 @@ setup_cron_with_checks() {
     fi
     
     if [ "$cron_running" = "false" ]; then
-        echo "警告: cron服务可能未运行"
-        echo "请尝试启动: sudo systemctl start crond 或 sudo systemctl start cron"
+        echo "检测到cron服务未运行，尝试启动..."
+        if start_cron_service; then
+            echo "✓ cron服务启动成功"
+        else
+            echo "警告: 无法自动启动cron服务"
+            echo "请手动启动: sudo systemctl start crond 或 sudo systemctl start cron"
+        fi
     fi
     
     # 3. 测试crontab权限
@@ -176,10 +260,23 @@ setup_cron_with_checks() {
         crontab -l 2>/dev/null | grep -v -F "$exec_script" | crontab - 2>/dev/null
     fi
     
-    # 5. 添加新的定时任务
+    # 5. 创建日志文件目录
+    local log_dir=$(dirname "$log_file")
+    if [ ! -d "$log_dir" ]; then
+        if ! mkdir -p "$log_dir" 2>/dev/null; then
+            echo "警告: 无法创建日志目录 $log_dir，使用 ~/.ddns/ddns.log"
+            log_file="$HOME/.ddns/ddns.log"
+            cron_cmd="*/$interval * * * * $exec_script >> $log_file 2>&1"
+            mkdir -p "$(dirname "$log_file")"
+        fi
+    fi
+    
+    # 6. 添加新的定时任务
     if (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab - 2>/dev/null; then
         echo "cron 定时任务: 每 $interval 分钟执行一次"
+        echo "日志文件: $log_file"
         echo "查看任务: crontab -l"
+        echo "查看日志: tail -f $log_file"
         return 0
     else
         echo "错误: 无法设置cron定时任务"
@@ -196,9 +293,9 @@ show_manual_setup_guide() {
     echo ""
     echo "==================== 手动配置指南 ===================="
     echo ""
-    echo "方案1: 手动添加cron任务"
+    echo "方案1: 手动添加cron任务（推荐）"
     echo "  运行: crontab -e"
-    echo "  添加: */$interval * * * * $exec_script"
+    echo "  添加: */$interval * * * * $exec_script >> /var/log/ddns.log 2>&1"
     echo ""
     echo "方案2: 创建systemd用户timer"
     echo "  1. mkdir -p ~/.config/systemd/user"
@@ -257,6 +354,28 @@ set -o pipefail
 
 # CloudFlare DDNS Execution Script (Auto-generated)
 # This script only performs DNS updates, no management functions
+
+# Function to rotate logs if they get too large
+rotate_logs_if_needed() {
+    local log_file="$1"
+    local max_lines="${2:-1000}"
+    local keep_lines="${3:-500}"
+    
+    # Check if log file exists and has content
+    if [ -f "$log_file" ]; then
+        local current_lines
+        current_lines=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+        
+        # If log file exceeds max_lines, rotate it
+        if [ "$current_lines" -gt "$max_lines" ]; then
+            # Create a backup and keep only the most recent lines
+            if tail -n "$keep_lines" "$log_file" > "${log_file}.tmp" 2>/dev/null; then
+                mv "${log_file}.tmp" "$log_file" 2>/dev/null
+                echo "$(date '+%Y-%m-%d %H:%M:%S'): 日志已轮转，从 $current_lines 行减少到 $keep_lines 行" >> "$log_file"
+            fi
+        fi
+    fi
+}
 
 # Configuration (DO NOT MODIFY)
 CFTOKEN="__TOKEN__"
@@ -348,6 +467,15 @@ get_wan_ip() {
 # Create directory for cache files
 DDNS_DIR="$HOME/.ddns"
 mkdir -p "$DDNS_DIR"
+
+# Rotate logs if needed (check common log locations)
+# Priority: /var/log/ddns.log -> ~/.ddns/ddns.log -> skip if neither exists
+for potential_log in "/var/log/ddns.log" "$HOME/.ddns/ddns.log"; do
+    if [ -f "$potential_log" ] || [ -d "$(dirname "$potential_log")" ]; then
+        rotate_logs_if_needed "$potential_log" 1000 500
+        break
+    fi
+done
 
 # Get current IP
 WAN_IP=$(get_wan_ip || {
@@ -643,9 +771,29 @@ show_status() {
     # Check scheduled tasks
     local has_scheduler=false
     
-    # Check systemd timer
+    # Check crontab first (preferred method)
+    if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
+        echo "✓ cron 定时任务已设置（推荐方案）"
+        local cron_line
+        cron_line=$(crontab -l 2>/dev/null | grep -F "$exec_script")
+        echo "  定时规则: $cron_line"
+        
+        # Parse interval from cron line
+        local interval=$(echo "$cron_line" | awk '{print $1}' | sed 's/\*//' | sed 's|/||')
+        [ -n "$interval" ] && echo "  执行间隔: 每 $interval 分钟"
+        
+        # Check log file
+        local log_file=$(echo "$cron_line" | grep -o '>>[^2]*' | sed 's/>>//' | xargs)
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+            echo "  日志文件: $log_file ($(wc -l < "$log_file") 行)"
+            echo "  最后执行: $(stat -c %y "$log_file" 2>/dev/null | cut -d. -f1)"
+        fi
+        has_scheduler=true
+    fi
+    
+    # Check systemd timer (backup method)
     if systemctl --user is-enabled "${SCRIPT_NAME}.timer" >/dev/null 2>&1; then
-        echo "✓ systemd timer 已设置"
+        echo "✓ systemd timer 已设置（备选方案）"
         local timer_status
         timer_status=$(systemctl --user is-active "${SCRIPT_NAME}.timer" 2>/dev/null || echo "inactive")
         echo "  状态: $timer_status"
@@ -654,12 +802,9 @@ show_status() {
             local timer_info
             timer_info=$(systemctl --user list-timers "${SCRIPT_NAME}.timer" --no-pager --no-legend 2>/dev/null)
             if [ -n "$timer_info" ]; then
-                # systemctl list-timers 输出格式: NEXT LEFT LAST PASSED UNIT ACTIVATES
-                # 需要正确解析字段位置
                 local next_run=$(echo "$timer_info" | awk '{print $1, $2}')
                 local left_time=$(echo "$timer_info" | awk '{print $3}')
                 
-                # 只有当解析到有效内容时才显示
                 if [ -n "$next_run" ] && [ "$next_run" != "- -" ]; then
                     echo "  下次运行: $next_run"
                 fi
@@ -667,23 +812,7 @@ show_status() {
                     echo "  剩余时间: $left_time"
                 fi
             fi
-            
-            # 从timer文件中读取执行间隔
-            local timer_file="$HOME/.config/systemd/user/${SCRIPT_NAME}.timer"
-            if [ -f "$timer_file" ]; then
-                local interval=$(grep "OnCalendar=" "$timer_file" | cut -d'=' -f2 | sed 's/\*:0\//每/' | sed 's/$/分钟/')
-                [ -n "$interval" ] && echo "  执行间隔: $interval"
-            fi
         fi
-        has_scheduler=true
-    fi
-    
-    # Check crontab
-    if crontab -l 2>/dev/null | grep -F "$exec_script" >/dev/null; then
-        echo "✓ cron 定时任务已设置"
-        local cron_line
-        cron_line=$(crontab -l 2>/dev/null | grep -F "$exec_script")
-        echo "  定时规则: $cron_line"
         has_scheduler=true
     fi
     
@@ -700,13 +829,84 @@ show_status() {
         fi
     fi
     
+    # Check current IP status
+    if [ -f "$exec_script" ]; then
+        echo ""
+        echo "📍 IP 状态信息:"
+        
+        # Get current IP from multiple sources
+        local current_ip=""
+        local ip_services=("https://api.ipify.org" "https://ipv4.icanhazip.com" "https://ident.me")
+        for service in "${ip_services[@]}"; do
+            if current_ip=$(curl -4 -s --connect-timeout 5 --max-time 10 "$service" 2>/dev/null); then
+                if [ -n "$current_ip" ]; then
+                    echo "  当前公网IP: $current_ip"
+                    break
+                fi
+            fi
+        done
+        
+        if [ -z "$current_ip" ]; then
+            echo "  当前公网IP: 无法获取"
+        fi
+        
+        # Check cached IP and show comparison
+        local hostname
+        if hostname=$(grep "^CFRECORD_NAME=" "$exec_script" | head -1 | cut -d'"' -f2 2>/dev/null); then
+            local ddns_dir="$HOME/.ddns"
+            local ip_cache_file="$ddns_dir/.cf-wan_ip_$hostname.txt"
+            
+            if [ -f "$ip_cache_file" ]; then
+                local cached_ip
+                cached_ip=$(cat "$ip_cache_file" 2>/dev/null)
+                if [ -n "$cached_ip" ]; then
+                    echo "  DNS记录IP: $cached_ip"
+                    
+                    # Compare IPs
+                    if [ -n "$current_ip" ]; then
+                        if [ "$current_ip" = "$cached_ip" ]; then
+                            echo "  IP状态: ✓ 同步（无需更新）"
+                        else
+                            echo "  IP状态: ⚠️  不同步（需要更新）"
+                        fi
+                    fi
+                    
+                    # Show last update time
+                    local last_update
+                    last_update=$(stat -c %y "$ip_cache_file" 2>/dev/null | cut -d. -f1)
+                    [ -n "$last_update" ] && echo "  最后更新: $last_update"
+                fi
+            else
+                echo "  DNS记录IP: 未缓存"
+                echo "  IP状态: ⚠️  首次运行或缓存丢失"
+            fi
+        fi
+    fi
+    
     # Check cache files
     local ddns_dir="$HOME/.ddns"
     if [ -d "$ddns_dir" ]; then
+        echo ""
         echo "✓ 缓存目录: $ddns_dir"
         local ip_files
         ip_files=$(find "$ddns_dir" -name ".cf-wan_ip_*.txt" 2>/dev/null | wc -l)
         echo "  IP 缓存文件: $ip_files 个"
+        
+        # Show cache file details
+        if [ "$ip_files" -gt 0 ]; then
+            echo "  缓存详情:"
+            find "$ddns_dir" -name ".cf-wan_ip_*.txt" 2>/dev/null | while read -r cache_file; do
+                if [ -f "$cache_file" ]; then
+                    local domain_name
+                    domain_name=$(basename "$cache_file" | sed 's/^\.cf-wan_ip_//' | sed 's/\.txt$//')
+                    local cached_ip
+                    cached_ip=$(cat "$cache_file" 2>/dev/null)
+                    local cache_time
+                    cache_time=$(stat -c %y "$cache_file" 2>/dev/null | cut -d. -f1)
+                    echo "    - $domain_name: $cached_ip ($cache_time)"
+                fi
+            done
+        fi
     else
         echo "✗ 缓存目录不存在"
     fi
