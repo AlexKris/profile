@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 启用严格模式，任何未捕获的错误都会导致脚本退出
-set -euo pipefail
+# 启用严格模式，显式错误处理（移除-e以避免不可预测行为）
+set -uo pipefail
 
 # 脚本版本
 readonly SCRIPT_VERSION="2.1.3"
@@ -40,7 +40,7 @@ SUDO_USERNAME=""
 # NTP服务选择（auto|timesyncd|chrony）
 NTP_SERVICE="auto"
 # 新增：安全审计参数（合并原来的三个审计相关参数）
-ENABLE_SECURITY_AUDIT="true"  # 默认启用安全审计
+ENABLE_SECURITY_AUDIT="false"  # 默认禁用安全审计
 # Docker相关
 INSTALL_DOCKER="false"
 # 新增：控制是否禁用root登录
@@ -59,46 +59,58 @@ cleanup() {
 # 注册EXIT信号处理
 trap cleanup EXIT INT TERM
 
-# 验证IP地址格式
-validate_ip() {
-    local ip="$1"
-    local valid_ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
-    local valid_cidr_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$"
+# ==================== 基础工具函数 ====================
+
+# ==================== 现代化错误处理函数 ====================
+
+# 致命错误处理函数 - 记录错误并退出
+die() {
+    local msg="${1:-未知致命错误}"
+    local exit_code="${2:-1}"
     
-    if [[ "$ip" =~ $valid_ip_regex ]]; then
-        # 检查每个数字段是否在0-255范围内
-        IFS='.' read -ra ADDR <<< "$ip"
-        for i in "${ADDR[@]}"; do
-            if [ "$i" -gt 255 ]; then
-                return 1
-            fi
-        done
-        return 0
-    elif [[ "$ip" =~ $valid_cidr_regex ]]; then
-        # 检查CIDR格式
-        local network="${ip%/*}"
-        local prefix="${ip#*/}"
-        if validate_ip "$network" && [ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]; then
-            return 0
-        fi
-    fi
-    return 1
+    log_message "ERROR" "致命错误: $msg"
+    log_message "ERROR" "脚本终止执行 (退出码: $exit_code)"
+    
+    # 清理资源
+    cleanup 2>/dev/null || true
+    exit "$exit_code"
 }
 
-# 错误处理函数
-handle_error() {
+# 检查命令执行结果 - 非致命错误处理
+check_error() {
     local exit_code=$1
-    local error_msg=$2
-    local fatal=${3:-false}
-
+    local operation="${2:-操作}"
+    local context="${3:-}"
+    
     if [ $exit_code -ne 0 ]; then
-        log_message "ERROR" "$error_msg (错误码: $exit_code)"
-        if [ "$fatal" = "true" ]; then
-            log_message "ERROR" "遇到致命错误，脚本终止执行"
-            exit $exit_code
-        fi
+        local error_msg="$operation 失败 (错误码: $exit_code)"
+        [ -n "$context" ] && error_msg="$error_msg - $context"
+        
+        log_message "WARNING" "$error_msg"
         return 1
     fi
+    return 0
+}
+
+# 安全执行命令 - 带错误检查的命令执行
+safe_execute() {
+    local cmd="$1"
+    local description="${2:-执行命令}"
+    local fatal="${3:-false}"
+    
+    log_message "DEBUG" "执行: $cmd"
+    
+    if ! eval "$cmd"; then
+        local exit_code=$?
+        if [ "$fatal" = "true" ]; then
+            die "$description 失败" "$exit_code"
+        else
+            check_error "$exit_code" "$description"
+            return "$exit_code"
+        fi
+    fi
+    
+    log_message "DEBUG" "$description 成功"
     return 0
 }
 
@@ -165,6 +177,8 @@ log_message() {
     [ "${level^^}" = "ERROR" ] && command -v logger >/dev/null 2>&1 && logger -t "$(basename "$0" .sh)" -p user.err "$message" 2>/dev/null || true
 }
 
+# ==================== 系统检查函数 ====================
+
 # 检查系统兼容性
 check_compatibility() {
     log_message "INFO" "检查系统兼容性..."
@@ -199,6 +213,8 @@ check_compatibility() {
     return 0
 }
 
+# ==================== 帮助和参数处理 ====================
+
 # 显示用法信息
 usage() {
     echo "用法: $0 [选项]"
@@ -212,7 +228,7 @@ usage() {
     echo "  --ntp_service SERVICE     指定NTP服务（auto|timesyncd|chrony，默认: auto）"
     echo "  --version                 显示脚本版本"
     echo "  --create_user USERNAME    创建管理员用户（必须提供SSH密钥）"
-    echo "  --disable_audit           禁用安全审计（默认启用auditd和etckeeper）"
+    echo "  --enable_audit            启用安全审计（auditd和etckeeper）"
     echo "  --install_docker          安装Docker并自动配置防火墙规则"
     echo "  --disable_root_login      禁用root用户SSH登录（建议在创建管理员用户后使用）"
     echo ""
@@ -302,8 +318,8 @@ parse_args() {
                     exit 1
                 fi
                 shift ;;
-            --disable_audit)
-                ENABLE_SECURITY_AUDIT="false" ;;
+            --enable_audit)
+                ENABLE_SECURITY_AUDIT="true" ;;
             --install_docker)
                 INSTALL_DOCKER="true" ;;
             --disable_root_login)
@@ -331,6 +347,8 @@ parse_args() {
     log_message "INFO" "脚本开始执行，日志文件: $LOG_FILE"
 }
 
+# ==================== APT包管理函数 ====================
+
 # 带重试机制的apt安装函数
 apt_install_with_retry() {
     local packages="$1"
@@ -342,7 +360,7 @@ apt_install_with_retry() {
     
     while [ $retry_count -lt $max_retries ]; do
         # 等待apt锁释放
-        if ! wait_for_apt; then
+        if ! wait_for_apt_locks; then
             log_message "ERROR" "等待apt锁失败，重试 $((retry_count + 1))/$max_retries"
             ((retry_count++))
             if [ $retry_count -lt $max_retries ]; then
@@ -381,76 +399,18 @@ apt_install_with_retry() {
     return 1
 }
 
-# 检测并处理特殊的锁定情况
-handle_special_lock_cases() {
-    [ "$OS_TYPE" != "debian" ] && return 0
-    
-    log_message "INFO" "检查特殊锁定情况..."
-    
-    # 检查unattended-upgrades是否在运行（只检测真正的更新进程）
-    if pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
-        log_message "INFO" "检测到unattended-upgrades正在运行，等待其完成..."
-        # 等待unattended-upgrades完成，最多等待20分钟
-        local wait_time=0
-        while pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1 && [ $wait_time -lt 1200 ]; do
-            sleep 30
-            ((wait_time += 30))
-            log_message "INFO" "unattended-upgrades仍在运行... ($wait_time/1200秒)"
-        done
-        
-        if pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
-            log_message "WARNING" "unattended-upgrades运行时间过长，可能需要手动干预"
-        else
-            log_message "INFO" "unattended-upgrades已完成"
-        fi
-    fi
-    
-    # 检查是否有僵尸dpkg进程
-    if pgrep -x "dpkg" >/dev/null 2>&1; then
-        log_message "INFO" "检测到dpkg进程，检查是否为僵尸进程..."
-        # 等待一段时间看进程是否自然结束
-        sleep 10
-        if pgrep -x "dpkg" >/dev/null 2>&1; then
-            log_message "WARNING" "发现可能的僵尸dpkg进程"
-            # 尝试修复
-            sudo dpkg --configure -a 2>/dev/null || true
-        fi
-    fi
-    
-    # 检查损坏的锁文件
-    local lock_files=(
-        "/var/lib/dpkg/lock"
-        "/var/lib/dpkg/lock-frontend"
-        "/var/lib/apt/lists/lock"
-        "/var/cache/apt/archives/lock"
-    )
-    
-    for lock_file in "${lock_files[@]}"; do
-        if [ -f "$lock_file" ]; then
-            # 检查锁文件是否被占用
-            if ! fuser "$lock_file" >/dev/null 2>&1; then
-                # 文件存在但没有进程使用，可能是残留锁文件
-                local file_age=$(stat -c %Y "$lock_file" 2>/dev/null || echo 0)
-                local current_time=$(date +%s)
-                local age_diff=$((current_time - file_age))
-                
-                # 如果锁文件超过30分钟没有被修改，可能是残留文件
-                if [ $age_diff -gt 1800 ]; then
-                    log_message "WARNING" "发现可能的残留锁文件: $lock_file (年龄: ${age_diff}秒)"
-                    log_message "INFO" "考虑手动删除该锁文件"
-                fi
-            fi
-        fi
-    done
-    
-    return 0
-}
 
-# 诊断和修复包管理器问题
-diagnose_and_fix_package_manager() {
+
+# 等待apt锁并处理特殊情况（合并版本）
+wait_for_apt_locks() {
     [ "$OS_TYPE" != "debian" ] && return 0
     
-    log_message "INFO" "诊断包管理器状态..."
+    local max_wait=900  # 15分钟
+    local waited=0
+    local check_interval=5
+    local first_wait=true
+    
+    log_message "INFO" "检查包管理器状态..."
     
     # 检查磁盘空间
     local available_space=$(df /var/cache/apt/archives | awk 'NR==2 {print $4}')
@@ -460,81 +420,69 @@ diagnose_and_fix_package_manager() {
     fi
     
     # 检查包数据库完整性
-    log_message "INFO" "检查包数据库完整性..."
-    if ! sudo dpkg --audit; then
+    if ! sudo dpkg --audit >/dev/null 2>&1; then
         log_message "WARNING" "发现包数据库问题，尝试修复..."
         sudo dpkg --configure -a || true
-        sudo apt-get -f install -y || true
     fi
     
-    # 检查apt源配置
-    if [ -f /etc/apt/sources.list ]; then
-        if ! grep -q "^deb " /etc/apt/sources.list && ! find /etc/apt/sources.list.d/ -name "*.list" -exec grep -q "^deb " {} \; 2>/dev/null; then
-            log_message "ERROR" "未找到有效的apt源配置"
-            return 1
-        fi
-    fi
-    
-    # 测试网络连接到apt仓库
-    log_message "INFO" "测试网络连接..."
-    if ! timeout 10 wget -q --spider http://security.debian.org/ 2>/dev/null && \
-       ! timeout 10 wget -q --spider http://deb.debian.org/ 2>/dev/null; then
-        log_message "WARNING" "无法连接到Debian仓库，可能存在网络问题"
-    fi
-    
-    return 0
-}
-
-# 等待apt锁释放（增强版本）
-wait_for_apt() {
-    [ "$OS_TYPE" != "debian" ] && return 0
-    
-    local max_wait=900  # 增加到15分钟
-    local waited=0
-    local check_interval=5
-    local first_wait=true
-    
-    # 检查所有可能的apt锁文件和进程
+    # 主锁等待循环
     while true; do
         local locked=false
         local lock_sources=()
         
-        # 检查dpkg锁
+        # 检查所有锁文件
         if fuser /var/lib/dpkg/lock* >/dev/null 2>&1; then
             locked=true
             lock_sources+=("dpkg-lock")
         fi
         
-        # 检查apt锁
         if fuser /var/lib/apt/lists/lock* >/dev/null 2>&1; then
             locked=true
             lock_sources+=("apt-lists-lock")
         fi
         
-        # 检查apt缓存锁
         if fuser /var/cache/apt/archives/lock* >/dev/null 2>&1; then
             locked=true
             lock_sources+=("apt-cache-lock")
         fi
         
-        # 检查dpkg前端锁
         if [ -f /var/lib/dpkg/lock-frontend ] && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
             locked=true
             lock_sources+=("dpkg-frontend-lock")
         fi
         
-        # 检查apt进程（只检测真正的更新进程）
-        if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1 || \
-           pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || \
-           pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
+        # 检查关键进程
+        if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1; then
             locked=true
             lock_sources+=("apt-processes")
         fi
         
-        # 检查cloud-init中的包管理器
+        # 特殊处理unattended-upgrades
+        if pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
+            locked=true
+            lock_sources+=("unattended-upgrades")
+            
+            # 首次检测到时显示特殊信息
+            if [ "$first_wait" = "true" ]; then
+                log_message "INFO" "检测到unattended-upgrades正在运行，等待其完成..."
+            fi
+        fi
+        
+        # 检查cloud-init
         if pgrep -f "cloud-init.*apt" >/dev/null 2>&1; then
             locked=true
             lock_sources+=("cloud-init-apt")
+        fi
+        
+        # 检查僵尸dpkg进程
+        if pgrep -x "dpkg" >/dev/null 2>&1; then
+            sleep 5  # 给进程一些时间自然结束
+            if pgrep -x "dpkg" >/dev/null 2>&1; then
+                log_message "WARNING" "发现可能的僵尸dpkg进程，尝试修复..."
+                sudo dpkg --configure -a 2>/dev/null || true
+                locked=true
+                lock_sources+=("zombie-dpkg")
+            fi
         fi
         
         # 如果没有锁，退出循环
@@ -542,20 +490,19 @@ wait_for_apt() {
             break
         fi
         
-        # 第一次检测到锁时显示详细信息
+        # 第一次检测到锁时显示信息
         if [ "$first_wait" = "true" ]; then
             log_message "INFO" "检测到包管理器锁定源: ${lock_sources[*]}"
             first_wait=false
         fi
         
-        # 检查是否超时
+        # 超时检查
         if [ $waited -ge $max_wait ]; then
             log_message "ERROR" "等待apt锁超时 ($max_wait秒)，当前锁定源: ${lock_sources[*]}"
-            log_message "ERROR" "可能需要手动清理锁文件或重启系统"
             return 1
         fi
         
-        # 每分钟显示一次进度
+        # 进度显示
         if [ $((waited % 60)) -eq 0 ] || [ $waited -lt 60 ]; then
             log_message "INFO" "等待apt锁释放... ($waited/$max_wait秒) - 锁定源: ${lock_sources[*]}"
         fi
@@ -566,12 +513,13 @@ wait_for_apt() {
     
     if [ $waited -gt 0 ]; then
         log_message "INFO" "apt锁已释放，等待了 $waited 秒"
-        # 额外等待一下，确保锁完全释放
-        sleep 3
+        sleep 3  # 确保锁完全释放
     fi
     
     return 0
 }
+
+# ==================== 系统初始化函数 ====================
 
 # 等待cloud-init完成
 wait_for_cloud_init() {
@@ -587,7 +535,7 @@ fix_sudo_issue() {
     if ! command -v sudo &> /dev/null; then
         log_message "INFO" "安装sudo..."
         if [ "$OS_TYPE" = "debian" ]; then
-            if ! wait_for_apt; then
+            if ! wait_for_apt_locks; then
                 log_message "ERROR" "等待apt锁失败，无法安装sudo"
                 return 1
             fi
@@ -608,36 +556,107 @@ fix_sudo_issue() {
     fi
 }
 
-# 更新系统并安装基础软件（优化后）
+# 更新系统并安装基础软件（完整apt操作流程）
 update_system_install_dependencies() {
     log_message "INFO" "更新系统并安装必要软件..."
     
     if [ "$OS_TYPE" = "debian" ]; then
-        wait_for_apt || return 1
-        export DEBIAN_FRONTEND=noninteractive
-        sudo apt-get update
-        sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
-        # 使用重试机制安装基础软件包
-        if ! apt_install_with_retry "wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd"; then
-            log_message "ERROR" "基础软件包安装失败"
+        # 阶段1：等待apt锁并确保环境就绪
+        log_message "DEBUG" "系统更新 - 准备阶段"
+        if ! wait_for_apt_locks; then
+            log_message "ERROR" "无法获取apt锁，系统可能正在进行其他安装操作"
             return 1
         fi
-
-        # 单独处理iperf3，使用重试机制
+        
+        # 阶段2：执行系统更新（允许部分失败但要记录）
+        log_message "DEBUG" "系统更新 - 执行系统更新"
+        export DEBIAN_FRONTEND=noninteractive
+        
+        # 更新软件包列表（关键步骤）
+        if ! safe_execute "sudo apt-get update -y" "更新软件包列表"; then
+            log_message "ERROR" "软件包列表更新失败，可能影响后续安装"
+            return 1
+        fi
+        
+        # 系统升级（允许失败但记录）
+        safe_execute "sudo apt-get upgrade -y" "系统升级" || \
+            check_error $? "系统升级" "可能有包冲突或网络问题"
+        
+        safe_execute "sudo apt-get full-upgrade -y" "完整系统升级" || \
+            check_error $? "完整系统升级" "某些包可能需要手动处理"
+        
+        # 清理操作（失败不影响主流程）
+        safe_execute "sudo apt-get autoclean -y" "清理软件包缓存" || \
+            log_message "WARNING" "软件包缓存清理失败"
+        
+        safe_execute "sudo apt-get autoremove -y" "移除不需要的软件包" || \
+            log_message "WARNING" "自动移除软件包失败"
+        
+        # 阶段3：安装基础软件包（关键功能，失败则退出）
+        log_message "DEBUG" "系统更新 - 安装基础软件包"
+        log_message "INFO" "安装基础软件包..."
+        
+        if ! apt_install_with_retry "wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd"; then
+            log_message "ERROR" "基础软件包安装失败"
+            log_message "ERROR" "这些是系统运行的必要软件，无法继续"
+            return 1
+        fi
+        
+        # 阶段4：安装可选软件包（失败不影响主流程）
+        log_message "DEBUG" "系统更新 - 安装可选软件包"
         log_message "INFO" "安装iperf3..."
-        echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections
+        
+        # 预设配置避免交互
+        if ! echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections; then
+            log_message "WARNING" "iperf3预配置失败"
+        fi
+        
         if ! apt_install_with_retry "iperf3"; then
+            check_error $? "iperf3安装" "网络测试工具，非必需"
             log_message "WARNING" "iperf3安装失败，但不影响主要功能"
         fi
+        
     else
+        # RedHat系列处理（增强错误处理）
+        log_message "DEBUG" "系统更新 - RedHat系列系统"
+        
         local pkg_manager="yum"
         command -v dnf &> /dev/null && pkg_manager="dnf"
-        sudo $pkg_manager update -y
-        sudo $pkg_manager install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc
+        
+        log_message "INFO" "使用包管理器: $pkg_manager"
+        
+        # 系统更新
+        if ! safe_execute "sudo $pkg_manager update -y" "RedHat系统更新"; then
+            log_message "ERROR" "RedHat系统更新失败"
+            return 1
+        fi
+        
+        # 软件包安装
+        if ! safe_execute "sudo $pkg_manager install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc" "安装基础软件包"; then
+            log_message "ERROR" "RedHat基础软件包安装失败"
+            return 1
+        fi
     fi
     
-    log_message "INFO" "系统更新和软件安装完成"
+    # 验证关键软件包是否安装成功
+    log_message "DEBUG" "系统更新 - 验证安装结果"
+    local missing_packages=""
+    for pkg in wget curl vim fail2ban; do
+        if ! command -v "$pkg" >/dev/null 2>&1; then
+            missing_packages="$missing_packages $pkg"
+        fi
+    done
+    
+    if [ -n "$missing_packages" ]; then
+        log_message "WARNING" "以下关键软件包可能安装失败:$missing_packages"
+        log_message "WARNING" "建议手动检查和安装这些软件包"
+    fi
+    
+    log_message "SUCCESS" "系统更新和软件安装完成"
+    return 0
 }
+
+# ==================== 用户管理函数 ====================
 
 # 配置SSH密钥
 configure_ssh_keys() {
@@ -767,16 +786,14 @@ EOF
     log_message "INFO" "SSH配置备份完成: $CONFIG_BACKUP_DIR"
 }
 
-# 配置SSH（优化后的版本）
-configure_ssh() {
-    log_message "INFO" "配置SSH..."
-    
-    # 备份配置
-    backup_ssh_config
-    
-    # 检查是否有可用的sudo用户
+# ==================== SSH配置函数群 ====================
+
+# 分析SSH环境状态
+analyze_ssh_environment() {
     local has_sudo_user="false"
     local current_user=$(whoami)
+    local has_root_ssh_key="false"
+    local can_disable_root="false"
     
     # 检查当前用户是否有sudo权限
     if [ "$current_user" != "root" ] && sudo -n true 2>/dev/null; then
@@ -792,7 +809,6 @@ configure_ssh() {
     
     # 检查是否有其他sudo用户
     if [ "$has_sudo_user" = "false" ]; then
-        # 检查系统中是否有其他sudo用户
         if [ "$OS_TYPE" = "debian" ]; then
             if getent group sudo | grep -q ":"; then
                 has_sudo_user="true"
@@ -806,78 +822,65 @@ configure_ssh() {
         fi
     fi
     
-    # 如果没有sudo用户且当前是root，检查是否有SSH密钥配置
-    local has_root_ssh_key="false"
+    # 检查root SSH密钥
     if [ "$current_user" = "root" ] && [ -f "/root/.ssh/authorized_keys" ] && [ -s "/root/.ssh/authorized_keys" ]; then
         has_root_ssh_key="true"
         log_message "INFO" "root用户已配置SSH密钥"
     fi
     
     # 决定是否可以禁用root登录
-    local can_disable_root="false"
     if [ "$has_sudo_user" = "true" ] || ([ "$has_root_ssh_key" = "true" ] && [ "$DISABLE_SSH_PASSWD" = "true" ]); then
         can_disable_root="true"
     fi
     
+    # 返回状态信息（使用全局变量）
+    SSH_ENV_HAS_SUDO_USER="$has_sudo_user"
+    SSH_ENV_HAS_ROOT_KEY="$has_root_ssh_key"
+    SSH_ENV_CAN_DISABLE_ROOT="$can_disable_root"
+}
+
+# 配置SSH认证设置
+configure_ssh_authentication() {
     # 启用公钥认证
     sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSH_CONFIG"
     grep -q "^PubkeyAuthentication" "$SSH_CONFIG" || echo "PubkeyAuthentication yes" | sudo tee -a "$SSH_CONFIG"
     
     # 处理root登录设置
-    # 如果用户明确设置了--disable_root_login参数，优先使用该设置
     if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
-        # 安全检查：确保有其他管理员用户或SSH密钥配置
-        if [ "$has_sudo_user" = "true" ] || [ "$has_root_ssh_key" = "true" ] || [ "$CREATE_DEVOPS_USER" = "true" ]; then
+        # 用户明确要求禁用root登录
+        if [ "$SSH_ENV_HAS_SUDO_USER" = "true" ] || [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ] || [ "$CREATE_DEVOPS_USER" = "true" ]; then
             log_message "INFO" "根据用户要求禁用root登录"
             sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
             grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
         else
             log_message "ERROR" "无法禁用root登录：未检测到其他管理员账户"
             log_message "ERROR" "请先创建具有sudo权限的用户或配置SSH密钥"
-            log_message "ERROR" "使用 --create_user USERNAME --ssh_key \"KEY\" 创建管理员用户"
             return 1
         fi
-    elif [ "$can_disable_root" = "true" ]; then
-        # 自动逻辑：如果检测到其他管理员账户，可以安全禁用root登录
+    elif [ "$SSH_ENV_CAN_DISABLE_ROOT" = "true" ]; then
+        # 自动逻辑：安全禁用root登录
         log_message "INFO" "检测到其他管理员账户，可以安全禁用root登录"
         sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
         grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
     else
         log_message "WARNING" "未检测到其他管理员账户，保持root登录权限"
-        if [ "$DISABLE_SSH_PASSWD" = "true" ] && [ "$has_root_ssh_key" = "true" ]; then
-            # 如果禁用了密码登录且root有SSH密钥，允许root使用密钥登录
+        if [ "$DISABLE_SSH_PASSWD" = "true" ] && [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ]; then
             sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' "$SSH_CONFIG"
             grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin prohibit-password" | sudo tee -a "$SSH_CONFIG"
             log_message "INFO" "设置root仅允许密钥登录"
         else
-            # 保持root登录开启
             sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' "$SSH_CONFIG"
             grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin yes" | sudo tee -a "$SSH_CONFIG"
             log_message "WARNING" "保持root密码登录开启，建议创建sudo用户后再禁用"
         fi
     fi
     
-    # 其他安全配置
-    local security_configs=(
-        "X11Forwarding no"
-        "ClientAliveInterval 300"
-        "ClientAliveCountMax 2"
-        "Protocol 2"
-        "UseDNS no"
-    )
-    
-    for config in "${security_configs[@]}"; do
-        local key="${config%% *}"
-        sudo sed -i "s/^#*$key.*/$config/" "$SSH_CONFIG"
-        grep -q "^$key" "$SSH_CONFIG" || echo "$config" | sudo tee -a "$SSH_CONFIG"
-    done
-    
     # 禁用密码登录前的安全检查
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         local can_disable_password="false"
         
         # 检查是否有SSH密钥配置
-        if [ "$has_sudo_user" = "true" ] || [ "$has_root_ssh_key" = "true" ] || [ -n "$SSH_KEY" ]; then
+        if [ "$SSH_ENV_HAS_SUDO_USER" = "true" ] || [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ] || [ -n "$SSH_KEY" ]; then
             can_disable_password="true"
         fi
         
@@ -902,7 +905,28 @@ configure_ssh() {
         fi
     fi
     
-    # 修改SSH端口
+    return 0
+}
+
+# 配置SSH安全设置
+configure_ssh_security() {
+    local security_configs=(
+        "X11Forwarding no"
+        "ClientAliveInterval 300"
+        "ClientAliveCountMax 2"
+        "Protocol 2"
+        "UseDNS no"
+    )
+    
+    for config in "${security_configs[@]}"; do
+        local key="${config%% *}"
+        sudo sed -i "s/^#*$key.*/$config/" "$SSH_CONFIG"
+        grep -q "^$key" "$SSH_CONFIG" || echo "$config" | sudo tee -a "$SSH_CONFIG"
+    done
+}
+
+# 配置SSH端口
+configure_ssh_port() {
     if [ -n "$SSH_PORT" ]; then
         log_message "INFO" "修改SSH端口为 $SSH_PORT..."
         sudo sed -i "s/^#*Port.*/Port $SSH_PORT/" "$SSH_CONFIG"
@@ -913,8 +937,11 @@ configure_ssh() {
             sudo ufw allow "$SSH_PORT/tcp" comment 'SSH Port'
         fi
     fi
-    
-        # 处理sshd_config.d目录 - 与cloud-init和谐共存
+}
+
+# 处理sshd_config.d目录配置
+handle_ssh_config_dir() {
+    # 处理sshd_config.d目录 - 与cloud-init和谐共存
         if [ -d "$SSH_CONFIG_DIR" ]; then
         # 创建99-security.conf以确保我们的配置优先级最高
         log_message "INFO" "创建SSH安全配置覆盖文件"
@@ -994,7 +1021,10 @@ EOF
             fi
         fi
     fi
-    
+}
+
+# 验证并重启SSH服务
+validate_and_restart_ssh() {
     # 测试SSH配置
     if ! sudo sshd -t; then
         log_message "ERROR" "SSH配置测试失败，正在还原配置..."
@@ -1023,7 +1053,11 @@ EOF
         return 1
     fi
     
-    # 显示SSH配置状态
+    return 0
+}
+
+# 显示SSH配置状态
+display_ssh_status() {
     log_message "INFO" "SSH配置完成"
     log_message "INFO" "当前SSH配置状态："
     log_message "INFO" "  端口: $(grep "^Port" "$SSH_CONFIG" 2>/dev/null || echo "22")"
@@ -1044,6 +1078,82 @@ EOF
         fi
     fi
 }
+
+# 配置SSH（重构后的主函数）
+configure_ssh() {
+    log_message "INFO" "配置SSH..."
+    
+    # 1. 准备阶段（关键步骤）
+    log_message "DEBUG" "SSH配置 - 准备阶段"
+    backup_ssh_config || {
+        log_message "WARNING" "SSH配置备份失败，继续配置但存在风险"
+    }
+    
+    analyze_ssh_environment || {
+        check_error $? "分析SSH环境"
+        log_message "WARNING" "SSH环境分析失败，使用默认配置继续"
+    }
+    
+    # 2. 应用配置阶段（每个步骤独立处理错误）
+    log_message "DEBUG" "SSH配置 - 应用配置阶段"
+    
+    # SSH认证配置是关键步骤，失败则需要特别关注
+    if ! configure_ssh_authentication; then
+        log_message "ERROR" "SSH认证配置失败，这可能导致无法远程连接"
+        log_message "WARNING" "建议检查SSH配置文件和密钥设置"
+        return 1
+    fi
+    
+    # 安全配置失败不应该阻断流程，但需要记录
+    configure_ssh_security || {
+        check_error $? "SSH安全配置"
+        log_message "WARNING" "SSH安全配置失败，安全性可能受影响"
+    }
+    
+    # 端口配置失败记录警告
+    configure_ssh_port || {
+        check_error $? "SSH端口配置"
+        log_message "WARNING" "SSH端口配置失败，可能使用默认端口22"
+    }
+    
+    # 配置目录处理
+    handle_ssh_config_dir || {
+        check_error $? "SSH配置目录处理"
+        log_message "WARNING" "SSH配置目录处理失败"
+    }
+    
+    # 3. 验证和重启阶段（最关键步骤）
+    log_message "DEBUG" "SSH配置 - 验证和重启阶段"
+    
+    # SSH服务验证和重启是最关键的步骤
+    if ! validate_and_restart_ssh; then
+        log_message "ERROR" "SSH服务验证或重启失败"
+        log_message "ERROR" "这是严重问题，可能导致远程连接中断"
+        log_message "INFO" "尝试恢复SSH配置..."
+        
+        # 尝试恢复备份配置
+        if [ -f "${SSH_CONFIG}.backup" ]; then
+            log_message "INFO" "恢复SSH配置备份"
+            sudo cp "${SSH_CONFIG}.backup" "$SSH_CONFIG" && \
+            sudo systemctl restart sshd && \
+            log_message "SUCCESS" "SSH配置已恢复到备份状态" || \
+            log_message "ERROR" "SSH配置恢复失败，需要手动检查"
+        fi
+        
+        return 1
+    fi
+    
+    # 显示状态（失败不影响主流程）
+    display_ssh_status || {
+        check_error $? "显示SSH状态"
+        log_message "DEBUG" "显示SSH状态信息失败"
+    }
+    
+    log_message "SUCCESS" "SSH配置完成"
+    return 0
+}
+
+# ==================== 系统服务配置 ====================
 
 # 配置fail2ban
 configure_fail2ban() {
@@ -1117,7 +1227,7 @@ configure_timezone_ntp() {
     if [ "$OS_TYPE" = "debian" ]; then
         if [ "$NTP_SERVICE" = "chrony" ] || ([ "$NTP_SERVICE" = "auto" ] && command -v chronyd &> /dev/null); then
             # 使用chrony
-            if ! wait_for_apt; then
+            if ! wait_for_apt_locks; then
                 log_message "ERROR" "等待apt锁失败，跳过chrony安装"
                 return 1
             fi
@@ -1213,7 +1323,7 @@ configure_security_audit() {
     while [ $retry_count -lt $max_retries ] && [ "$install_success" = "false" ]; do
         if [ "$OS_TYPE" = "debian" ]; then
             # 等待apt锁释放
-            if ! wait_for_apt; then
+            if ! wait_for_apt_locks; then
                 log_message "ERROR" "等待apt锁失败，跳过安全审计工具安装"
                 return 1
             fi
@@ -1285,7 +1395,7 @@ EOF
     while [ $retry_count -lt $max_retries ] && [ "$install_success" = "false" ]; do
         if [ "$OS_TYPE" = "debian" ]; then
             # 等待apt锁释放
-            if ! wait_for_apt; then
+            if ! wait_for_apt_locks; then
                 log_message "ERROR" "等待apt锁失败，跳过etckeeper安装"
                 break
             fi
@@ -1347,8 +1457,7 @@ EOF
     fi
 }
 
-
-
+# ==================== Docker安装 ====================
 
 # 安装Docker
 install_docker() {
@@ -1423,7 +1532,9 @@ EOF
     fi
 }
     
-    # 显示配置总结
+# ==================== 配置总结和主流程 ====================
+
+# 显示配置总结
 show_summary() {
     local ssh_port="${SSH_PORT:-22}"
     [ -z "$SSH_PORT" ] && ssh_port=$(sudo ss -tlnp | grep sshd | head -1 | sed 's/.*:\([0-9]\+\) .*/\1/' || echo "22")
@@ -1483,40 +1594,109 @@ show_summary() {
 
 # 主脚本的主函数
 main() {
-    parse_args "$@"
+    # 阶段0：参数解析（致命错误会自动退出）
+    parse_args "$@" || die "命令行参数解析失败"
     
-    # 系统检查和初始化
-    check_compatibility || { log_message "ERROR" "系统兼容性检查失败"; exit 1; }
-    wait_for_cloud_init
-    fix_sudo_issue
+    log_message "INFO" "开始系统初始化和配置过程"
     
-    # 检查并处理特殊锁定情况
-    handle_special_lock_cases
+    # 阶段1：系统检查和基础初始化（关键阶段，失败则退出）
+    log_message "INFO" "=== 阶段1：系统检查和基础初始化 ==="
+    check_compatibility || die "系统兼容性检查失败，无法继续"
     
-    # 诊断和修复包管理器问题
-    diagnose_and_fix_package_manager
+    wait_for_cloud_init || {
+        check_error $? "等待cloud-init完成"
+        log_message "WARNING" "cloud-init可能未完全完成，继续执行"
+    }
     
-    # 系统更新和软件安装
-    update_system_install_dependencies
+    fix_sudo_issue || {
+        check_error $? "修复sudo问题"
+        log_message "WARNING" "sudo问题修复失败，可能影响后续操作"
+    }
     
-    # SSH配置
-    configure_ssh_keys
-    create_admin_user
-    configure_ssh
+    # 阶段2：系统更新和软件安装（重要但允许部分失败）
+    log_message "INFO" "=== 阶段2：系统更新和软件安装 ==="
+    update_system_install_dependencies || {
+        check_error $? "系统更新和依赖安装"
+        log_message "WARNING" "系统更新出现问题，继续后续配置"
+    }
     
-    # 系统服务配置
-    configure_fail2ban
-    configure_timezone_ntp
-    configure_system_optimization
-    configure_security_audit
+    # 阶段3：SSH和用户配置（安全关键，需要特别处理）
+    log_message "INFO" "=== 阶段3：SSH和用户配置 ==="
+    configure_ssh_keys || {
+        check_error $? "SSH密钥配置"
+        log_message "WARNING" "SSH密钥配置失败，可能影响安全性"
+    }
     
-    # Docker安装（在防火墙配置之前）
-    install_docker
+    create_admin_user || {
+        check_error $? "创建管理员用户"
+        log_message "WARNING" "管理员用户创建失败"
+    }
     
+    configure_ssh || {
+        local ssh_exit=$?
+        if [ $ssh_exit -ne 0 ]; then
+            log_message "ERROR" "SSH配置失败，这可能导致无法远程连接"
+            log_message "WARNING" "请检查SSH配置，确保可以正常连接"
+            # SSH配置失败不应该导致脚本退出，但需要特别关注
+        fi
+    }
     
-    # 显示配置总结
-    show_summary
+    # 阶段4：系统服务配置（增强功能，允许失败）
+    log_message "INFO" "=== 阶段4：系统服务配置 ==="
+    configure_fail2ban || check_error $? "fail2ban配置"
+    configure_timezone_ntp || check_error $? "时区和NTP配置"
+    configure_system_optimization || check_error $? "系统优化配置"
+    
+    # 安全审计配置（可选功能）
+    if [ "$ENABLE_SECURITY_AUDIT" = "true" ]; then
+        configure_security_audit || check_error $? "安全审计配置"
+    fi
+    
+    # 阶段5：Docker安装（可选功能）
+    if [ "$INSTALL_DOCKER" = "true" ]; then
+        log_message "INFO" "=== 阶段5：Docker安装 ==="
+        install_docker || check_error $? "Docker安装"
+    fi
+    
+    # 阶段6：总结和完成
+    log_message "INFO" "=== 配置完成总结 ==="
+    show_summary || log_message "WARNING" "显示配置总结时出现问题"
+    
+    log_message "SUCCESS" "系统初始化和配置过程完成"
 }
 
-# 执行主函数
-main "$@"
+# ==================== 脚本执行入口 ====================
+
+# 脚本执行处理逻辑（现代化错误处理）
+execute_script() {
+    local exit_code=0
+    
+    # 捕获所有可能的错误
+    if main "$@"; then
+        log_message "SUCCESS" "脚本执行完成，所有配置均已成功应用"
+        log_message "INFO" "日志文件已保存到: $LOG_FILE"
+    else
+        exit_code=$?
+        log_message "ERROR" "脚本执行过程中遇到错误 (退出码: $exit_code)"
+        log_message "INFO" "请查看日志文件获取详细信息: $LOG_FILE"
+        
+        # 提供故障排除建议
+        echo ""
+        echo "==================== 故障排除建议 ===================="
+        echo "1. 检查系统兼容性: 确保在支持的Linux发行版上运行"
+        echo "2. 检查网络连接: 确保可以访问软件包仓库"
+        echo "3. 检查权限: 确保有sudo权限"
+        echo "4. 检查磁盘空间: 确保有足够的磁盘空间"
+        echo "5. 查看详细日志: cat $LOG_FILE"
+        echo "======================================================"
+    fi
+    
+    return $exit_code
+}
+
+# 主入口：执行脚本并处理退出状态
+if ! execute_script "$@"; then
+    exit_code=$?
+    log_message "ERROR" "脚本执行失败，退出码: $exit_code"
+    exit $exit_code
+fi
