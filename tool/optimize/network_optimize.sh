@@ -6,34 +6,29 @@
 set -e
 
 # 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
 
 # 检查是否为root用户
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}错误: 此脚本需要root权限运行${NC}"
+        echo "错误: 此脚本需要root权限运行"
         exit 1
     fi
 }
 
 # 备份当前配置
 backup_config() {
-    echo -e "${BLUE}备份当前sysctl配置...${NC}"
+    echo "备份当前sysctl配置..."
     if [ -f /etc/sysctl.conf ]; then
         cp /etc/sysctl.conf /etc/sysctl.conf.backup.$(date +%Y%m%d_%H%M%S)
-        echo -e "${GREEN}备份完成${NC}"
+        echo "备份完成"
     fi
 }
 
 # 显示当前网络配置
 show_current_config() {
-    echo -e "\n${BLUE}========== 当前网络配置 ==========${NC}"
+    echo -e "\n========== 当前网络配置 =========="
     
-    echo -e "\n${YELLOW}TCP缓冲区设置:${NC}"
+    echo -e "\nTCP缓冲区设置:"
     sysctl net.ipv4.tcp_rmem 2>/dev/null || echo "未设置"
     sysctl net.ipv4.tcp_wmem 2>/dev/null || echo "未设置"
     sysctl net.core.rmem_max 2>/dev/null || echo "未设置"
@@ -41,19 +36,19 @@ show_current_config() {
     sysctl net.core.rmem_default 2>/dev/null || echo "未设置"
     sysctl net.core.wmem_default 2>/dev/null || echo "未设置"
     
-    echo -e "\n${YELLOW}网络队列设置:${NC}"
+    echo -e "\n网络队列设置:"
     sysctl net.core.netdev_max_backlog 2>/dev/null || echo "未设置"
     sysctl net.core.somaxconn 2>/dev/null || echo "未设置"
     sysctl net.ipv4.tcp_max_syn_backlog 2>/dev/null || echo "未设置"
     
-    echo -e "\n${YELLOW}TCP优化参数:${NC}"
+    echo -e "\nTCP优化参数:"
     sysctl net.ipv4.tcp_congestion_control 2>/dev/null || echo "未设置"
     sysctl net.core.default_qdisc 2>/dev/null || echo "未设置"
     sysctl net.ipv4.tcp_fastopen 2>/dev/null || echo "未设置"
     sysctl net.ipv4.tcp_tw_reuse 2>/dev/null || echo "未设置"
     sysctl net.ipv4.tcp_fin_timeout 2>/dev/null || echo "未设置"
     
-    echo -e "\n${YELLOW}当前网络接口MTU:${NC}"
+    echo -e "\n当前网络接口MTU:"
     ip link show | grep -E "^[0-9]+:" | while read -r line; do
         iface=$(echo "$line" | cut -d: -f2 | tr -d ' ')
         if [[ "$iface" != "lo" ]]; then
@@ -65,7 +60,7 @@ show_current_config() {
 
 # 应用基础优化
 apply_basic_optimization() {
-    echo -e "\n${BLUE}应用基础网络优化...${NC}"
+    echo -e "\n应用基础网络优化..."
     
     cat >> /etc/sysctl.conf << 'EOF'
 
@@ -161,12 +156,12 @@ net.ipv4.tcp_no_metrics_save = 1
 
 EOF
     
-    echo -e "${GREEN}基础优化配置已写入/etc/sysctl.conf${NC}"
+    echo "基础优化配置已写入/etc/sysctl.conf"
 }
 
 # 应用高性能优化(适用于高负载服务器)
 apply_high_performance() {
-    echo -e "\n${BLUE}应用高性能优化配置...${NC}"
+    echo -e "\n应用高性能优化配置..."
     
     cat >> /etc/sysctl.conf << 'EOF'
 
@@ -198,7 +193,7 @@ net.ipv4.tcp_mem = 1572864 2097152 3145728
 
 EOF
     
-    echo -e "${GREEN}高性能优化配置已追加${NC}"
+    echo "高性能优化配置已追加"
 }
 
 # 应用优化
@@ -217,17 +212,17 @@ apply_optimization() {
         apply_high_performance
     fi
     
-    echo -e "\n${BLUE}应用新配置...${NC}"
+    echo -e "\n应用新配置..."
     sysctl -p /etc/sysctl.conf
     
-    echo -e "${GREEN}优化完成!${NC}"
+    echo "优化完成!"
 }
 
 # 恢复备份
 restore_backup() {
-    echo -e "\n${BLUE}可用的备份文件:${NC}"
+    echo -e "\n可用的备份文件:"
     ls -la /etc/sysctl.conf.backup.* 2>/dev/null || {
-        echo -e "${RED}没有找到备份文件${NC}"
+        echo "没有找到备份文件"
         return 1
     }
     
@@ -237,32 +232,32 @@ restore_backup() {
     if [ -f "$backup_file" ]; then
         cp "$backup_file" /etc/sysctl.conf
         sysctl -p /etc/sysctl.conf
-        echo -e "${GREEN}恢复完成${NC}"
+        echo "恢复完成"
     else
-        echo -e "${RED}文件不存在${NC}"
+        echo "文件不存在"
     fi
 }
 
 # 性能测试建议
 show_test_suggestions() {
-    echo -e "\n${BLUE}========== 性能测试建议 ==========${NC}"
-    echo -e "${YELLOW}1. 网络吞吐量测试:${NC}"
+    echo -e "\n========== 性能测试建议 =========="
+    echo "1. 网络吞吐量测试:"
     echo "   iperf3 -s  # 服务器端"
     echo "   iperf3 -c <server_ip> -t 30  # 客户端"
     
-    echo -e "\n${YELLOW}2. 网络延迟测试:${NC}"
+    echo -e "\n2. 网络延迟测试:"
     echo "   ping -c 100 <target_ip>"
     echo "   mtr <target_ip>"
     
-    echo -e "\n${YELLOW}3. TCP连接测试:${NC}"
+    echo -e "\n3. TCP连接测试:"
     echo "   ss -s  # 查看socket统计"
     echo "   netstat -an | grep TIME_WAIT | wc -l  # TIME_WAIT连接数"
     
-    echo -e "\n${YELLOW}4. 网络队列监控:${NC}"
+    echo -e "\n4. 网络队列监控:"
     echo "   ss -ntu | awk '{print \$6}' | sort | uniq -c  # 连接状态统计"
     echo "   watch -n 1 'cat /proc/net/softnet_stat'  # 软中断统计"
     
-    echo -e "\n${YELLOW}5. 缓冲区使用监控:${NC}"
+    echo -e "\n5. 缓冲区使用监控:"
     echo "   ss -m  # 查看socket内存使用"
     echo "   cat /proc/sys/net/ipv4/tcp_mem  # TCP内存使用"
 }
@@ -270,14 +265,14 @@ show_test_suggestions() {
 # 主菜单
 main_menu() {
     while true; do
-        echo -e "\n${BLUE}========== 网络性能调优工具 ==========${NC}"
+        echo -e "\n========== 网络性能调优工具 =========="
         echo "1. 显示当前网络配置"
         echo "2. 应用基础优化 (一般服务器)"
         echo "3. 应用高性能优化 (高负载服务器)"
         echo "4. 恢复备份配置"
         echo "5. 显示性能测试建议"
         echo "6. 退出"
-        echo -e "${YELLOW}请选择操作 [1-6]:${NC} "
+        echo "请选择操作 [1-6]: "
         read -r choice
         
         case $choice in
@@ -300,11 +295,11 @@ main_menu() {
                 show_test_suggestions
                 ;;
             6)
-                echo -e "${GREEN}退出${NC}"
+                echo "退出"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}无效选择${NC}"
+                echo "无效选择"
                 ;;
         esac
     done
@@ -341,7 +336,7 @@ else
             echo "无参数运行进入交互菜单"
             ;;
         *)
-            echo -e "${RED}未知参数: $1${NC}"
+            echo "未知参数: $1"
             echo "使用 --help 查看帮助"
             exit 1
             ;;

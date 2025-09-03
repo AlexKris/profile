@@ -5,41 +5,36 @@
 set -e
 
 # 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m'
 
 # 检查内核版本
 check_kernel_version() {
-    echo -e "${BLUE}========== 内核信息 ==========${NC}"
+    echo "========== 内核信息 =========="
     uname -r
     echo ""
 }
 
 # 检查BBR支持和版本
 check_bbr_version() {
-    echo -e "${BLUE}========== BBR版本检测 ==========${NC}"
+    echo "========== BBR版本检测 =========="
     
     # 检查当前拥塞控制算法
     current_cc=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
-    echo -e "当前拥塞控制算法: ${GREEN}$current_cc${NC}"
+    echo -e "当前拥塞控制算法: $current_cc"
     
     # 检查可用的拥塞控制算法
     echo -e "\n可用的拥塞控制算法:"
     available_cc=$(sysctl net.ipv4.tcp_available_congestion_control 2>/dev/null | cut -d= -f2)
     echo "$available_cc" | tr ' ' '\n' | while read cc; do
         if [[ "$cc" == *"bbr"* ]]; then
-            echo -e "  ${GREEN}$cc${NC}"
+            echo -e "  $cc"
         else
             echo "  $cc"
         fi
     done
     
     # 检查BBR模块信息
-    echo -e "\n${CYAN}BBR模块详细信息:${NC}"
+    echo -e "\n${CYAN}BBR模块详细信息:"
     if lsmod | grep -q tcp_bbr; then
         modinfo tcp_bbr 2>/dev/null | grep -E "^(filename|version|description|author|srcversion):" || {
             echo "BBR模块已加载但无法获取详细信息"
@@ -49,11 +44,11 @@ check_bbr_version() {
     fi
     
     # 检查BBR版本特征
-    echo -e "\n${CYAN}BBR版本特征检测:${NC}"
+    echo -e "\n${CYAN}BBR版本特征检测:"
     
     # BBRv1 特征 (Linux 4.9+)
     if [ -f /proc/sys/net/ipv4/tcp_congestion_control ]; then
-        echo -e "${GREEN}✓${NC} BBRv1 基础支持 (Linux 4.9+)"
+        echo "✓ BBRv1 基础支持 (Linux 4.9+)"
     fi
     
     # BBRv2 特征 (Linux 5.4+)
@@ -61,30 +56,30 @@ check_bbr_version() {
         kernel_major=$(uname -r | cut -d. -f1)
         kernel_minor=$(uname -r | cut -d. -f2)
         if [ "$kernel_major" -ge 5 ] && [ "$kernel_minor" -ge 4 ]; then
-            echo -e "${GREEN}✓${NC} BBRv2 特征存在 (Linux 5.4+)"
+            echo "✓ BBRv2 特征存在 (Linux 5.4+)"
         fi
     fi
     
     # BBRv3 特征检测
-    echo -e "\n${CYAN}BBRv3 特征检测:${NC}"
+    echo -e "\n${CYAN}BBRv3 特征检测:"
     
     # 检查是否有bbrplus或bbr2
     if echo "$available_cc" | grep -qE "bbrplus|bbr2|bbrv3"; then
-        echo -e "${GREEN}✓${NC} 检测到BBR增强版本"
+        echo "✓ 检测到BBR增强版本"
     fi
     
     # 检查sysctl中的BBR参数
-    echo -e "\n${CYAN}BBR相关内核参数:${NC}"
+    echo -e "\n${CYAN}BBR相关内核参数:"
     sysctl -a 2>/dev/null | grep -i bbr | head -10 || echo "无BBR特定参数"
     
     # 尝试检测BBR版本通过dmesg
-    echo -e "\n${CYAN}内核日志中的BBR信息:${NC}"
+    echo -e "\n${CYAN}内核日志中的BBR信息:"
     dmesg | grep -i bbr | tail -5 2>/dev/null || echo "无相关日志"
 }
 
 # 显示BBR版本差异
 show_bbr_comparison() {
-    echo -e "\n${BLUE}========== BBR版本对比 ==========${NC}"
+    echo -e "\n========== BBR版本对比 =========="
     
     cat << 'EOF'
 
@@ -129,7 +124,7 @@ EOF
 
 # 如何启用BBRv3
 show_bbr_v3_installation() {
-    echo -e "\n${BLUE}========== 如何启用BBRv3 ==========${NC}"
+    echo -e "\n========== 如何启用BBRv3 =========="
     
     cat << 'EOF'
 
@@ -186,7 +181,7 @@ EOF
 
 # 测试BBR性能
 test_bbr_performance() {
-    echo -e "\n${BLUE}========== BBR性能测试建议 ==========${NC}"
+    echo -e "\n========== BBR性能测试建议 =========="
     
     cat << 'EOF'
 
@@ -241,7 +236,7 @@ EOF
 
 # BBR调优参数
 show_bbr_tuning() {
-    echo -e "\n${BLUE}========== BBR调优参数 ==========${NC}"
+    echo -e "\n========== BBR调优参数 =========="
     
     cat << 'EOF'
 
@@ -300,14 +295,14 @@ EOF
 # 主菜单
 main_menu() {
     while true; do
-        echo -e "\n${BLUE}========== BBR版本检测和优化工具 ==========${NC}"
+        echo -e "\n========== BBR版本检测和优化工具 =========="
         echo "1. 检查当前BBR版本和状态"
         echo "2. 显示BBR版本对比"
         echo "3. 查看BBRv3安装方法"
         echo "4. BBR性能测试建议"
         echo "5. BBR调优参数说明"
         echo "6. 退出"
-        echo -e "${YELLOW}请选择操作 [1-6]:${NC} "
+        echo "请选择操作 [1-6]: "
         read -r choice
         
         case $choice in
@@ -328,11 +323,11 @@ main_menu() {
                 show_bbr_tuning
                 ;;
             6)
-                echo -e "${GREEN}退出${NC}"
+                echo "退出"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}无效选择${NC}"
+                echo "无效选择"
                 ;;
         esac
     done
@@ -373,7 +368,7 @@ else
             echo "  --help     显示帮助"
             ;;
         *)
-            echo -e "${RED}未知参数: $1${NC}"
+            echo "未知参数: $1"
             exit 1
             ;;
     esac

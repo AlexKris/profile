@@ -6,12 +6,7 @@
 set -e
 
 # 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m'
 
 # 默认值
 DEFAULT_TARGET="8.8.8.8"
@@ -33,7 +28,7 @@ get_default_interface() {
 
 # 显示当前MTU设置
 show_current_mtu() {
-    echo -e "\n${BLUE}========== 当前MTU设置 ==========${NC}"
+    echo -e "\n========== 当前MTU设置 =========="
     ip link show | grep -E "^[0-9]+:" | while read -r line; do
         local iface=$(echo "$line" | cut -d: -f2 | tr -d ' ')
         if [[ "$iface" != "lo" ]]; then
@@ -43,7 +38,7 @@ show_current_mtu() {
         fi
     done
     
-    echo -e "\n${BLUE}========== 路由表MTU信息 ==========${NC}"
+    echo -e "\n========== 路由表MTU信息 =========="
     ip route show | grep -E "mtu|metric" | head -10 || echo "  无特殊MTU路由"
 }
 
@@ -71,57 +66,57 @@ find_optimal_mtu() {
     local high=$MAX_MTU
     local optimal_mtu=$MIN_MTU
     
-    echo -e "\n${BLUE}开始MTU探测 (目标: $target)${NC}"
-    echo -e "${YELLOW}使用二分查找法...${NC}"
+    echo -e "\n开始MTU探测 (目标: $target)"
+    echo "使用二分查找法..."
     
     # 首先测试几个常见值
-    echo -e "\n${CYAN}测试常见MTU值:${NC}"
+    echo -e "\n${CYAN}测试常见MTU值:"
     for mtu in "${COMMON_MTUS[@]}"; do
         printf "  测试 MTU %4d ... " "$mtu"
         if test_mtu_with_ping "$target" "$mtu" "$interface"; then
-            echo -e "${GREEN}成功${NC}"
+            echo "成功"
             if [ "$mtu" -gt "$optimal_mtu" ]; then
                 optimal_mtu=$mtu
                 low=$mtu
             fi
         else
-            echo -e "${RED}失败${NC}"
+            echo "失败"
             if [ "$mtu" -lt "$high" ]; then
                 high=$mtu
             fi
         fi
     done
     
-    echo -e "\n${CYAN}精确查找最优值 (范围: $low - $high):${NC}"
+    echo -e "\n${CYAN}精确查找最优值 (范围: $low - $high):"
     while [ $((high - low)) -gt 1 ]; do
         local mid=$(((low + high) / 2))
         printf "  测试 MTU %4d ... " "$mid"
         
         if test_mtu_with_ping "$target" "$mid" "$interface"; then
-            echo -e "${GREEN}成功${NC}"
+            echo "成功"
             low=$mid
             optimal_mtu=$mid
         else
-            echo -e "${RED}失败${NC}"
+            echo "失败"
             high=$mid
         fi
     done
     
-    echo -e "\n${GREEN}最优MTU值: $optimal_mtu${NC}"
+    echo -e "\n最优MTU值: $optimal_mtu"
     return $optimal_mtu
 }
 
 # 路径MTU发现
 path_mtu_discovery() {
     local target=$1
-    echo -e "\n${BLUE}========== 路径MTU发现 ==========${NC}"
+    echo -e "\n========== 路径MTU发现 =========="
     
     # 使用tracepath进行路径MTU发现
     if command -v tracepath &>/dev/null; then
-        echo -e "${CYAN}使用tracepath探测到$target的路径MTU:${NC}"
+        echo -e "${CYAN}使用tracepath探测到$target的路径MTU:"
         tracepath -n "$target" | tail -5
     else
-        echo -e "${YELLOW}tracepath未安装，使用ping探测${NC}"
+        echo "tracepath未安装，使用ping探测"
         find_optimal_mtu "$target" ""
         local mtu=$?
         echo -e "探测到的路径MTU: $mtu"
@@ -134,9 +129,9 @@ benchmark_mtu() {
     local target=$2
     local current_mtu=$(ip link show "$interface" | grep -oP 'mtu \K[0-9]+' | head -1)
     
-    echo -e "\n${BLUE}========== MTU性能测试 ==========${NC}"
-    echo -e "${YELLOW}接口: $interface, 目标: $target${NC}"
-    echo -e "${YELLOW}当前MTU: $current_mtu${NC}\n"
+    echo -e "\n========== MTU性能测试 =========="
+    echo "接口: $interface, 目标: $target"
+    echo "当前MTU: $current_mtu\n"
     
     local test_mtus=(1400 1450 1480 1492 1500)
     if [ "$current_mtu" -gt 1500 ]; then
@@ -171,7 +166,7 @@ benchmark_mtu() {
     
     # 恢复原始MTU
     ip link set dev "$interface" mtu "$current_mtu"
-    echo -e "\n${GREEN}MTU已恢复到: $current_mtu${NC}"
+    echo -e "\nMTU已恢复到: $current_mtu"
 }
 
 # 应用MTU设置
@@ -179,14 +174,14 @@ apply_mtu() {
     local interface=$1
     local mtu=$2
     
-    echo -e "\n${BLUE}应用MTU设置${NC}"
+    echo -e "\n应用MTU设置"
     echo -e "接口: $interface"
     echo -e "新MTU: $mtu"
     
     # 检查是否需要root权限
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}错误: 需要root权限来修改MTU${NC}"
-        echo -e "${YELLOW}请使用: sudo ip link set dev $interface mtu $mtu${NC}"
+        echo "错误: 需要root权限来修改MTU"
+        echo "请使用: sudo ip link set dev $interface mtu $mtu"
         return 1
     fi
     
@@ -194,10 +189,10 @@ apply_mtu() {
     ip link set dev "$interface" mtu "$mtu"
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}MTU设置成功${NC}"
+        echo "MTU设置成功"
         
         # 持久化配置建议
-        echo -e "\n${YELLOW}持久化配置建议:${NC}"
+        echo -e "\n持久化配置建议:"
         echo -e "1. 对于NetworkManager管理的接口:"
         echo "   nmcli con mod <connection-name> 802-3-ethernet.mtu $mtu"
         echo -e "\n2. 对于传统网络配置(/etc/network/interfaces):"
@@ -205,19 +200,19 @@ apply_mtu() {
         echo -e "\n3. 对于systemd-networkd:"
         echo "   在.network文件中添加: MTUBytes=$mtu"
     else
-        echo -e "${RED}MTU设置失败${NC}"
+        echo "MTU设置失败"
         return 1
     fi
 }
 
 # MTU问题诊断
 diagnose_mtu_issues() {
-    echo -e "\n${BLUE}========== MTU问题诊断 ==========${NC}"
+    echo -e "\n========== MTU问题诊断 =========="
     
-    echo -e "\n${CYAN}1. 检查MSS钳制:${NC}"
+    echo -e "\n${CYAN}1. 检查MSS钳制:"
     iptables -t mangle -L FORWARD -n -v | grep -i "tcp.*mss" || echo "  未发现MSS钳制规则"
     
-    echo -e "\n${CYAN}2. 检查PMTU黑洞:${NC}"
+    echo -e "\n${CYAN}2. 检查PMTU黑洞:"
     local icmp_setting=$(sysctl net.ipv4.tcp_mtu_probing 2>/dev/null | cut -d= -f2 | tr -d ' ')
     case "$icmp_setting" in
         0) echo "  PMTU探测: 关闭 (可能存在黑洞问题)" ;;
@@ -226,21 +221,21 @@ diagnose_mtu_issues() {
         *) echo "  PMTU探测: 未知状态" ;;
     esac
     
-    echo -e "\n${CYAN}3. 检查ICMP过滤:${NC}"
+    echo -e "\n${CYAN}3. 检查ICMP过滤:"
     local icmp_ignore=$(sysctl net.ipv4.icmp_ignore_all 2>/dev/null | cut -d= -f2 | tr -d ' ')
     if [ "$icmp_ignore" = "1" ]; then
-        echo -e "  ${RED}警告: ICMP被忽略，可能影响PMTU发现${NC}"
+        echo -e "  警告: ICMP被忽略，可能影响PMTU发现"
     else
         echo "  ICMP正常处理"
     fi
     
-    echo -e "\n${CYAN}4. 常见MTU问题症状:${NC}"
+    echo -e "\n${CYAN}4. 常见MTU问题症状:"
     echo "  - 小文件传输正常，大文件传输失败: MTU过大"
     echo "  - SSH能连接但传输卡住: MTU问题"
     echo "  - 网页部分加载: MTU或MSS问题"
     echo "  - VPN连接后速度慢: MTU需要调整"
     
-    echo -e "\n${CYAN}5. 建议的MTU值:${NC}"
+    echo -e "\n${CYAN}5. 建议的MTU值:"
     echo "  - 以太网标准: 1500"
     echo "  - PPPoE: 1492"
     echo "  - VPN (IPSec): 1400-1420"
@@ -262,13 +257,13 @@ generate_report() {
         diagnose_mtu_issues
     } > "$output_file"
     
-    echo -e "\n${GREEN}报告已保存到: $output_file${NC}"
+    echo -e "\n报告已保存到: $output_file"
 }
 
 # 主菜单
 main_menu() {
     while true; do
-        echo -e "\n${BLUE}========== MTU检测和优化工具 ==========${NC}"
+        echo -e "\n========== MTU检测和优化工具 =========="
         echo "1. 显示当前MTU设置"
         echo "2. 自动检测最优MTU"
         echo "3. 路径MTU发现"
@@ -277,7 +272,7 @@ main_menu() {
         echo "6. MTU问题诊断"
         echo "7. 生成优化报告"
         echo "8. 退出"
-        echo -e "${YELLOW}请选择操作 [1-8]:${NC} "
+        echo "请选择操作 [1-8]: "
         read -r choice
         
         case $choice in
@@ -285,19 +280,19 @@ main_menu() {
                 show_current_mtu
                 ;;
             2)
-                echo -e "${YELLOW}请输入目标地址 (默认: $DEFAULT_TARGET):${NC} "
+                echo "请输入目标地址 (默认: $DEFAULT_TARGET): "
                 read -r target
                 target=${target:-$DEFAULT_TARGET}
                 
                 DEFAULT_INTERFACE=$(get_default_interface)
-                echo -e "${YELLOW}请输入网络接口 (默认: $DEFAULT_INTERFACE):${NC} "
+                echo "请输入网络接口 (默认: $DEFAULT_INTERFACE): "
                 read -r interface
                 interface=${interface:-$DEFAULT_INTERFACE}
                 
                 find_optimal_mtu "$target" "$interface"
                 ;;
             3)
-                echo -e "${YELLOW}请输入目标地址:${NC} "
+                echo "请输入目标地址: "
                 read -r target
                 if [ -n "$target" ]; then
                     path_mtu_discovery "$target"
@@ -305,27 +300,27 @@ main_menu() {
                 ;;
             4)
                 DEFAULT_INTERFACE=$(get_default_interface)
-                echo -e "${YELLOW}请输入网络接口 (默认: $DEFAULT_INTERFACE):${NC} "
+                echo "请输入网络接口 (默认: $DEFAULT_INTERFACE): "
                 read -r interface
                 interface=${interface:-$DEFAULT_INTERFACE}
                 
-                echo -e "${YELLOW}请输入测试目标 (默认: $DEFAULT_TARGET):${NC} "
+                echo "请输入测试目标 (默认: $DEFAULT_TARGET): "
                 read -r target
                 target=${target:-$DEFAULT_TARGET}
                 
                 if [[ $EUID -ne 0 ]]; then
-                    echo -e "${RED}性能测试需要root权限${NC}"
+                    echo "性能测试需要root权限"
                 else
                     benchmark_mtu "$interface" "$target"
                 fi
                 ;;
             5)
                 DEFAULT_INTERFACE=$(get_default_interface)
-                echo -e "${YELLOW}请输入网络接口 (默认: $DEFAULT_INTERFACE):${NC} "
+                echo "请输入网络接口 (默认: $DEFAULT_INTERFACE): "
                 read -r interface
                 interface=${interface:-$DEFAULT_INTERFACE}
                 
-                echo -e "${YELLOW}请输入MTU值:${NC} "
+                echo "请输入MTU值: "
                 read -r mtu
                 if [ -n "$mtu" ]; then
                     apply_mtu "$interface" "$mtu"
@@ -338,11 +333,11 @@ main_menu() {
                 generate_report
                 ;;
             8)
-                echo -e "${GREEN}退出${NC}"
+                echo "退出"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}无效选择${NC}"
+                echo "无效选择"
                 ;;
         esac
     done
@@ -386,7 +381,7 @@ else
             echo "无参数运行进入交互菜单"
             ;;
         *)
-            echo -e "${RED}未知参数: $1${NC}"
+            echo "未知参数: $1"
             echo "使用 --help 查看帮助"
             exit 1
             ;;

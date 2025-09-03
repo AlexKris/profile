@@ -24,9 +24,6 @@ readonly SSH_CONFIG="/etc/ssh/sshd_config"
 readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
 # 固定日志文件路径
 readonly LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
-# Cloudflare IP更新脚本路径
-readonly CF_UPDATE_SCRIPT="/usr/local/bin/update-cloudflare-ips.sh"
-readonly CF_CRON_JOB="/etc/cron.d/cloudflare-ip-update"
 
 # 脚本参数变量
 DISABLE_SSH_PASSWD="false"
@@ -35,19 +32,13 @@ SSH_KEY=""
 TMP_FILES=""
 OS_TYPE=""
 OS_VERSION=""
-# 服务器地区参数，默认为auto自动检测
-SERVER_REGION="auto"
+# 服务器地区参数，默认为asia
+SERVER_REGION="asia"
 # 创建管理员用户参数
 CREATE_DEVOPS_USER="false"
 SUDO_USERNAME=""
 # NTP服务选择（auto|timesyncd|chrony）
 NTP_SERVICE="auto"
-# 防火墙相关参数
-ENABLE_SSH_WHITELIST="false"
-SSH_WHITELIST_IPS=""
-DISABLE_ICMP="false"
-# 新增：网站防护参数（合并原来的block_web_ports和allow_cloudflare）
-PROTECT_WEB_PORTS="false"
 # 新增：安全审计参数（合并原来的三个审计相关参数）
 ENABLE_SECURITY_AUDIT="true"  # 默认启用安全审计
 # Docker相关
@@ -111,52 +102,67 @@ handle_error() {
     return 0
 }
 
-# 简化的日志记录函数
+# 统一的日志函数（符合最佳实践）
 log_message() {
-    local level="$1"
-    local message="$2"
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    local level="${1:-INFO}"
+    local message="${2:-}"
+    local timestamp
     
-    # 过滤敏感信息
-    if [[ "$message" =~ (ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+)[[:space:]]+[A-Za-z0-9+/]+=* ]]; then
-        message="[SSH密钥已过滤]"
+    # 参数验证
+    [ -z "$message" ] && { echo "[错误] 消息内容不能为空" >&2; return 1; }
+    
+    # 安全：过滤敏感信息
+    if [[ "$message" =~ (ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+)[[:space:]]+[A-Za-z0-9+/]+=*|password.*=|token.*=|key.*= ]]; then
+        message="[敏感信息已过滤]"
     fi
     
-        # 打印到控制台
-        case "$level" in
-            "ERROR")
-                echo -e "[错误] $message" >&2
-                ;;
-            "WARNING")
-                echo -e "[警告] $message"
-                ;;
-            "INFO")
-                echo -e "[信息] $message"
-                ;;
-            "DEBUG")
-                echo -e "[调试] $message"
-                ;;
-            *)
-                echo -e "[日志] $message"
-                ;;
-        esac
+    # 统一时间戳格式
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
-    # 确保日志目录存在
-    local log_dir=$(dirname "$LOG_FILE")
-    if [ ! -d "$log_dir" ]; then
-        mkdir -p "$log_dir" 2>/dev/null
-        # 设置严格的日志目录权限
-        chmod 700 "$log_dir" 2>/dev/null || true
+    # 级别标准化和输出
+    case "${level^^}" in
+        "ERROR"|"ERR")
+            echo "[错误] $message" >&2
+            ;;
+        "WARNING"|"WARN")
+            echo "[警告] $message"
+            ;;
+        "INFO")
+            echo "[信息] $message"
+            ;;
+        "DEBUG")
+            [ "${DEBUG:-}" = "1" ] && echo "[调试] $message"
+            ;;
+        "SUCCESS"|"OK")
+            echo "[成功] $message"
+            ;;
+        *)
+            echo "[日志] $message"
+            ;;
+    esac
+    
+    # 文件日志记录（如果定义了 LOG_FILE）
+    if [ -n "${LOG_FILE:-}" ]; then
+        # 安全创建日志目录
+        local log_dir
+        log_dir=$(dirname "$LOG_FILE")
+        if [ ! -d "$log_dir" ]; then
+            mkdir -p "$log_dir" 2>/dev/null || return 0
+            chmod 750 "$log_dir" 2>/dev/null || true
+        fi
+        
+        # 写入日志文件
+        echo "[$timestamp][$level] $message" >> "$LOG_FILE" 2>/dev/null || true
+        chmod 640 "$LOG_FILE" 2>/dev/null || true
+        
+        # 简单日志轮转（防止过大）
+        if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 10000 ]; then
+            tail -5000 "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "$LOG_FILE" 2>/dev/null
+        fi
     fi
     
-    # 写入到日志文件
-    echo "[$timestamp][$level] $message" >> "$LOG_FILE" 2>/dev/null || true
-    
-    # 设置日志文件权限（仅root可读写）
-    chmod 600 "$LOG_FILE" 2>/dev/null || true
-    
-    # 对于错误级别的消息，同时写入系统日志
-    [ "$level" = "ERROR" ] && logger -t "setup-script" "ERROR: $message" 2>/dev/null || true
+    # 系统日志记录（错误级别）
+    [ "${level^^}" = "ERROR" ] && command -v logger >/dev/null 2>&1 && logger -t "$(basename "$0" .sh)" -p user.err "$message" 2>/dev/null || true
 }
 
 # 检查系统兼容性
@@ -202,13 +208,10 @@ usage() {
     echo "  --port PORT               设置SSH端口号 (例如: --port 2222)"
     echo "  --ssh_key KEY             设置SSH公钥 (直接输入公钥文本)"
     echo "  --region REGION           指定服务器所在地区，用于选择NTP服务器"
-    echo "                            (auto|cn|hk|tw|jp|sg|us|eu|asia，默认: auto)"
+    echo "                            (cn|hk|tw|jp|sg|us|eu|asia，默认: asia)"
     echo "  --ntp_service SERVICE     指定NTP服务（auto|timesyncd|chrony，默认: auto）"
     echo "  --version                 显示脚本版本"
     echo "  --create_user USERNAME    创建管理员用户（必须提供SSH密钥）"
-    echo "  --ssh_whitelist IPS       启用SSH白名单，只允许指定IP访问（逗号分隔）"
-    echo "  --disable_icmp            禁用ICMP（禁止ping）"
-    echo "  --protect_web             保护Web端口(80/443)，仅允许Cloudflare和内网访问"
     echo "  --disable_audit           禁用安全审计（默认启用auditd和etckeeper）"
     echo "  --install_docker          安装Docker并自动配置防火墙规则"
     echo "  --disable_root_login      禁用root用户SSH登录（建议在创建管理员用户后使用）"
@@ -227,8 +230,7 @@ usage() {
     echo "示例:"
     echo "  $0 --disable_ssh_pwd --port 2222 --ssh_key \"ssh-rsa AAAA...\""
     echo "  $0 --create_user devops --ssh_key \"ssh-rsa AAAA...\" --disable_ssh_pwd"
-    echo "  $0 --ssh_whitelist \"1.2.3.4,5.6.7.8/24\" --disable_icmp --protect_web"
-    echo "  $0 --install_docker --protect_web --region cn"
+    echo "  $0 --install_docker --region cn"
     echo "  $0 --create_user admin --ssh_key \"ssh-rsa AAAA...\" --disable_root_login --disable_ssh_pwd"
     echo ""
     echo "脚本版本: $SCRIPT_VERSION"
@@ -263,7 +265,7 @@ parse_args() {
                     exit 1
                 fi
                 case "$2" in
-                    auto|cn|hk|tw|jp|sg|us|eu|asia)
+                    cn|hk|tw|jp|sg|us|eu|asia)
                         SERVER_REGION="$2"
                         ;;
                     *)
@@ -300,18 +302,6 @@ parse_args() {
                     exit 1
                 fi
                 shift ;;
-            --ssh_whitelist)
-                if [ -z "$2" ] || [[ "$2" == --* ]]; then
-                    log_message "ERROR" "选项 $1 需要一个有效的IP列表参数"
-                    exit 1
-                fi
-                ENABLE_SSH_WHITELIST="true"
-                SSH_WHITELIST_IPS="$2"
-                shift ;;
-            --disable_icmp)
-                DISABLE_ICMP="true" ;;
-            --protect_web)
-                PROTECT_WEB_PORTS="true" ;;
             --disable_audit)
                 ENABLE_SECURITY_AUDIT="false" ;;
             --install_docker)
@@ -1105,9 +1095,8 @@ configure_timezone_ntp() {
     # 设置时区为东八区
     sudo timedatectl set-timezone Asia/Shanghai
     
-    # 自动检测地区
+    # 使用用户指定的地区
     local region="$SERVER_REGION"
-    [ "$region" = "auto" ] && region=$(detect_server_region)
     
     # 选择NTP服务器
     local ntp_server
@@ -1180,26 +1169,6 @@ EOF
     log_message "INFO" "时区和NTP配置完成"
 }
 
-# 自动检测服务器地区
-detect_server_region() {
-    log_message "INFO" "自动检测服务器地区..."
-    
-    # 通过IP地理位置检测
-    if command -v curl &> /dev/null; then
-        local country=$(curl -s --connect-timeout 5 "https://ipapi.co/country_code" 2>/dev/null || echo "")
-        case "$country" in
-            CN) echo "cn"; return ;;
-            HK) echo "hk"; return ;;
-            TW) echo "tw"; return ;;
-            JP) echo "jp"; return ;;
-            SG) echo "sg"; return ;;
-            US) echo "us"; return ;;
-            GB|DE|FR|IT|ES|NL) echo "eu"; return ;;
-        esac
-    fi
-    
-    echo "asia"
-}
 
 # 配置系统优化
 configure_system_optimization() {
@@ -1378,449 +1347,8 @@ EOF
     fi
 }
 
-# 创建Cloudflare IP更新脚本
-create_cloudflare_update_script() {
-    log_message "INFO" "创建Cloudflare IP更新脚本..."
-    
-    sudo tee "$CF_UPDATE_SCRIPT" > /dev/null << 'EOF'
-#!/bin/bash
 
-# Cloudflare IP更新脚本
-LOG_FILE="/var/log/cloudflare-ip-update.log"
-COMMENT_MARK="cloudflare-auto"  # 用于标记Cloudflare规则
-INTERNAL_MARK="internal-network"  # 用于标记内网规则
 
-log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
-}
-
-# 获取当前的Cloudflare IP
-get_cloudflare_ips() {
-    local ipv4_list=$(curl -s --connect-timeout 10 https://www.cloudflare.com/ips-v4)
-    local ipv6_list=$(curl -s --connect-timeout 10 https://www.cloudflare.com/ips-v6)
-    
-    # 验证获取的内容是否为有效IP
-    if [[ ! "$ipv4_list" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3} ]]; then
-        log_message "错误: 获取的IPv4列表无效"
-        return 1
-    fi
-    
-    echo "$ipv4_list"
-    echo "$ipv6_list"
-}
-
-# 确保内网规则存在
-ensure_internal_rules() {
-    log_message "检查并确保内网规则存在..."
-    
-    local internal_networks=("127.0.0.1" "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16")
-    
-    for network in "${internal_networks[@]}"; do
-        for port in 80 443; do
-            # INPUT链
-            if ! iptables -C INPUT -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
-                iptables -I INPUT 1 -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK"
-                log_message "添加INPUT内网规则: $network:$port"
-            fi
-        done
-    done
-    
-    # DOCKER-USER链
-    if iptables -L DOCKER-USER -n &>/dev/null; then
-        # 先处理lo接口规则
-        if ! iptables -C DOCKER-USER -i lo -j RETURN -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
-            iptables -I DOCKER-USER 1 -i lo -j RETURN -m comment --comment "$INTERNAL_MARK"
-            log_message "添加DOCKER-USER lo接口规则"
-        fi
-        
-        # 添加内网规则
-        for network in "${internal_networks[@]}"; do
-            for port in 80 443; do
-                if ! iptables -C DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
-                    # 使用追加而不是插入，因为lo规则应该在最前面
-                    iptables -A DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK"
-                    log_message "添加DOCKER-USER内网规则: $network:$port"
-                fi
-            done
-        done
-    fi
-}
-
-# 清理旧的Cloudflare规则（使用注释标记）
-clean_old_rules() {
-    log_message "清理旧的Cloudflare规则..."
-    
-    # 清理INPUT链中带有cloudflare-auto标记的规则
-    while true; do
-        local rule_num=$(iptables -L INPUT -n --line-numbers | grep "$COMMENT_MARK" | head -1 | awk '{print $1}')
-        [ -z "$rule_num" ] && break
-        iptables -D INPUT "$rule_num" 2>/dev/null || {
-            log_message "警告: 无法删除INPUT链规则 #$rule_num"
-            break
-        }
-    done
-    
-    # 清理DOCKER-USER链中的规则
-    if iptables -L DOCKER-USER -n &>/dev/null; then
-        while true; do
-            local rule_num=$(iptables -L DOCKER-USER -n --line-numbers | grep "$COMMENT_MARK" | head -1 | awk '{print $1}')
-            [ -z "$rule_num" ] && break
-            iptables -D DOCKER-USER "$rule_num" 2>/dev/null || {
-                log_message "警告: 无法删除DOCKER-USER链规则 #$rule_num"
-                break
-            }
-        done
-    fi
-    
-    # 清理IPv6规则
-    if command -v ip6tables &>/dev/null; then
-        while true; do
-            local rule_num=$(ip6tables -L INPUT -n --line-numbers | grep "$COMMENT_MARK" | head -1 | awk '{print $1}')
-            [ -z "$rule_num" ] && break
-            ip6tables -D INPUT "$rule_num" 2>/dev/null || {
-                log_message "警告: 无法删除IPv6规则 #$rule_num"
-                break
-            }
-        done
-    fi
-    
-    log_message "旧规则清理完成"
-}
-
-# 检查规则是否已存在
-rule_exists() {
-    local chain="$1"
-    local ip="$2"
-    local port="$3"
-    
-    iptables -C "$chain" -p tcp -s "$ip" --dport "$port" -j ACCEPT -m comment --comment "$COMMENT_MARK" 2>/dev/null || \
-    iptables -C "$chain" -p tcp -s "$ip" --dport "$port" -j RETURN -m comment --comment "$COMMENT_MARK" 2>/dev/null
-}
-
-# 添加新的Cloudflare规则
-add_cloudflare_rules() {
-    local ips="$1"
-    local count=0
-    local errors=0
-    
-    log_message "添加新的Cloudflare规则..."
-    
-    # 获取内网规则之后的位置（在内网规则之后插入）
-    local insert_pos_input=$(iptables -L INPUT -n --line-numbers | grep -E "$INTERNAL_MARK|192.168.0.0/16.*tcp dpt:443" | tail -1 | awk '{print $1}')
-    [ -z "$insert_pos_input" ] && insert_pos_input=8  # 预留前面几个位置给内网规则（4个网段×2个端口）
-    
-    # 获取DOCKER-USER链中内网规则之后的位置
-    local insert_pos_docker=1
-    if iptables -L DOCKER-USER -n &>/dev/null; then
-        # 计算内网规则数量：1个lo规则 + 4个网段×2个端口 = 9
-        insert_pos_docker=$(iptables -L DOCKER-USER -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
-        [ -z "$insert_pos_docker" ] && insert_pos_docker=9  # 预留前面几个位置给内网规则
-    fi
-    
-    while IFS= read -r ip; do
-        # 跳过空行和非IP格式的行
-        [ -z "$ip" ] && continue
-        [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]] && \
-        [[ ! "$ip" =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$ ]] && continue
-        
-        if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-            # IPv4规则
-            for port in 80 443; do
-                # INPUT链
-                if ! rule_exists INPUT "$ip" "$port"; then
-                    if iptables -I INPUT $((++insert_pos_input)) -p tcp -s "$ip" --dport "$port" -j ACCEPT -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
-                        ((count++))
-                    else
-                        ((errors++))
-                        log_message "错误: 无法添加INPUT规则 $ip:$port"
-                    fi
-                fi
-                
-                # DOCKER-USER链 - 使用插入而不是追加
-                if iptables -L DOCKER-USER -n &>/dev/null; then
-                    if ! rule_exists DOCKER-USER "$ip" "$port"; then
-                        if iptables -I DOCKER-USER $((++insert_pos_docker)) -s "$ip" -p tcp --dport "$port" -j RETURN -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
-                            ((count++))
-                        else
-                            ((errors++))
-                            log_message "错误: 无法添加DOCKER-USER规则 $ip:$port"
-                        fi
-                    fi
-                fi
-            done
-        elif [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$ ]]; then
-            # IPv6规则
-            if command -v ip6tables &>/dev/null; then
-                for port in 80 443; do
-                    if ! ip6tables -C INPUT -p tcp -s "$ip" --dport "$port" -j ACCEPT -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
-                        if ip6tables -A INPUT -p tcp -s "$ip" --dport "$port" -j ACCEPT -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
-                            ((count++))
-                        else
-                            ((errors++))
-                            log_message "错误: 无法添加IPv6规则 $ip:$port"
-                        fi
-                fi
-            done
-            fi
-        fi
-    done <<< "$ips"
-    
-    log_message "已添加 $count 条Cloudflare IP规则，错误 $errors 条"
-    
-    # 确保DROP规则在最后
-    ensure_drop_rules_last
-}
-
-# 确保DROP规则在最后
-ensure_drop_rules_last() {
-    # 移除现有的DROP规则
-    while iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
-    while iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
-    
-    # 在末尾重新添加DROP规则
-    iptables -A INPUT -p tcp --dport 80 -j DROP
-    iptables -A INPUT -p tcp --dport 443 -j DROP
-    
-    # DOCKER-USER链的DROP规则
-    if iptables -L DOCKER-USER -n &>/dev/null; then
-        while iptables -D DOCKER-USER -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
-        while iptables -D DOCKER-USER -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
-        
-        # 先添加DROP规则
-        iptables -A DOCKER-USER -p tcp --dport 80 -j DROP
-        iptables -A DOCKER-USER -p tcp --dport 443 -j DROP
-        
-        # 确保最后有RETURN规则
-        iptables -D DOCKER-USER -j RETURN 2>/dev/null || true
-        iptables -A DOCKER-USER -j RETURN
-    fi
-}
-
-# 验证防火墙规则
-verify_rules() {
-    local cf_rules=$(iptables -L INPUT -n | grep -c "$COMMENT_MARK" || echo 0)
-    local internal_rules=$(iptables -L INPUT -n | grep -c "$INTERNAL_MARK" || echo 0)
-    local docker_cf_rules=0
-    local docker_internal_rules=0
-    
-    if iptables -L DOCKER-USER -n &>/dev/null; then
-        docker_cf_rules=$(iptables -L DOCKER-USER -n | grep -c "$COMMENT_MARK" || echo 0)
-        docker_internal_rules=$(iptables -L DOCKER-USER -n | grep -c "$INTERNAL_MARK" || echo 0)
-    fi
-    
-    log_message "验证: INPUT链中有 $internal_rules 条内网规则，$cf_rules 条Cloudflare规则"
-    if [ $docker_cf_rules -gt 0 ] || [ $docker_internal_rules -gt 0 ]; then
-        log_message "验证: DOCKER-USER链中有 $docker_internal_rules 条内网规则，$docker_cf_rules 条Cloudflare规则"
-    fi
-    
-    # 验证规则顺序
-    log_message "验证规则顺序..."
-    local first_drop=$(iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:(80|443).*DROP" | head -1 | awk '{print $1}')
-    local last_accept=$(iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:(80|443).*ACCEPT" | tail -1 | awk '{print $1}')
-    
-    if [ -n "$first_drop" ] && [ -n "$last_accept" ] && [ "$last_accept" -gt "$first_drop" ]; then
-        log_message "警告: 发现ACCEPT规则在DROP规则之后，可能存在安全风险"
-    else
-        log_message "验证: 规则顺序正确"
-    fi
-}
-
-# 主函数
-main() {
-    log_message "========== 开始更新Cloudflare IP规则 =========="
-    
-    # 检查是否有root权限
-    if [ "$EUID" -ne 0 ]; then
-        log_message "错误: 此脚本需要root权限运行"
-        exit 1
-    fi
-    
-    # 检测IPv6支持
-    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
-        log_message "信息: 检测到IPv6支持，将配置IPv6规则"
-    else
-        log_message "信息: 未检测到IPv6支持，仅配置IPv4规则"
-    fi
-    
-    # 首先确保内网规则存在
-    ensure_internal_rules
-    
-    # 获取最新的Cloudflare IP
-    local cf_ips=$(get_cloudflare_ips)
-    
-    if [ -z "$cf_ips" ]; then
-        log_message "错误: 无法获取Cloudflare IP列表"
-        exit 1
-    fi
-    
-    # 清理旧的Cloudflare规则
-    clean_old_rules
-    
-    # 添加新的Cloudflare规则
-    add_cloudflare_rules "$cf_ips"
-    
-    # 验证规则
-    verify_rules
-    
-    # 保存iptables规则
-    if [ -f /etc/debian_version ]; then
-        if command -v iptables-save &>/dev/null; then
-            mkdir -p /etc/iptables 2>/dev/null
-            iptables-save > /etc/iptables/rules.v4 2>/dev/null || log_message "警告: 无法保存IPv4规则"
-            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || log_message "警告: 无法保存IPv6规则"
-        fi
-    elif [ -f /etc/redhat-release ]; then
-        if command -v iptables-save &>/dev/null; then
-            iptables-save > /etc/sysconfig/iptables 2>/dev/null || log_message "警告: 无法保存防火墙规则"
-        fi
-    fi
-    
-    log_message "========== Cloudflare IP规则更新完成 =========="
-}
-
-# 启动日志
-mkdir -p $(dirname "$LOG_FILE")
-touch "$LOG_FILE"
-
-# 捕获错误
-trap 'log_message "错误: 脚本异常退出 (行号: $LINENO)"' ERR
-
-# 执行主函数
-main
-EOF
-    
-    sudo chmod +x "$CF_UPDATE_SCRIPT"
-    # 设置脚本权限（仅root可读写执行）
-    sudo chmod 700 "$CF_UPDATE_SCRIPT"
-    
-    # 创建定时任务
-    sudo tee "$CF_CRON_JOB" > /dev/null << EOF
-# 每天凌晨3点更新Cloudflare IP列表
-0 3 * * * root $CF_UPDATE_SCRIPT >/dev/null 2>&1
-EOF
-    
-    # 设置cron文件权限
-    sudo chmod 644 "$CF_CRON_JOB"
-    
-    # 立即执行一次
-    sudo "$CF_UPDATE_SCRIPT"
-    
-    log_message "INFO" "Cloudflare IP更新脚本创建完成"
-}
-
-# 配置防火墙（优化后的版本）
-configure_firewall() {
-    log_message "INFO" "配置防火墙规则..."
-    
-    # SSH端口规则（这个保留在setup脚本中，因为是独立的）
-    local ssh_port="${SSH_PORT:-22}"
-    if [ "$ENABLE_SSH_WHITELIST" != "true" ]; then
-        # 确保SSH端口开放
-        if ! sudo iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null; then
-            sudo iptables -I INPUT 1 -p tcp --dport "$ssh_port" -j ACCEPT -m comment --comment "SSH Port"
-            log_message "INFO" "添加SSH端口 $ssh_port 防火墙规则"
-        fi
-    fi
-    
-    # SSH白名单
-    if [ "$ENABLE_SSH_WHITELIST" = "true" ] && [ -n "$SSH_WHITELIST_IPS" ]; then
-        log_message "INFO" "配置SSH白名单..."
-        
-        # 清理现有SSH规则
-        while sudo iptables -L INPUT -n --line-numbers | grep "tcp dpt:$ssh_port" | head -1 | awk '{print $1}' | xargs -r sudo iptables -D INPUT 2>/dev/null; do :; done
-        
-        # 添加白名单规则
-        IFS=',' read -ra IPS <<< "$SSH_WHITELIST_IPS"
-        for ip in "${IPS[@]}"; do
-            ip=$(echo "$ip" | xargs)
-            if validate_ip "$ip"; then
-                sudo iptables -A INPUT -s "$ip" -p tcp --dport "$ssh_port" -j ACCEPT
-            else
-                log_message "WARNING" "跳过无效的IP地址: $ip"
-            fi
-        done
-        
-        # 拒绝其他SSH连接
-        sudo iptables -A INPUT -p tcp --dport "$ssh_port" -j DROP
-    fi
-    
-    # 禁用ICMP
-    if [ "$DISABLE_ICMP" = "true" ]; then
-        log_message "INFO" "禁用ICMP..."
-        sudo iptables -A INPUT -p icmp -j DROP
-        sudo iptables -A OUTPUT -p icmp -j DROP
-    fi
-    
-    # Web端口保护 - 改为由定时任务脚本统一处理
-    if [ "$PROTECT_WEB_PORTS" = "true" ]; then
-        log_message "INFO" "配置Web端口保护..."
-        
-        # 创建Cloudflare IP更新脚本
-        create_cloudflare_update_script
-        
-        # 立即执行一次脚本来配置所有Web相关的防火墙规则
-        # 包括内网规则、Cloudflare规则和DOCKER-USER链
-        log_message "INFO" "执行防火墙规则配置..."
-        if [ -f "$CF_UPDATE_SCRIPT" ]; then
-            sudo "$CF_UPDATE_SCRIPT" || {
-                log_message "ERROR" "防火墙规则配置失败"
-                return 1
-            }
-        else
-            log_message "ERROR" "防火墙配置脚本不存在"
-            return 1
-        fi
-    fi
-    
-    # 保存防火墙规则
-    save_firewall_rules
-    
-    log_message "INFO" "防火墙配置完成"
-}
-
-# 保存防火墙规则
-save_firewall_rules() {
-    log_message "INFO" "保存防火墙规则..."
-    
-    if [ "$OS_TYPE" = "debian" ]; then
-        # 安装iptables-persistent
-        if ! dpkg -l | grep -q iptables-persistent; then
-            # 等待apt锁释放
-            if wait_for_apt; then
-                echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | sudo debconf-set-selections
-                echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | sudo debconf-set-selections
-                if apt_install_with_retry "iptables-persistent"; then
-                    log_message "INFO" "iptables-persistent安装成功"
-                else
-                    log_message "WARNING" "iptables-persistent安装失败，防火墙规则可能无法持久化"
-                fi
-            else
-                log_message "WARNING" "无法获取apt锁，跳过iptables-persistent安装"
-            fi
-        fi
-        
-        sudo mkdir -p /etc/iptables
-        if sudo iptables-save > /etc/iptables/rules.v4; then
-            log_message "INFO" "IPv4防火墙规则已保存"
-        else
-            log_message "WARNING" "无法保存IPv4防火墙规则"
-        fi
-        # 只有在系统支持IPv6时才尝试保存IPv6规则
-        if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
-            if sudo ip6tables-save > /etc/iptables/rules.v6; then
-                log_message "INFO" "IPv6防火墙规则已保存"
-            else
-                log_message "WARNING" "无法保存IPv6防火墙规则"
-            fi
-        fi
-    else
-        if sudo iptables-save > /etc/sysconfig/iptables; then
-            log_message "INFO" "防火墙规则已保存"
-        else
-            log_message "WARNING" "无法保存防火墙规则"
-        fi
-    fi
-}
 
 # 安装Docker
 install_docker() {
@@ -1866,7 +1394,6 @@ install_docker() {
         
         # 配置Docker镜像加速（中国地区）
         local region="$SERVER_REGION"
-        [ "$region" = "auto" ] && region=$(detect_server_region)
         
         if [ "$region" = "cn" ]; then
     sudo mkdir -p /etc/docker
@@ -1912,13 +1439,10 @@ show_summary() {
     echo "  密码登录: $([ "$DISABLE_SSH_PASSWD" = "true" ] && echo "已禁用" || echo "已启用")"
     echo "  公钥认证: 已启用"
     echo "  SSH密钥: $([ -n "$SSH_KEY" ] && echo "已添加" || echo "未添加")"
-    [ "$ENABLE_SSH_WHITELIST" = "true" ] && echo "  白名单: $SSH_WHITELIST_IPS"
     echo ""
     echo "安全配置:"
     echo "  fail2ban: $(systemctl is-active fail2ban 2>/dev/null || echo '未运行')"
     echo "  安全审计: $([ "$ENABLE_SECURITY_AUDIT" = "true" ] && echo "已启用 (auditd + etckeeper)" || echo "已禁用")"
-    [ "$DISABLE_ICMP" = "true" ] && echo "  ICMP: 已禁用"
-    [ "$PROTECT_WEB_PORTS" = "true" ] && echo "  Web端口保护: 已启用 (Cloudflare IP自动更新)"
     echo ""
     echo "系统优化:"
     echo "  BBR: $(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo '未启用')"
@@ -1929,15 +1453,13 @@ show_summary() {
         echo "Docker:"
         echo "  版本: $(docker --version | awk '{print $3}' | sed 's/,$//')"
         echo "  状态: $(systemctl is-active docker)"
-        [ "$PROTECT_WEB_PORTS" = "true" ] && echo "  防火墙: DOCKER-USER链已配置"
     fi
     
-    [ "$CREATE_DEVOPS_USER" = "true" ] && echo -e "\n管理员用户: $SUDO_USERNAME (已创建)"
+    [ "$CREATE_DEVOPS_USER" = "true" ] && echo "\n管理员用户: $SUDO_USERNAME (已创建)"
     
     echo "--------------------------------------------------"
     echo "日志文件: $LOG_FILE"
     echo "配置备份: $CONFIG_BACKUP_DIR"
-    [ "$PROTECT_WEB_PORTS" = "true" ] && echo "CF更新脚本: $CF_UPDATE_SCRIPT"
     echo "--------------------------------------------------"
     echo "SSH登录命令:"
     if [ "$CREATE_DEVOPS_USER" = "true" ]; then
@@ -1956,7 +1478,7 @@ show_summary() {
         echo "注意: cloud-init SSH配置已禁用"
     fi
     
-    [ "$DISABLE_SSH_PASSWD" = "true" ] && echo -e "警告: 密码登录已禁用，请确保已保存SSH密钥！"
+    [ "$DISABLE_SSH_PASSWD" = "true" ] && echo "警告: 密码登录已禁用，请确保已保存SSH密钥！"
 }
 
 # 主脚本的主函数
@@ -1991,8 +1513,6 @@ main() {
     # Docker安装（在防火墙配置之前）
     install_docker
     
-    # 防火墙配置（在Docker安装之后，这样可以一次性配置所有规则）
-    configure_firewall
     
     # 显示配置总结
     show_summary
