@@ -10,12 +10,17 @@ readonly SCRIPT_VERSION="2.1.3"
 readonly DEFAULT_SSH_PORT="22"
 readonly MIN_PORT=1024
 readonly MAX_PORT=65535
-# 获取脚本所在目录
-if [ -n "${BASH_SOURCE[0]:-}" ]; then
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 获取脚本所在目录（支持管道执行）
+if [ -n "${BASH_SOURCE[0]:-}" ] && [[ "${BASH_SOURCE[0]}" != /dev/fd/* ]] && [[ "${BASH_SOURCE[0]}" != /proc/self/fd/* ]]; then
+    # 正常文件执行
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 else
-    # 如果通过管道执行，使用当前目录
-    SCRIPT_DIR="$(pwd)"
+    # 通过管道执行，使用用户家目录或/tmp
+    if [ -w "$HOME" ] && [ -d "$HOME" ]; then
+        SCRIPT_DIR="$HOME"
+    else
+        SCRIPT_DIR="/tmp"
+    fi
 fi
 # 添加时间戳到配置备份目录名
 readonly TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -641,11 +646,18 @@ update_system_install_dependencies() {
     # 验证关键软件包是否安装成功
     log_message "DEBUG" "系统更新 - 验证安装结果"
     local missing_packages=""
-    for pkg in wget curl vim fail2ban; do
+    
+    # 检查有直接命令的软件包
+    for pkg in wget curl vim; do
         if ! command -v "$pkg" >/dev/null 2>&1; then
             missing_packages="$missing_packages $pkg"
         fi
     done
+    
+    # 特殊检查fail2ban（它的命令是fail2ban-client）
+    if ! command -v fail2ban-client >/dev/null 2>&1 && ! systemctl is-enabled fail2ban >/dev/null 2>&1; then
+        missing_packages="$missing_packages fail2ban"
+    fi
     
     if [ -n "$missing_packages" ]; then
         log_message "WARNING" "以下关键软件包可能安装失败:$missing_packages"
