@@ -8,17 +8,34 @@
 # 版本: 2.0
 # 更新: $(date '+%Y-%m-%d')
 
-# 错误处理
-set -euo pipefail
+# 启用严格模式，显式错误处理（移除-e以避免不可预测行为）
+set -uo pipefail
 
-# 捕获错误和退出信号
-trap 'log_error "脚本执行出错，行号: $LINENO"' ERR
-trap 'log_info "脚本退出"' EXIT
+# 脚本版本
+readonly SCRIPT_VERSION="2.0"
+
+# 获取脚本所在目录（支持管道执行）
+if [ -n "${BASH_SOURCE[0]:-}" ] && [[ "${BASH_SOURCE[0]}" != /dev/fd/* ]] && [[ "${BASH_SOURCE[0]}" != /proc/self/fd/* ]]; then
+    # 正常文件执行
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # 通过管道执行，使用用户家目录或/tmp
+    if [ -w "$HOME" ] && [ -d "$HOME" ]; then
+        SCRIPT_DIR="$HOME"
+    else
+        SCRIPT_DIR="/tmp"
+    fi
+fi
+
+# 时间戳
+ readonly TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+
+# 临时文件清理变量
+TMP_FILES=""
 
 # 全局变量
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKUP_DIR="/etc/sysctl.backup"
-LOG_FILE="/var/log/network_optimize.log"
+readonly BACKUP_DIR="/etc/sysctl.backup"
+readonly LOG_FILE="$SCRIPT_DIR/network_optimize-$TIMESTAMP.log"
 
 # 配置变量
 PROFILE=""
@@ -29,31 +46,117 @@ ENABLE_FASTOPEN=false
 DRY_RUN=false
 APPLY_CONFIG=false
 
-# 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 日志记录函数
-log() {
-    local level=$1
-    shift
-    local message="$*"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp][$level] $message" | tee -a "$LOG_FILE"
+# 设置安全的临时文件处理
+cleanup() {
+    # 删除所有临时文件
+    if [ -n "$TMP_FILES" ]; then
+        rm -f $TMP_FILES >/dev/null 2>&1
+    fi
+    log_message "INFO" "脚本执行完成，清理临时文件"
 }
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $*" | tee -a "$LOG_FILE"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOG_FILE"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*" | tee -a "$LOG_FILE"; }
+# 注册EXIT信号处理
+trap cleanup EXIT INT TERM
+
+# ==================== 现代化错误处理函数 ====================
+
+# 致命错误处理函数 - 记录错误并退出
+die() {
+    local msg="${1:-未知致命错误}"
+    local exit_code="${2:-1}"
+    
+    log_message "ERROR" "致命错误: $msg"
+    log_message "ERROR" "脚本终止执行 (退出码: $exit_code)"
+    
+    # 清理资源
+    cleanup 2>/dev/null || true
+    exit "$exit_code"
+}
+
+# 检查命令执行结果 - 非致命错误处理
+check_error() {
+    local exit_code=$1
+    local operation="${2:-操作}"
+    local context="${3:-}"
+    
+    if [ $exit_code -ne 0 ]; then
+        local error_msg="$operation 失败 (错误码: $exit_code)"
+        [ -n "$context" ] && error_msg="$error_msg - $context"
+        
+        log_message "WARNING" "$error_msg"
+        return 1
+    fi
+    return 0
+}
+
+# 安全执行命令 - 带错误检查的命令执行
+safe_execute() {
+    local cmd="$1"
+    local description="${2:-执行命令}"
+    local fatal="${3:-false}"
+    
+    log_message "DEBUG" "执行: $cmd"
+    
+    if ! eval "$cmd"; then
+        local exit_code=$?
+        local error_msg="$description 失败 (错误码: $exit_code)"
+        
+        if [ "$fatal" = "true" ]; then
+            die "$error_msg" "$exit_code"
+        else
+            log_message "WARNING" "$error_msg"
+            return "$exit_code"
+        fi
+    fi
+    
+    log_message "DEBUG" "$description 成功"
+    return 0
+}
+
+# 颜色输出（已禁用）
+
+# 日志记录函数（与setup.sh保持一致）
+log_message() {
+    local level="${1:-INFO}"
+    local message="${2:-}"
+    local timestamp
+    
+    # 参数验证
+    [ -z "$message" ] && { echo "[错误] 消息内容不能为空" >&2; return 1; }
+    
+    # 统一时间戳格式
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # 级别标准化和输出
+    case "${level^^}" in
+        "ERROR"|"ERR")
+            echo "[错误] $message" | tee -a "$LOG_FILE" >&2
+            ;;
+        "WARNING"|"WARN")
+            echo "[警告] $message" | tee -a "$LOG_FILE"
+            ;;
+        "INFO")
+            echo "[信息] $message" | tee -a "$LOG_FILE"
+            ;;
+        "SUCCESS"|"OK")
+            echo "[成功] $message" | tee -a "$LOG_FILE"
+            ;;
+        "DEBUG")
+            [ "${DEBUG:-}" = "1" ] && echo "[调试] $message" | tee -a "$LOG_FILE"
+            ;;
+        *)
+            echo "[信息] $message" | tee -a "$LOG_FILE"
+            ;;
+    esac
+    
+    # 写入日志文件（带时间戳）
+    echo "[$timestamp][$level] $message" >> "$LOG_FILE" 2>/dev/null || true
+}
 
 # 检查是否为root用户
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        log_error "此脚本需要root权限运行"
-        exit 1
+        die "此脚本需要root权限运行"
     fi
 }
 
@@ -61,7 +164,7 @@ check_root() {
 ensure_backup_dir() {
     if [[ ! -d "$BACKUP_DIR" ]]; then
         mkdir -p "$BACKUP_DIR"
-        log_info "创建备份目录: $BACKUP_DIR"
+        log_message "INFO" "创建备份目录: $BACKUP_DIR"
     fi
 }
 
@@ -71,32 +174,32 @@ detect_system_info() {
     local mem_mb=$((mem_kb / 1024))
     local kernel_version=$(uname -r)
     
-    log_info "系统内存: ${mem_mb}MB"
-    log_info "内核版本: $kernel_version"
+    log_message "INFO" "系统内存: ${mem_mb}MB"
+    log_message "INFO" "内核版本: $kernel_version"
     
-    echo -e "\n${BLUE}[系统检测结果]${NC}"
+    echo -e "\n[系统检测结果]"
     echo "  内存: ${mem_mb}MB"
     echo "  内核: $kernel_version"
     
     # 建议profile
     if [[ $mem_mb -lt 1024 ]]; then
-        echo -e "  ${GREEN}建议使用: --profile=lite${NC} (检测到内存 < 1GB)"
+        echo -e "  建议使用: --profile=lite (检测到内存 < 1GB)"
     elif [[ $mem_mb -lt 2048 ]]; then
-        echo -e "  ${GREEN}建议使用: --profile=balanced${NC} (检测到内存 1-2GB)"
+        echo -e "  建议使用: --profile=balanced (检测到内存 1-2GB)"
     else
-        echo -e "  ${GREEN}建议使用: --profile=performance${NC} (检测到内存 > 2GB)"
+        echo -e "  建议使用: --profile=performance (检测到内存 > 2GB)"
     fi
     
     # 检查BBR支持
     if kernel_version_ge "4.9"; then
-        echo -e "  ${GREEN}✓ 内核支持BBR拥塞控制${NC}"
+        echo -e "  ✓ 内核支持BBR拥塞控制"
     else
-        echo -e "  ${YELLOW}⚠ 内核版本过低，不支持BBR拥塞控制${NC}"
+        echo -e "  ⚠ 内核版本过低，不支持BBR拥塞控制"
     fi
     
     # 检查当前是否已有优化配置
     if grep -q "网络性能优化" /etc/sysctl.conf 2>/dev/null; then
-        echo -e "  ${YELLOW}⚠ 检测到已有网络优化配置${NC}"
+        echo -e "  ⚠ 检测到已有网络优化配置"
     fi
 }
 
@@ -127,15 +230,15 @@ backup_config() {
     
     if [[ -f /etc/sysctl.conf ]]; then
         cp /etc/sysctl.conf "$backup_file"
-        log_info "配置已备份到: $backup_file"
+        log_message "INFO" "配置已备份到: $backup_file"
     else
-        log_warn "/etc/sysctl.conf 不存在，创建空白配置文件"
+        log_message "WARNING" "/etc/sysctl.conf 不存在，创建空白配置文件"
         touch /etc/sysctl.conf
     fi
     
     # 同时备份当前运行时配置
     sysctl -a > "$BACKUP_DIR/sysctl.runtime.$timestamp" 2>/dev/null || true
-    log_info "运行时配置已备份"
+    log_message "INFO" "运行时配置已备份"
 }
 
 # 显示单个参数
@@ -148,30 +251,30 @@ show_param() {
 
 # 显示当前网络配置
 show_current_config() {
-    echo -e "${BLUE}========== 当前网络配置 ==========${NC}"
+    echo "========== 当前网络配置 =========="
     
-    echo -e "\n${YELLOW}[TCP缓冲区设置]${NC}"
+    echo -e "\n[TCP缓冲区设置]"
     show_param "net.ipv4.tcp_rmem"
     show_param "net.ipv4.tcp_wmem"
     show_param "net.core.rmem_max"
     show_param "net.core.wmem_max"
     
-    echo -e "\n${YELLOW}[网络队列设置]${NC}"
+    echo -e "\n[网络队列设置]"
     show_param "net.core.netdev_max_backlog"
     show_param "net.core.somaxconn"
     show_param "net.ipv4.tcp_max_syn_backlog"
     
-    echo -e "\n${YELLOW}[TCP高级特性]${NC}"
+    echo -e "\n[TCP高级特性]"
     show_param "net.ipv4.tcp_congestion_control"
     show_param "net.core.default_qdisc"
     show_param "net.ipv4.tcp_fastopen"
     show_param "net.ipv4.tcp_tw_reuse"
     show_param "net.ipv4.ip_forward"
     
-    echo -e "\n${YELLOW}[连接跟踪]${NC}"
+    echo -e "\n[连接跟踪]"
     show_param "net.netfilter.nf_conntrack_max"
     
-    echo -e "\n${YELLOW}[当前TCP连接统计]${NC}"
+    echo -e "\n[当前TCP连接统计]"
     ss -s | grep -E "TCP:|TIME-WAIT" || true
 }
 
@@ -319,8 +422,7 @@ generate_profile_config() {
             generate_performance_profile
             ;;
         *)
-            log_error "未知的profile: $PROFILE"
-            exit 1
+            die "未知的profile: $PROFILE"
             ;;
     esac
 }
@@ -336,7 +438,7 @@ net.netfilter.nf_conntrack_tcp_timeout_established = 7200
 net.netfilter.nf_conntrack_tcp_timeout_time_wait = 60
 
 EOF
-        log_info "应用NAT优化: 禁用tw_reuse，调整连接跟踪超时"
+        log_message "INFO" "应用NAT优化: 禁用tw_reuse，调整连接跟踪超时"
     else
         cat << EOF
 
@@ -358,7 +460,7 @@ net.netfilter.nf_conntrack_tcp_timeout_close_wait = 60
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 120
 
 EOF
-        log_info "应用网关优化: 启用IP转发"
+        log_message "INFO" "应用网关优化: 启用IP转发"
     fi
 }
 
@@ -373,9 +475,9 @@ net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 
 EOF
-            log_info "启用BBR拥塞控制"
+            log_message "INFO" "启用BBR拥塞控制"
         else
-            log_warn "内核版本过低，跳过BBR配置"
+            log_message "WARNING" "内核版本过低，跳过BBR配置"
         fi
     fi
     
@@ -386,7 +488,7 @@ EOF
 net.ipv4.tcp_fastopen = 3
 
 EOF
-        log_info "启用TCP Fast Open"
+        log_message "INFO" "启用TCP Fast Open"
     fi
 }
 
@@ -406,12 +508,12 @@ generate_full_config() {
 clean_old_config() {
     # 移除旧的网络优化配置块
     sed -i '/# ===== 网络性能优化/,/# 配置生成完成:/d' /etc/sysctl.conf 2>/dev/null || true
-    log_info "已清理旧的优化配置"
+    log_message "INFO" "已清理旧的优化配置"
 }
 
 # 应用配置
 apply_config() {
-    log_info "开始应用网络优化配置..."
+    log_message "INFO" "开始应用网络优化配置..."
     
     # 备份现有配置
     backup_config
@@ -420,10 +522,10 @@ apply_config() {
     generate_full_config
     
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${BLUE}========== 预览模式: 将要应用的配置 ==========${NC}"
+        echo "========== 预览模式: 将要应用的配置 =========="
         cat /tmp/sysctl_new.conf
-        echo -e "${BLUE}==========================================${NC}"
-        echo -e "${GREEN}预览完成。使用 --apply 来实际应用配置。${NC}"
+        echo "=========================================="
+        echo "预览完成。使用 --apply 来实际应用配置。"
         return 0
     fi
     
@@ -434,12 +536,12 @@ apply_config() {
     cat /tmp/sysctl_new.conf >> /etc/sysctl.conf
     
     # 应用配置
-    if sysctl -p /etc/sysctl.conf; then
-        log_info "网络优化配置应用成功"
-        echo -e "${GREEN}优化完成! Profile: $PROFILE${NC}"
+    if safe_execute "sysctl -p /etc/sysctl.conf" "应用网络配置" "false"; then
+        log_message "SUCCESS" "网络优化配置应用成功"
+        echo "优化完成! Profile: $PROFILE"
         
         # 显示关键参数
-        echo -e "\n${YELLOW}[关键配置]${NC}"
+        echo -e "\n[关键配置]"
         show_param "net.ipv4.tcp_rmem"
         show_param "net.ipv4.tcp_wmem"
         show_param "net.core.somaxconn"
@@ -456,17 +558,16 @@ apply_config() {
             show_param "net.ipv4.tcp_congestion_control"
         fi
     else
-        log_error "配置应用失败"
-        return 1
+        die "配置应用失败，请检查配置文件" 1
     fi
     
     # 清理临时文件
-    rm -f /tmp/sysctl_new.conf
+    TMP_FILES="$TMP_FILES /tmp/sysctl_new.conf"
 }
 
 # 恢复备份
 restore_backup() {
-    echo -e "${YELLOW}可用的备份文件:${NC}"
+    echo "可用的备份文件:"
     ls -la "$BACKUP_DIR"/sysctl.conf.backup.* 2>/dev/null | head -10 || {
         echo "没有找到备份文件"
         return 1
@@ -477,34 +578,33 @@ restore_backup() {
     
     if [[ -f "$backup_file" ]]; then
         cp "$backup_file" /etc/sysctl.conf
-        if sysctl -p /etc/sysctl.conf; then
-            log_info "从备份恢复成功: $backup_file"
+        if safe_execute "sysctl -p /etc/sysctl.conf" "恢复配置" "false"; then
+            log_message "SUCCESS" "从备份恢复成功: $backup_file"
         else
-            log_error "恢复失败，配置文件可能有问题"
-            return 1
+            die "恢复失败，配置文件可能有问题" 1
         fi
     else
-        log_error "备份文件不存在: $backup_file"
+        log_message "ERROR" "备份文件不存在: $backup_file"
         return 1
     fi
 }
 
 # 性能测试和监控建议
 show_test_suggestions() {
-    echo -e "${BLUE}========== 性能测试和监控建议 ==========${NC}"
+    echo "========== 性能测试和监控建议 =========="
     
-    echo -e "\n${YELLOW}[吞吐量测试]${NC}"
+    echo -e "\n[吞吐量测试]"
     echo "  # iperf3测试"
     echo "  服务端: iperf3 -s -p 5201"
     echo "  客户端: iperf3 -c <server_ip> -t 30 -P 4"
     
-    echo -e "\n${YELLOW}[延迟测试]${NC}"
+    echo -e "\n[延迟测试]"
     echo "  # 基础延迟"
     echo "  ping -c 100 <target_ip>"
     echo "  # 路由追踪"
     echo "  mtr -n -c 50 <target_ip>"
     
-    echo -e "\n${YELLOW}[连接状态监控]${NC}"
+    echo -e "\n[连接状态监控]"
     echo "  # socket统计"
     echo "  ss -s"
     echo "  # TIME_WAIT连接数"
@@ -512,7 +612,7 @@ show_test_suggestions() {
     echo "  # 连接状态分布"
     echo "  ss -tan | awk 'NR>1{print \$1}' | sort | uniq -c"
     
-    echo -e "\n${YELLOW}[缓冲区使用监控]${NC}"
+    echo -e "\n[缓冲区使用监控]"
     echo "  # socket内存使用"
     echo "  ss -tm | grep skmem"
     echo "  # TCP内存统计"
@@ -520,7 +620,7 @@ show_test_suggestions() {
     echo "  # 当前TCP内存使用"
     echo "  cat /proc/sys/net/ipv4/tcp_mem"
     
-    echo -e "\n${YELLOW}[系统负载监控]${NC}"
+    echo -e "\n[系统负载监控]"
     echo "  # 网络接口统计"
     echo "  cat /proc/net/dev"
     echo "  # 中断统计"
@@ -531,18 +631,18 @@ show_test_suggestions() {
 
 # 诊断当前网络状态
 diagnose_network() {
-    echo -e "${BLUE}========== 网络状态诊断 ==========${NC}"
+    echo "========== 网络状态诊断 =========="
     
     # TCP连接统计
-    echo -e "\n${YELLOW}[TCP连接统计]${NC}"
+    echo -e "\n[TCP连接统计]"
     ss -s | grep -E "TCP:|TIME-WAIT"
     
     # 缓冲区使用分析
-    echo -e "\n${YELLOW}[缓冲区使用TOP10]${NC}"
+    echo -e "\n[缓冲区使用TOP10]"
     ss -tm 2>/dev/null | grep skmem | head -10 || echo "无活跃连接"
     
     # 队列状态
-    echo -e "\n${YELLOW}[网络队列状态]${NC}"
+    echo -e "\n[网络队列状态]"
     local main_interface
     main_interface=$(ip route | grep default | awk '{print $5}' | head -1)
     if [[ -n "$main_interface" ]]; then
@@ -556,10 +656,10 @@ diagnose_network() {
         count=$(cat /proc/sys/net/netfilter/nf_conntrack_count)
         max=$(cat /proc/sys/net/netfilter/nf_conntrack_max)
         local usage=$((count * 100 / max))
-        echo -e "\n${YELLOW}[连接跟踪使用率]${NC}"
+        echo -e "\n[连接跟踪使用率]"
         echo "  当前: $count / $max ($usage%)"
         if [[ $usage -gt 80 ]]; then
-            echo -e "  ${RED}⚠️  警告: 连接跟踪表使用率过高${NC}"
+            echo "  ⚠️  警告: 连接跟踪表使用率过高"
         fi
     fi
 }
@@ -567,26 +667,26 @@ diagnose_network() {
 # 显示使用帮助
 show_help() {
     cat << EOF
-${BLUE}网络性能调优脚本 v2.0${NC}
+网络性能调优脚本 v2.0
 
 用法: $0 [选项]
 
-${YELLOW}主要参数:${NC}
+主要参数:
   --apply              应用优化配置（需要root权限）
   --profile=<type>     选择预设配置类型
                        lite        - 内存受限型 (<1G内存, 8MB缓冲区)
                        balanced    - 均衡型 (1-2G内存, 20MB缓冲区)
                        performance - 性能型 (2G+内存, 32MB缓冲区)
 
-${YELLOW}角色修饰符（可组合）:${NC}
+角色修饰符（可组合）:
   --nat                NAT服务器模式（禁用tw_reuse）
   --gateway            网关模式（启用IP转发）
 
-${YELLOW}可选优化:${NC}
+可选优化:
   --enable-bbr         启用BBR拥塞控制（需要内核4.9+）
   --enable-fastopen    启用TCP Fast Open
 
-${YELLOW}其他选项:${NC}
+其他选项:
   --dry-run           预览模式（显示将要应用的配置）
   --show              显示当前网络配置
   --diagnose          诊断当前网络状态
@@ -595,7 +695,7 @@ ${YELLOW}其他选项:${NC}
   --detect            检测系统信息并给出建议
   --help              显示此帮助信息
 
-${YELLOW}使用示例:${NC}
+使用示例:
   # 检测系统并获得建议
   $0 --detect
   
@@ -624,7 +724,7 @@ EOF
 main_menu() {
     while true; do
         clear
-        echo -e "${BLUE}========== 网络性能调优工具 v2.0 ==========${NC}"
+        echo "========== 网络性能调优工具 v2.0 =========="
         echo "1. 检测系统信息并获得建议"
         echo "2. 显示当前网络配置"
         echo "3. 诊断网络状态"
@@ -733,9 +833,7 @@ parse_arguments() {
                 exit 0
                 ;;
             *)
-                log_error "未知参数: $1"
-                echo "使用 --help 查看帮助"
-                exit 1
+                die "未知参数: $1。使用 --help 查看帮助"
                 ;;
         esac
     done
@@ -746,9 +844,7 @@ validate_arguments() {
     # 检查profile是否指定
     if [[ "$APPLY_CONFIG" == "true" || "$DRY_RUN" == "true" ]]; then
         if [[ -z "$PROFILE" ]]; then
-            log_error "必须指定 --profile 参数"
-            echo "可选值: lite, balanced, performance"
-            exit 1
+            die "必须指定 --profile 参数。可选值: lite, balanced, performance"
         fi
         
         # 验证profile值
@@ -756,9 +852,7 @@ validate_arguments() {
             "lite"|"balanced"|"performance")
                 ;;
             *)
-                log_error "无效的profile: $PROFILE"
-                echo "可选值: lite, balanced, performance"
-                exit 1
+                die "无效的profile: $PROFILE。可选值: lite, balanced, performance"
                 ;;
         esac
     fi
@@ -766,13 +860,13 @@ validate_arguments() {
     # 检查BBR内核支持
     if [[ "$ENABLE_BBR" == "true" ]]; then
         if ! kernel_version_ge "4.9"; then
-            log_warn "内核版本过低，BBR可能不支持"
+            log_message "WARNING" "内核版本过低，BBR可能不支持"
         fi
     fi
     
     # NAT和tw_reuse冲突检查
     if [[ "$ENABLE_NAT" == "true" ]]; then
-        log_info "NAT模式: 将禁用tcp_tw_reuse以避免连接问题"
+        log_message "INFO" "NAT模式: 将禁用tcp_tw_reuse以避免连接问题"
     fi
 }
 
