@@ -97,8 +97,12 @@ safe_execute() {
     
     log_message "DEBUG" "执行: $cmd"
     
-    if ! eval "$cmd"; then
-        local exit_code=$?
+    # 执行命令并捕获退出码
+    eval "$cmd"
+    local exit_code=$?
+    
+    # 只有非零退出码才算真正失败
+    if [ "$exit_code" -ne 0 ]; then
         local error_msg="$description 失败 (错误码: $exit_code)"
         
         if [ "$fatal" = "true" ]; then
