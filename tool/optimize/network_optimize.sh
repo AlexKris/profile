@@ -442,7 +442,7 @@ net.netfilter.nf_conntrack_tcp_timeout_established = 7200
 net.netfilter.nf_conntrack_tcp_timeout_time_wait = 60
 
 EOF
-        log_message "INFO" "应用NAT优化: 禁用tw_reuse，调整连接跟踪超时"
+        log_message "INFO" "应用NAT优化: 禁用tw_reuse，调整连接跟踪超时" >&2
     else
         cat << EOF
 
@@ -464,7 +464,7 @@ net.netfilter.nf_conntrack_tcp_timeout_close_wait = 60
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 120
 
 EOF
-        log_message "INFO" "应用网关优化: 启用IP转发"
+        log_message "INFO" "应用网关优化: 启用IP转发" >&2
     fi
 }
 
