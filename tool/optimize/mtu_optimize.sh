@@ -1180,15 +1180,33 @@ parse_arguments() {
                     die "用法: $0 --set <interface> <mtu> [--persist]"
                 fi
                 
+                local interface="$2"
+                local mtu="$3"
+                shift 3  # 移除已处理的参数
+                
+                # 检查是否有 --persist 参数
+                local persist_flag=false
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                        --persist)
+                            persist_flag=true
+                            shift
+                            ;;
+                        *)
+                            die "未知参数: $1。使用 --help 查看帮助"
+                            ;;
+                    esac
+                done
+                
                 # 应用MTU设置
-                if apply_mtu "$2" "$3"; then
+                if apply_mtu "$interface" "$mtu"; then
                     # 如果指定了持久化选项
-                    if [ "$PERSIST" = "true" ]; then
+                    if [ "$persist_flag" = "true" ]; then
                         echo ""
                         echo "正在配置持久化..."
-                        persist_mtu_config "$2" "$3"
+                        persist_mtu_config "$interface" "$mtu"
                     else
-                        suggest_persistence "$2" "$3"
+                        suggest_persistence "$interface" "$mtu"
                     fi
                 fi
                 exit 0
