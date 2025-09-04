@@ -844,8 +844,15 @@ persist_mtu_config() {
             local connection=$(nmcli -t -f NAME con show --active | head -1)
             if [ -n "$connection" ]; then
                 if safe_execute "nmcli con mod '$connection' 802-3-ethernet.mtu $mtu" "配置NetworkManager MTU" "false"; then
-                    safe_execute "nmcli con up '$connection'" "重新加载连接" "false"
-                    log_message "SUCCESS" "NetworkManager MTU配置已生效"
+                    # 检查是否是远程连接
+                    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$SSH_CONNECTION" ]; then
+                        log_message "WARNING" "检测到SSH远程连接，跳过连接重新加载"
+                        log_message "INFO" "MTU设置已保存，将在下次网络重连时生效"
+                        log_message "SUCCESS" "NetworkManager MTU配置已保存"
+                    else
+                        safe_execute "nmcli con up '$connection'" "重新加载连接" "false"
+                        log_message "SUCCESS" "NetworkManager MTU配置已生效"
+                    fi
                     return 0
                 fi
             else
@@ -877,10 +884,18 @@ EOF
                 log_message "INFO" "更新systemd-networkd配置文件"
             fi
             
-            # 重启网络服务
-            if safe_execute "systemctl restart systemd-networkd" "重启systemd-networkd" "false"; then
-                log_message "SUCCESS" "systemd-networkd MTU配置已生效"
+            # 检查是否是远程连接
+            if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$SSH_CONNECTION" ]; then
+                log_message "WARNING" "检测到SSH远程连接，跳过网络服务重启"
+                log_message "INFO" "配置文件已创建，将在下次重启时生效"
+                log_message "SUCCESS" "systemd-networkd MTU配置已保存"
                 return 0
+            else
+                # 重启网络服务
+                if safe_execute "systemctl restart systemd-networkd" "重启systemd-networkd" "false"; then
+                    log_message "SUCCESS" "systemd-networkd MTU配置已生效"
+                    return 0
+                fi
             fi
             ;;
         "ifupdown")
