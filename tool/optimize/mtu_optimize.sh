@@ -547,6 +547,10 @@ safe_apply_mtu() {
     # 备份当前配置
     local backup_file
     backup_file=$(backup_mtu_config "$interface")
+    if [ $? -ne 0 ] || [ -z "$backup_file" ]; then
+        log_message "ERROR" "备份配置失败"
+        return 1
+    fi
     
     # 应用新的MTU设置
     if safe_execute "ip link set dev '$interface' mtu '$mtu'" "设置MTU" "false"; then
@@ -566,18 +570,27 @@ safe_apply_mtu() {
                 sleep "$timeout"
                 echo ""
                 log_message "WARNING" "超时自动回滚MTU设置"
-                restore_mtu_config "$backup_file"
+                if [ -f "$backup_file" ]; then
+                    restore_mtu_config "$backup_file"
+                else
+                    log_message "ERROR" "备份文件丢失，无法自动回滚"
+                fi
                 exit 0
             ) &
             local rollback_pid=$!
             
             # 等待用户确认
-            echo "网络连通正常? (y/n): "
-            read -r -t "$timeout" confirm
-            
-            # 杀死自动回滚进程
-            kill "$rollback_pid" 2>/dev/null
-            wait "$rollback_pid" 2>/dev/null
+            echo -n "网络连通正常? (y/n): "
+            if read -r -t "$timeout" confirm; then
+                # 用户有输入，杀死自动回滚进程
+                kill "$rollback_pid" 2>/dev/null
+                wait "$rollback_pid" 2>/dev/null
+            else
+                # 超时，等待自动回滚完成
+                wait "$rollback_pid" 2>/dev/null
+                log_message "WARNING" "响应超时，已自动回滚"
+                return 1
+            fi
             
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 log_message "SUCCESS" "MTU设置确认成功"
@@ -585,7 +598,11 @@ safe_apply_mtu() {
                 return 0
             else
                 log_message "WARNING" "用户取消，回滚MTU设置"
-                restore_mtu_config "$backup_file"
+                if [ -f "$backup_file" ]; then
+                    restore_mtu_config "$backup_file"
+                else
+                    log_message "ERROR" "备份文件不存在，无法回滚"
+                fi
                 return 1
             fi
         else
