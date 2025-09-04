@@ -51,7 +51,7 @@ PROFILE=""
 AUTO_MODE=false
 DRY_RUN=false
 APPLY_CONFIG=false
-ROLLBACK=false
+RESTORE=false
 PERSIST=false
 
 # 设置安全的临时文件处理
@@ -933,7 +933,7 @@ MTU检测和优化工具 v$SCRIPT_VERSION
   --set <if> <mtu>     手动设置接口MTU
 
 安全选项:
-  --rollback           从备份恢复MTU设置
+  --restore            从备份恢复MTU设置
   --list-backups       列出可用的备份文件
   --persist            自动配置持久化（配合--set使用）
 
@@ -960,7 +960,7 @@ MTU检测和优化工具 v$SCRIPT_VERSION
   $0 --diagnose
   
   # 从备份恢复
-  $0 --rollback
+  $0 --restore
   
   # 列出备份文件
   $0 --list-backups
@@ -1125,7 +1125,7 @@ parse_arguments() {
                 PERSIST=true
                 shift
                 ;;
-            --rollback)
+            --restore)
                 echo "可用的备份文件:"
                 list_mtu_backups
                 if [ $? -eq 0 ]; then
