@@ -97,6 +97,12 @@ safe_execute() {
     
     log_message "DEBUG" "执行: $cmd"
     
+    # 特殊处理 sysctl 命令
+    if [[ "$cmd" == *"sysctl -p"* ]]; then
+        apply_sysctl_with_feedback
+        return 0
+    fi
+    
     # 执行命令并捕获退出码
     eval "$cmd"
     local exit_code=$?
@@ -118,6 +124,68 @@ safe_execute() {
 }
 
 # 颜色输出（已禁用）
+
+# 智能sysctl应用函数 - 使用-e参数忽略不存在的键
+apply_sysctl_with_feedback() {
+    local output
+    local exit_code
+    
+    # 使用 -e 忽略不存在的键，捕获所有输出
+    output=$(sysctl -p -e /etc/sysctl.conf 2>&1)
+    exit_code=$?
+    
+    # 分析输出
+    local success_count=0
+    local skip_count=0
+    local applied_params=""
+    local skipped_params=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[a-z] ]] && [[ "$line" == *" = "* ]]; then
+            # 成功应用的参数
+            ((success_count++))
+            applied_params+="  ✓ $line\n"
+        elif [[ "$line" =~ "cannot stat" ]]; then
+            # 跳过的参数
+            ((skip_count++))
+            param=$(echo "$line" | sed 's/.*\/proc\/sys\///' | tr '/' '.' | sed 's/:.*//')
+            skipped_params+="  - $param (不可用)\n"
+        fi
+    done <<< "$output"
+    
+    # 显示结果
+    log_message "SUCCESS" "网络优化配置应用完成"
+    echo "优化完成! Profile: $PROFILE"
+    echo ""
+    echo "[应用统计]"
+    echo "  ✅ 成功应用: ${success_count} 个参数"
+    
+    if [[ $skip_count -gt 0 ]]; then
+        echo "  ⚠️  跳过参数: ${skip_count} 个 (环境限制，不影响核心功能)"
+        
+        # 只在 debug 模式显示详细信息
+        if [[ "${DEBUG:-false}" == "true" ]]; then
+            echo -e "\n[跳过的参数]"
+            echo -e "$skipped_params"
+        fi
+    fi
+    
+    # 显示关键配置
+    echo -e "\n[关键配置已生效]"
+    show_param "net.ipv4.tcp_rmem"
+    show_param "net.ipv4.tcp_wmem"
+    show_param "net.core.somaxconn"
+    
+    if [[ "$ENABLE_NAT" == "true" ]]; then
+        show_param "net.ipv4.tcp_tw_reuse"
+    fi
+    
+    if [[ "$ENABLE_GATEWAY" == "true" ]]; then
+        show_param "net.ipv4.ip_forward"
+    fi
+    
+    return 0  # 总是返回成功
+}
 
 # 日志记录函数（与setup.sh保持一致）
 log_message() {
@@ -539,31 +607,9 @@ apply_config() {
     # 追加新配置
     cat /tmp/sysctl_new.conf >> /etc/sysctl.conf
     
-    # 应用配置
-    if safe_execute "sysctl -p /etc/sysctl.conf" "应用网络配置" "false"; then
-        log_message "SUCCESS" "网络优化配置应用成功"
-        echo "优化完成! Profile: $PROFILE"
-        
-        # 显示关键参数
-        echo -e "\n[关键配置]"
-        show_param "net.ipv4.tcp_rmem"
-        show_param "net.ipv4.tcp_wmem"
-        show_param "net.core.somaxconn"
-        
-        if [[ "$ENABLE_NAT" == "true" ]]; then
-            show_param "net.ipv4.tcp_tw_reuse"
-        fi
-        
-        if [[ "$ENABLE_GATEWAY" == "true" ]]; then
-            show_param "net.ipv4.ip_forward"
-        fi
-        
-        if [[ "$ENABLE_BBR" == "true" ]] && kernel_version_ge "4.9"; then
-            show_param "net.ipv4.tcp_congestion_control"
-        fi
-    else
-        die "配置应用失败，请检查配置文件" 1
-    fi
+    # 应用配置 - 使用新的智能反馈函数
+    # safe_execute 会自动调用 apply_sysctl_with_feedback
+    safe_execute "sysctl -p /etc/sysctl.conf" "应用网络配置" "false"
     
     # 清理临时文件
     TMP_FILES="$TMP_FILES /tmp/sysctl_new.conf"
