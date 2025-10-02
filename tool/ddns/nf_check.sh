@@ -456,7 +456,7 @@ IPV4_SERVICES=(
 get_current_ip() {
     local services=()
     local curl_flag=""
-    
+
     if [ "$IPv" = "6" ]; then
         services=("${IPV6_SERVICES[@]}")
         curl_flag="-6"
@@ -464,13 +464,27 @@ get_current_ip() {
         services=("${IPV4_SERVICES[@]}")
         curl_flag="-4"
     fi
-    
+
     for service in "${services[@]}"; do
         local ip
         if ip=$(curl $curl_flag -s --connect-timeout 5 --max-time 10 "$service" 2>/dev/null); then
             if [ -n "$ip" ]; then
-                echo "$ip"
-                return 0
+                # 验证是否为有效的 IP 地址格式
+                if [ "$IPv" = "6" ]; then
+                    # IPv6: 必须包含冒号
+                    if [[ "$ip" =~ : ]]; then
+                        echo "$ip"
+                        return 0
+                    fi
+                else
+                    # IPv4: 匹配 x.x.x.x 格式 (简单验证)
+                    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                        echo "$ip"
+                        return 0
+                    fi
+                fi
+                # 如果格式不对，记录到 stderr 并继续尝试下一个服务
+                echo "$(date): 警告: $service 返回了无效的IP格式: $ip" >&2
             fi
         fi
     done
