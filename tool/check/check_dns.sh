@@ -59,12 +59,12 @@ fi
 
 # DNS服务器列表
 DNS_SERVERS=(
-    "1.1.1.1|Cloudflare Primary"
-    "1.0.0.1|Cloudflare Secondary"
-    "8.8.8.8|Google Primary"
-    "8.8.4.4|Google Secondary"
-    "94.140.14.14|AdGuard DNS"
-    "94.140.15.15|AdGuard Secondary"
+    "1.1.1.1|Cloudflare-Primary"
+    "1.0.0.1|Cloudflare-Secondary"
+    "8.8.8.8|Google-Primary"
+    "8.8.4.4|Google-Secondary"
+    "94.140.14.14|AdGuard-DNS"
+    "94.140.15.15|AdGuard-Secondary"
     "9.9.9.9|Quad9"
     "208.67.222.222|OpenDNS"
 )
@@ -79,8 +79,8 @@ echo "  域名数量: ${#TEST_DOMAINS[@]}"
 echo "  每DNS测试: $((${#TEST_DOMAINS[@]} * TEST_COUNT)) 次"
 echo ""
 
-declare -A results
-declare -A details
+# 使用数组存储结果
+declare -a result_lines=()
 
 for dns_entry in "${DNS_SERVERS[@]}"; do
     IFS='|' read -r dns_ip dns_name <<< "$dns_entry"
@@ -120,11 +120,11 @@ for dns_entry in "${DNS_SERVERS[@]}"; do
         
         echo "  平均: ${avg_time}ms | 范围: ${min_time}-${max_time}ms | 成功率: ${success_rate}%"
         
-        results["$avg_time|$dns_name|$dns_ip"]="$avg_time"
-        details["$avg_time|$dns_name|$dns_ip"]="$min_time-${max_time}ms | ${success_rate}%"
+        # 格式化为9位数，便于排序
+        sort_key=$(printf "%09d" $avg_time)
+        result_lines+=("${sort_key}|${avg_time}|${dns_name}|${dns_ip}|${min_time}|${max_time}|${success_rate}")
     else
         echo "  所有查询失败"
-        results["999999|$dns_name|$dns_ip"]="999999"
     fi
     echo ""
 done
@@ -134,23 +134,19 @@ echo "   排名结果"
 echo "================================"
 echo ""
 
+# 排序并显示结果
 rank=1
-for key in $(printf '%s\n' "${!results[@]}" | sort -n); do
-    IFS='|' read -r avg_time dns_name dns_ip <<< "$key"
-    detail="${details[$key]}"
+while IFS='|' read -r sort_key avg_time dns_name dns_ip min_time max_time success_rate; do
+    echo "$rank. $dns_name ($dns_ip)"
+    echo "   平均: ${avg_time}ms | 范围: ${min_time}-${max_time}ms | 成功率: ${success_rate}%"
     
-    if [ "$avg_time" != "999999" ]; then
-        if [ $rank -eq 1 ]; then
-            echo "$rank. $dns_name ($dns_ip) - ${avg_time}ms"
-            echo "   $detail (推荐)"
-        else
-            echo "$rank. $dns_name ($dns_ip) - ${avg_time}ms"
-            echo "   $detail"
-        fi
-        ((rank++))
+    if [ $rank -eq 1 ]; then
+        echo "   (推荐使用)"
     fi
+    
     echo ""
-done
+    ((rank++))
+done < <(printf '%s\n' "${result_lines[@]}" | sort -n)
 
 echo "测试完成！"
 echo ""
