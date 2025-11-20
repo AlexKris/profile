@@ -141,23 +141,34 @@ download_snell() {
 check_port_available() {
     local port="$1"
     local port_check=""
+    local cmd_prefix=""
+
+    # 使用带进程信息的端口检查，若已由 Snell 占用则视为正常升级
+    if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then
+        cmd_prefix="sudo"
+    fi
     
     if command -v ss &>/dev/null; then
-        port_check=$(ss -tuln | grep ":${port} " || true)
+        port_check=$($cmd_prefix ss -tulnp 2>/dev/null | grep -E "[.:]${port}\\b" || true)
     elif command -v netstat &>/dev/null; then
-        port_check=$(netstat -tuln | grep ":${port} " || true)
+        port_check=$($cmd_prefix netstat -tulnp 2>/dev/null | grep -E "[.:]${port}\\b" || true)
     else
         log_warn "未找到 ss 或 netstat 命令，无法检查端口占用情况"
         return 0
     fi
     
-    if [ -n "$port_check" ]; then
-        log_warn "端口 ${port} 已被占用，可能导致服务无法启动:"
-        echo "$port_check"
-        return 1
+    if [ -z "$port_check" ]; then
+        return 0
+    fi
+
+    if echo "$port_check" | grep -qi "snell"; then
+        log_info "端口 ${port} 当前由 Snell 使用，视为覆盖升级将继续安装。"
+        return 0
     fi
     
-    return 0
+    log_warn "端口 ${port} 已被占用，可能导致服务无法启动:"
+    echo "$port_check"
+    return 1
 }
 
 # 配置 systemd 服务
