@@ -16,6 +16,8 @@ SSH_PORT="$DEFAULT_SSH_PORT"
 SSH_WHITELIST_IPS=""
 ENABLE_SSH_WHITELIST="false"
 DISABLE_ICMP="false"
+ICMP_METHOD="iptables"  # iptables 或 sysctl
+PING_WHITELIST_IPS=""
 SAVE_RULES="false"
 
 # 统一的日志函数（符合最佳实践）
@@ -258,23 +260,93 @@ configure_ssh_rules() {
     fi
 }
 
-# 配置 ICMP 规则
+# 配置 ICMP 规则（仅禁止 ping 响应，保留服务器 ping 外部能力）
 configure_icmp_rules() {
-    if [ "$DISABLE_ICMP" = "true" ]; then
-        log_message "INFO" "禁用 ICMP 协议..."
-        
-        # 禁用 ICMP
-        if ! iptables -C INPUT -p icmp -j DROP 2>/dev/null; then
-            iptables -A INPUT -p icmp -j DROP
-            log_message "INFO" "已禁用入站 ICMP"
-        fi
-        
-        if ! iptables -C OUTPUT -p icmp -j DROP 2>/dev/null; then
-            iptables -A OUTPUT -p icmp -j DROP
-            log_message "INFO" "已禁用出站 ICMP"
-        fi
+    if [ "$DISABLE_ICMP" != "true" ]; then
+        log_message "INFO" "ICMP ping 响应保持默认配置"
+        return
+    fi
+
+    log_message "INFO" "禁用 ICMP ping 响应 (方式: $ICMP_METHOD)..."
+
+    case "$ICMP_METHOD" in
+        sysctl)
+            configure_icmp_sysctl
+            ;;
+        iptables)
+            configure_icmp_iptables
+            ;;
+        *)
+            log_message "ERROR" "未知的 ICMP 禁用方式: $ICMP_METHOD"
+            exit 1
+            ;;
+    esac
+}
+
+# sysctl 方式禁用 ping（内核层，更高效）
+configure_icmp_sysctl() {
+    local sysctl_conf="/etc/sysctl.conf"
+    local ipv4_param="net.ipv4.icmp_echo_ignore_all"
+
+    # 立即生效
+    if sysctl -w "${ipv4_param}=1" >/dev/null 2>&1; then
+        log_message "INFO" "已通过 sysctl 禁用 IPv4 ping 响应"
     else
-        log_message "INFO" "ICMP 协议保持默认配置"
+        log_message "ERROR" "sysctl 设置失败"
+        return 1
+    fi
+
+    # 持久化配置
+    if grep -q "^${ipv4_param}" "$sysctl_conf" 2>/dev/null; then
+        sed -i "s/^${ipv4_param}.*/${ipv4_param} = 1/" "$sysctl_conf"
+    else
+        echo "${ipv4_param} = 1" >> "$sysctl_conf"
+    fi
+    log_message "INFO" "sysctl 配置已持久化到 $sysctl_conf"
+
+    # IPv6 (如果支持)
+    if [ -f /proc/sys/net/ipv6/icmp/echo_ignore_all ]; then
+        sysctl -w net.ipv6.icmp.echo_ignore_all=1 >/dev/null 2>&1
+        if grep -q "^net.ipv6.icmp.echo_ignore_all" "$sysctl_conf" 2>/dev/null; then
+            sed -i "s/^net.ipv6.icmp.echo_ignore_all.*/net.ipv6.icmp.echo_ignore_all = 1/" "$sysctl_conf"
+        else
+            echo "net.ipv6.icmp.echo_ignore_all = 1" >> "$sysctl_conf"
+        fi
+        log_message "INFO" "已通过 sysctl 禁用 IPv6 ping 响应"
+    fi
+}
+
+# iptables 方式禁用 ping（支持白名单，更灵活）
+configure_icmp_iptables() {
+    # 如果有白名单，先添加白名单规则
+    if [ -n "$PING_WHITELIST_IPS" ]; then
+        log_message "INFO" "配置 ping 白名单..."
+        IFS=',' read -ra IPS <<< "$PING_WHITELIST_IPS"
+        for ip in "${IPS[@]}"; do
+            ip=$(echo "$ip" | xargs)
+            if validate_ip "$ip"; then
+                if ! iptables -C INPUT -s "$ip" -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null; then
+                    iptables -I INPUT 1 -s "$ip" -p icmp --icmp-type echo-request -j ACCEPT
+                    log_message "INFO" "添加 ping 白名单: $ip"
+                fi
+            else
+                log_message "WARNING" "跳过无效 IP: $ip"
+            fi
+        done
+    fi
+
+    # IPv4: 禁止入站 ping 请求（echo-request）
+    if ! iptables -C INPUT -p icmp --icmp-type echo-request -j DROP 2>/dev/null; then
+        iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
+        log_message "INFO" "已禁用 IPv4 ping 响应"
+    fi
+
+    # IPv6: 同样禁止入站 ping 请求
+    if command -v ip6tables &>/dev/null; then
+        if ! ip6tables -C INPUT -p icmpv6 --icmpv6-type echo-request -j DROP 2>/dev/null; then
+            ip6tables -A INPUT -p icmpv6 --icmpv6-type echo-request -j DROP
+            log_message "INFO" "已禁用 IPv6 ping 响应"
+        fi
     fi
 }
 
@@ -388,6 +460,18 @@ parse_args() {
                 DISABLE_ICMP="true"
                 shift
                 ;;
+            --icmp-method)
+                ICMP_METHOD="$2"
+                if [[ "$ICMP_METHOD" != "iptables" && "$ICMP_METHOD" != "sysctl" ]]; then
+                    log_message "ERROR" "无效的 ICMP 方式: $ICMP_METHOD (可选: iptables, sysctl)"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --ping-whitelist)
+                PING_WHITELIST_IPS="$2"
+                shift 2
+                ;;
             --save-rules)
                 SAVE_RULES="true"
                 shift
@@ -416,17 +500,21 @@ show_help() {
     echo "选项:"
     echo "  --ssh-port PORT           设置 SSH 端口 (默认: $DEFAULT_SSH_PORT)"
     echo "  --ssh-whitelist IPS       设置 SSH IP 白名单 (逗号分隔)"
-    echo "  --disable-icmp            禁用 ICMP 协议"
+    echo "  --disable-icmp            禁用 ping 响应"
+    echo "  --icmp-method METHOD      禁用方式: iptables(默认,支持白名单) 或 sysctl(内核层,更高效)"
+    echo "  --ping-whitelist IPS      ping 白名单 (仅 iptables 方式有效,逗号分隔)"
     echo "  --save-rules              保存防火墙规则"
     echo "  --status                  显示当前状态"
     echo "  --help                    显示此帮助信息"
     echo ""
     echo "示例:"
-    echo "  $0 --ssh-port 2022                    # 设置 SSH 端口"
-    echo "  $0 --ssh-whitelist \"1.2.3.4,5.6.7.8\" # 设置 SSH 白名单"
-    echo "  $0 --ssh-port 22 --disable-icmp       # 配置 SSH 并禁用 ICMP"
-    echo "  $0 --save-rules                       # 保存当前规则"
-    echo "  $0 --status                           # 查看状态"
+    echo "  $0 --ssh-port 2022                                  # 设置 SSH 端口"
+    echo "  $0 --ssh-whitelist \"1.2.3.4,5.6.7.8\"                # 设置 SSH 白名单"
+    echo "  $0 --disable-icmp                                   # 禁用 ping (iptables 方式)"
+    echo "  $0 --disable-icmp --icmp-method sysctl              # 禁用 ping (sysctl 方式,更高效)"
+    echo "  $0 --disable-icmp --ping-whitelist \"10.0.0.1\"       # 禁用 ping 但允许特定 IP"
+    echo "  $0 --save-rules                                     # 保存当前规则"
+    echo "  $0 --status                                         # 查看状态"
     echo ""
     echo "版本: $SCRIPT_VERSION"
 }
@@ -464,7 +552,7 @@ main() {
     echo "配置摘要:"
     echo "  SSH 端口: $SSH_PORT"
     [ "$ENABLE_SSH_WHITELIST" = "true" ] && echo "  SSH 白名单: 已启用"
-    [ "$DISABLE_ICMP" = "true" ] && echo "  ICMP: 已禁用"
+    [ "$DISABLE_ICMP" = "true" ] && echo "  ICMP: 已禁用 ($ICMP_METHOD 方式)"
     [ "$SAVE_RULES" = "true" ] && echo "  规则保存: 已执行"
     echo ""
 }
