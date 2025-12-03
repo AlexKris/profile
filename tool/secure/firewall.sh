@@ -12,9 +12,10 @@ readonly LOG_FILE="/var/log/firewall_config.log"
 readonly DEFAULT_SSH_PORT="22"
 
 # 脚本参数
-SSH_PORT="$DEFAULT_SSH_PORT"
+SSH_PORT=""
 SSH_WHITELIST_IPS=""
 ENABLE_SSH_WHITELIST="false"
+CONFIGURE_SSH="false"
 DISABLE_ICMP="false"
 ICMP_METHOD="iptables"  # iptables 或 sysctl
 PING_WHITELIST_IPS=""
@@ -444,6 +445,7 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --ssh-port)
+                CONFIGURE_SSH="true"
                 SSH_PORT="$2"
                 if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [ "$SSH_PORT" -lt 1 ] || [ "$SSH_PORT" -gt 65535 ]; then
                     log_message "ERROR" "无效的 SSH 端口: $SSH_PORT"
@@ -452,6 +454,7 @@ parse_args() {
                 shift 2
                 ;;
             --ssh-whitelist)
+                CONFIGURE_SSH="true"
                 ENABLE_SSH_WHITELIST="true"
                 SSH_WHITELIST_IPS="$2"
                 shift 2
@@ -533,12 +536,17 @@ main() {
     parse_args "$@"
     
     log_message "INFO" "开始配置防火墙..."
-    
-    # 配置 SSH 规则
-    configure_ssh_rules
-    
+
+    # 配置 SSH 规则（仅在指定相关参数时）
+    if [ "$CONFIGURE_SSH" = "true" ]; then
+        [ -z "$SSH_PORT" ] && SSH_PORT="$DEFAULT_SSH_PORT"
+        configure_ssh_rules
+    fi
+
     # 配置 ICMP 规则
-    configure_icmp_rules
+    if [ "$DISABLE_ICMP" = "true" ]; then
+        configure_icmp_rules
+    fi
     
     # 保存规则（如果指定）
     if [ "$SAVE_RULES" = "true" ]; then
@@ -550,7 +558,7 @@ main() {
     # 显示配置摘要
     echo ""
     echo "配置摘要:"
-    echo "  SSH 端口: $SSH_PORT"
+    [ "$CONFIGURE_SSH" = "true" ] && echo "  SSH 端口: $SSH_PORT"
     [ "$ENABLE_SSH_WHITELIST" = "true" ] && echo "  SSH 白名单: 已启用"
     [ "$DISABLE_ICMP" = "true" ] && echo "  ICMP: 已禁用 ($ICMP_METHOD 方式)"
     [ "$SAVE_RULES" = "true" ] && echo "  规则保存: 已执行"
