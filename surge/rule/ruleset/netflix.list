@@ -1,0 +1,14 @@
+# Netflix Domains
+DOMAIN-SUFFIX,netflix.com
+DOMAIN-SUFFIX,netflix.net
+DOMAIN-SUFFIX,nflxext.com
+DOMAIN-SUFFIX,nflximg.com
+DOMAIN-SUFFIX,nflxvideo.net
+DOMAIN-SUFFIX,nflxso.net
+DOMAIN-SUFFIX,nflxsearch.net
+
+# Netflix Test Domains
+DOMAIN-KEYWORD,netflixdnstest
+
+# Netflix App (Android / iOS)
+PROCESS-NAME,com.netflix.mediaclient
