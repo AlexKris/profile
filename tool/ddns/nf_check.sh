@@ -493,6 +493,14 @@ get_current_ip() {
 
 # 主要检测逻辑
 main() {
+    # 进程锁，防止重复执行
+    local LOCK_FILE="/tmp/nf_check.lock"
+    exec 200>"$LOCK_FILE"
+    if ! flock -n 200; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $VM 另一个实例正在运行，跳过本次执行" | tee -a "$log"
+        exit 0
+    fi
+
     local current_time=$(date +"%Y-%m-%d %H:%M:%S")
     local current_ip
     current_ip=$(get_current_ip)
