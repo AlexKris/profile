@@ -4,7 +4,10 @@
 set -uo pipefail
 
 # 脚本版本
-readonly SCRIPT_VERSION="2.1.3"
+readonly SCRIPT_VERSION="2.2.0"
+
+# 已测试的Debian版本
+readonly TESTED_DEBIAN_VERSIONS="11 12 13"  # bullseye, bookworm, trixie
 
 # 脚本常量 - 集中配置
 readonly DEFAULT_SSH_PORT="22"
@@ -191,8 +194,29 @@ check_compatibility() {
     # 检查操作系统类型
     if [ -f /etc/debian_version ]; then
         OS_TYPE="debian"
-        OS_VERSION=$(cat /etc/debian_version)
-        log_message "INFO" "检测到Debian/Ubuntu系统 (版本: $OS_VERSION)"
+        local raw_version=$(cat /etc/debian_version)
+
+        # 解析版本号：支持 "13.0", "trixie/sid", "bookworm/sid" 等格式
+        if [[ "$raw_version" =~ ^([0-9]+) ]]; then
+            OS_VERSION="${BASH_REMATCH[1]}"
+        elif [[ "$raw_version" =~ trixie ]]; then
+            OS_VERSION="13"
+        elif [[ "$raw_version" =~ bookworm ]]; then
+            OS_VERSION="12"
+        elif [[ "$raw_version" =~ bullseye ]]; then
+            OS_VERSION="11"
+        elif [[ "$raw_version" =~ buster ]]; then
+            OS_VERSION="10"
+        else
+            OS_VERSION="$raw_version"
+        fi
+
+        log_message "INFO" "检测到Debian/Ubuntu系统 (版本: $OS_VERSION, 原始: $raw_version)"
+
+        # 检查是否为已测试版本
+        if ! echo "$TESTED_DEBIAN_VERSIONS" | grep -qw "$OS_VERSION"; then
+            log_message "WARNING" "Debian $OS_VERSION 尚未经过完整测试，可能存在兼容性问题"
+        fi
     elif [ -f /etc/redhat-release ]; then
         OS_TYPE="redhat"
         OS_VERSION=$(cat /etc/redhat-release)
@@ -254,6 +278,7 @@ usage() {
     echo "  $0 --install_docker --region cn"
     echo "  $0 --create_user admin --ssh_key \"ssh-rsa AAAA...\" --disable_root_login --disable_ssh_pwd"
     echo ""
+    echo "支持的系统: Debian 11/12/13, Ubuntu 20.04+, RHEL/CentOS 7+"
     echo "脚本版本: $SCRIPT_VERSION"
 }
 
@@ -353,6 +378,46 @@ parse_args() {
 }
 
 # ==================== APT包管理函数 ====================
+
+# 检查软件包是否可用
+check_package_available() {
+    local package="$1"
+    apt-cache show "$package" >/dev/null 2>&1
+}
+
+# 获取兼容的软件包名（处理不同Debian版本的包名差异）
+get_compatible_package() {
+    local package="$1"
+    case "$package" in
+        netcat-openbsd)
+            # Debian 13 仍使用 netcat-openbsd，但添加备选
+            if check_package_available "netcat-openbsd"; then
+                echo "netcat-openbsd"
+            elif check_package_available "netcat"; then
+                echo "netcat"
+            else
+                log_message "WARNING" "netcat 相关包不可用"
+                echo ""
+            fi
+            ;;
+        *)
+            echo "$package"
+            ;;
+    esac
+}
+
+# 解析并获取兼容的软件包列表
+get_compatible_packages() {
+    local packages="$1"
+    local result=""
+    for pkg in $packages; do
+        local compatible_pkg=$(get_compatible_package "$pkg")
+        if [ -n "$compatible_pkg" ]; then
+            result="$result $compatible_pkg"
+        fi
+    done
+    echo "$result" | xargs  # 去除多余空格
+}
 
 # 带重试机制的apt安装函数
 apt_install_with_retry() {
