@@ -253,7 +253,7 @@ usage() {
     echo "  --port PORT               设置SSH端口号 (例如: --port 2222)"
     echo "  --ssh_key KEY             设置SSH公钥 (直接输入公钥文本)"
     echo "  --region REGION           指定服务器所在地区，用于选择NTP服务器"
-    echo "                            (cn|hk|tw|jp|sg|us|eu|asia，默认: asia)"
+    echo "                            (auto|cn|hk|tw|jp|kr|sg|us|eu|asia，默认: asia)"
     echo "  --ntp_service SERVICE     指定NTP服务（auto|timesyncd|chrony，默认: auto）"
     echo "  --version                 显示脚本版本"
     echo "  --create_user USERNAME    创建管理员用户（必须提供SSH密钥）"
@@ -267,6 +267,7 @@ usage() {
     echo "  hk   - 香港"
     echo "  tw   - 台湾"
     echo "  jp   - 日本"
+    echo "  kr   - 韩国"
     echo "  sg   - 新加坡"
     echo "  us   - 美国"
     echo "  eu   - 欧洲"
@@ -280,6 +281,33 @@ usage() {
     echo ""
     echo "支持的系统: Debian 11/12/13, Ubuntu 20.04+, RHEL/CentOS 7+"
     echo "脚本版本: $SCRIPT_VERSION"
+}
+
+# 自动检测服务器地区
+detect_region() {
+    local country_code
+
+    # 尝试多个 API 以提高可靠性
+    country_code=$(curl -s --max-time 5 "http://ip-api.com/line/?fields=countryCode" 2>/dev/null)
+
+    # 如果第一个 API 失败，尝试备用
+    if [ -z "$country_code" ] || [ ${#country_code} -ne 2 ]; then
+        country_code=$(curl -s --max-time 5 "https://ifconfig.co/country-iso" 2>/dev/null)
+    fi
+
+    # 映射国家代码到地区
+    case "$country_code" in
+        CN) echo "cn" ;;
+        HK) echo "hk" ;;
+        TW) echo "tw" ;;
+        JP) echo "jp" ;;
+        KR) echo "kr" ;;
+        SG) echo "sg" ;;
+        US) echo "us" ;;
+        GB|DE|FR|NL|IT|ES|PL|SE|NO|FI|DK|CH|AT|BE|IE|PT|CZ|RO|HU|GR)
+            echo "eu" ;;
+        *) echo "asia" ;;  # 默认 fallback
+    esac
 }
 
 # 解析参数
@@ -311,7 +339,11 @@ parse_args() {
                     exit 1
                 fi
                 case "$2" in
-                    cn|hk|tw|jp|sg|us|eu|asia)
+                    auto)
+                        SERVER_REGION=$(detect_region)
+                        log_message "INFO" "自动检测地区: $SERVER_REGION"
+                        ;;
+                    cn|hk|tw|jp|kr|sg|us|eu|asia)
                         SERVER_REGION="$2"
                         ;;
                     *)
@@ -1292,6 +1324,7 @@ configure_timezone_ntp() {
         hk) ntp_server="hk.pool.ntp.org" ;;
         tw) ntp_server="tw.pool.ntp.org" ;;
         jp) ntp_server="jp.pool.ntp.org" ;;
+        kr) ntp_server="kr.pool.ntp.org" ;;
         sg) ntp_server="sg.pool.ntp.org" ;;
         us) ntp_server="us.pool.ntp.org" ;;
         eu) ntp_server="europe.pool.ntp.org" ;;
@@ -1643,7 +1676,7 @@ show_summary() {
         echo "  状态: $(systemctl is-active docker)"
     fi
     
-    [ "$CREATE_DEVOPS_USER" = "true" ] && echo "\n管理员用户: $SUDO_USERNAME (已创建)"
+    [ "$CREATE_DEVOPS_USER" = "true" ] && echo -e "\n管理员用户: $SUDO_USERNAME (已创建)"
     
     echo "--------------------------------------------------"
     echo "日志文件: $LOG_FILE"
