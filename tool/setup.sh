@@ -475,7 +475,7 @@ apt_install_with_retry() {
         
         # 尝试安装包
         log_message "INFO" "尝试安装包: $packages (第 $((retry_count + 1)) 次)"
-        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $packages; then
+        if sudo apt-get install -y $packages; then
             log_message "INFO" "包安装成功: $packages"
             return 0
         else
@@ -641,7 +641,7 @@ fix_sudo_issue() {
                 log_message "ERROR" "等待apt锁失败，无法安装sudo"
                 return 1
             fi
-            apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+            apt-get update -y && apt-get install -y sudo
         else
             yum install -y sudo || dnf install -y sudo
         fi
@@ -672,7 +672,6 @@ update_system_install_dependencies() {
         
         # 阶段2：执行系统更新（允许部分失败但要记录）
         log_message "DEBUG" "系统更新 - 执行系统更新"
-        export DEBIAN_FRONTEND=noninteractive
         
         # 更新软件包列表（关键步骤）
         if ! safe_execute "sudo apt-get update -y" "更新软件包列表"; then
@@ -707,12 +706,7 @@ update_system_install_dependencies() {
         # 阶段4：安装可选软件包（失败不影响主流程）
         log_message "DEBUG" "系统更新 - 安装可选软件包"
         log_message "INFO" "安装iperf3..."
-        
-        # 预设配置避免交互
-        if ! echo 'iperf3 iperf3/autostart boolean false' | sudo debconf-set-selections; then
-            log_message "WARNING" "iperf3预配置失败"
-        fi
-        
+
         if ! apt_install_with_retry "iperf3"; then
             check_error $? "iperf3安装" "网络测试工具，非必需"
             log_message "WARNING" "iperf3安装失败，但不影响主要功能"
