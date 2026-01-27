@@ -1128,6 +1128,13 @@ EOF
 
 # 验证并重启SSH服务
 validate_and_restart_ssh() {
+    # 确保sshd特权分离目录存在（某些云镜像或容器中可能缺失）
+    if [ ! -d /run/sshd ]; then
+        log_message "INFO" "创建SSH特权分离目录 /run/sshd"
+        sudo mkdir -p /run/sshd
+        sudo chmod 0755 /run/sshd
+    fi
+
     # 测试SSH配置
     if ! sudo sshd -t; then
         log_message "ERROR" "SSH配置测试失败，正在还原配置..."
