@@ -273,10 +273,18 @@ start_service() {
     cd "${DOCKER_DIR}"
     docker compose down 2>/dev/null || true
     docker compose up -d
-    sleep 2
 
-    docker ps | grep -q smartdns || { log ERR "SmartDNS 启动失败，请检查日志: docker logs smartdns"; exit 1; }
-    log OK "SmartDNS 启动成功"
+    local i
+    for i in $(seq 1 15); do
+        if docker compose ps --format json 2>/dev/null | grep -q '"running"'; then
+            log OK "SmartDNS 启动成功"
+            return
+        fi
+        sleep 1
+    done
+
+    log ERR "SmartDNS 在 15s 内未就绪，请检查: docker compose -f ${DOCKER_DIR}/docker-compose.yaml ps"
+    exit 1
 }
 
 verify_deployment() {
