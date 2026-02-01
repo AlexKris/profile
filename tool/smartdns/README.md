@@ -17,6 +17,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/AlexKris/profile/main/tool/s
 
 # DNS 缓存 + 流媒体分流
 bash <(curl -fsSL https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh) -d
+
+bash <(curl -fsSL https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh) -d -u 22.22.22.22
 ```
 
 ## 参数说明
