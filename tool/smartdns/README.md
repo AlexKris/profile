@@ -13,12 +13,10 @@
 
 ```bash
 # 纯 DNS 缓存
-bash <(curl -fsSL https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh)
+bash <(curl -fsSL "https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh?$(date +%s)")
 
 # DNS 缓存 + 流媒体分流
-bash <(curl -fsSL https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh) -d
-
-bash <(curl -fsSL https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh) -d -u 22.22.22.22
+bash <(curl -fsSL "https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh?$(date +%s)") -d -u 22.22.22.22
 ```
 
 ## 参数说明
