@@ -223,7 +223,11 @@ update_nginx_realip() {
         echo ""
         while IFS= read -r ip; do
             [ -z "$ip" ] && continue
-            echo "set_real_ip_from ${ip};"
+            # 只写入合法的 IP/CIDR（跳过 log_message 混入的日志行）
+            if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]] || \
+               [[ "$ip" =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$ ]]; then
+                echo "set_real_ip_from ${ip};"
+            fi
         done <<< "$cf_ips"
         echo ""
         echo "real_ip_header CF-Connecting-IP;"
