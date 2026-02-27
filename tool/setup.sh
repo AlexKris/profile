@@ -935,8 +935,8 @@ analyze_ssh_environment() {
         log_message "INFO" "root用户已配置SSH密钥"
     fi
     
-    # 决定是否可以禁用root登录
-    if [ "$has_sudo_user" = "true" ] || ([ "$has_root_ssh_key" = "true" ] && [ "$DISABLE_SSH_PASSWD" = "true" ]); then
+    # 决定是否可以完全禁用root登录（仅当有其他sudo用户时才安全）
+    if [ "$has_sudo_user" = "true" ]; then
         can_disable_root="true"
     fi
     
@@ -954,8 +954,8 @@ configure_ssh_authentication() {
     
     # 处理root登录设置
     if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
-        # 用户明确要求禁用root登录
-        if [ "$SSH_ENV_HAS_SUDO_USER" = "true" ] || [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ] || [ "$CREATE_DEVOPS_USER" = "true" ]; then
+        # 用户明确要求禁用root登录（必须有其他用户能登录）
+        if [ "$SSH_ENV_HAS_SUDO_USER" = "true" ] || [ "$CREATE_DEVOPS_USER" = "true" ]; then
             log_message "INFO" "根据用户要求禁用root登录"
             sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
             grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
@@ -986,9 +986,24 @@ configure_ssh_authentication() {
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
         local can_disable_password="false"
         
-        # 检查是否有SSH密钥配置
-        if [ "$SSH_ENV_HAS_SUDO_USER" = "true" ] || [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ] || [ -n "$SSH_KEY" ]; then
+        # 检查是否有SSH密钥配置（必须确认有用户能通过密钥登录）
+        if [ -n "$SSH_KEY" ] || [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ]; then
+            # 本次运行提供了密钥 或 root已有密钥
             can_disable_password="true"
+        elif [ "$SSH_ENV_HAS_SUDO_USER" = "true" ]; then
+            # 有sudo用户，但需验证至少有一个用户配置了SSH密钥
+            local has_key_user="false"
+            for keyfile in /home/*/.ssh/authorized_keys; do
+                if [ -f "$keyfile" ] && [ -s "$keyfile" ]; then
+                    has_key_user="true"
+                    break
+                fi
+            done
+            if [ "$has_key_user" = "true" ]; then
+                can_disable_password="true"
+            else
+                log_message "WARNING" "存在sudo用户但未检测到SSH密钥，无法安全禁用密码登录"
+            fi
         fi
         
         if [ "$can_disable_password" = "true" ]; then
@@ -1053,6 +1068,19 @@ handle_ssh_config_dir() {
         # 创建99-security.conf以确保我们的配置优先级最高
         log_message "INFO" "创建SSH安全配置覆盖文件"
         
+        # 先从sshd_config中捕获configure_ssh_authentication刚设置的值（必须在注释掉之前）
+        local effective_port="${SSH_PORT:-$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')}"
+        effective_port="${effective_port:-22}"
+
+        local current_permit_root
+        current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
+        current_permit_root="${current_permit_root:-yes}"
+
+        # 如果用户明确设置了--disable_root_login，确保覆盖
+        if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
+            current_permit_root="no"
+        fi
+
         # 从主配置文件中移除我们要管理的配置项，避免冲突
         if [ -n "$SSH_PORT" ] || [ "$DISABLE_SSH_PASSWD" = "true" ]; then
             log_message "INFO" "清理主配置文件中的冲突设置"
@@ -1068,22 +1096,6 @@ handle_ssh_config_dir() {
             sudo sed -i 's/^ClientAliveCountMax/#ClientAliveCountMax/' "$SSH_CONFIG"
             sudo sed -i 's/^UseDNS/#UseDNS/' "$SSH_CONFIG"
             sudo sed -i 's/^Protocol/#Protocol/' "$SSH_CONFIG"
-        fi
-        
-        # 读取当前有效的配置值
-        local current_port=$(sshd -T 2>/dev/null | grep "^port" | awk '{print $2}' || echo "22")
-        local effective_port="${SSH_PORT:-$current_port}"
-        
-        # 获取当前的PermitRootLogin设置
-        local current_permit_root=$(sshd -T 2>/dev/null | grep "^permitrootlogin" | awk '{print $2}' || echo "yes")
-        # 如果主配置文件中有明确设置，使用该设置
-        if grep -q "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null; then
-            current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" | awk '{print $2}')
-        fi
-        
-        # 如果用户明确设置了--disable_root_login，确保在99-security.conf中也体现
-        if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
-            current_permit_root="no"
         fi
         
         sudo tee "$SSH_CONFIG_DIR/99-security.conf" > /dev/null << EOF
@@ -1130,11 +1142,20 @@ EOF
     fi
 }
 
-# 从备份恢复SSH配置
+# 从备份恢复SSH配置（包括sshd_config.d目录）
 restore_ssh_config_from_backup() {
     local backup_file="$CONFIG_BACKUP_DIR/sshd_config.$TIMESTAMP.bak"
+    local backup_dir="$CONFIG_BACKUP_DIR/sshd_config.d.$TIMESTAMP"
     if [ -f "$backup_file" ]; then
         sudo cp "$backup_file" "$SSH_CONFIG"
+        # 恢复sshd_config.d目录
+        if [ -d "$backup_dir" ]; then
+            sudo cp -r "$backup_dir"/* "$SSH_CONFIG_DIR/" 2>/dev/null || true
+        fi
+        # 如果备份中没有99-security.conf但当前存在，则删除（说明是本次创建的）
+        if [ ! -f "$backup_dir/99-security.conf" ] && [ -f "$SSH_CONFIG_DIR/99-security.conf" ]; then
+            sudo rm -f "$SSH_CONFIG_DIR/99-security.conf"
+        fi
         log_message "INFO" "已从备份恢复SSH配置: $backup_file"
         return 0
     else
@@ -1169,8 +1190,12 @@ validate_and_restart_ssh() {
     # 等待SSH服务启动
     sleep 2
     
-    # 验证SSH服务状态
-    local ssh_port="${SSH_PORT:-22}"
+    # 验证SSH服务状态（从实际配置文件读取端口，而非依赖命令行参数）
+    local ssh_port
+    ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
+        || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
+        || ssh_port="22"
+    ssh_port="${ssh_port:-22}"
     if sudo ss -tlnp | grep -q ":$ssh_port"; then
         log_message "INFO" "SSH服务正在监听端口 $ssh_port"
     else
