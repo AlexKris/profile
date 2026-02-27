@@ -600,12 +600,13 @@ main() {
                 api_retry_count=$((api_retry_count + 1))
                 echo "${current_time} ${VM} 调用更换IP接口 (第${api_retry_count}次尝试)" | tee -a "$log"
                 
-                # 使用curl调用API，设置超时时间
-                if change_result=$(curl -s --connect-timeout 10 --max-time 30 "${change_target}" 2>&1); then
-                    # 检查HTTP状态码
-                    local http_code
-                    http_code=$(curl -s --connect-timeout 10 --max-time 30 -w "%{http_code}" -o /dev/null "${change_target}" 2>/dev/null)
-                    
+                # 使用curl调用API，一次请求同时获取响应体和状态码
+                local raw_response
+                if raw_response=$(curl -s --connect-timeout 10 --max-time 30 -w "\n%{http_code}" "${change_target}" 2>&1); then
+                    # 分离状态码（最后一行）和响应体
+                    local http_code="${raw_response##*$'\n'}"
+                    change_result="${raw_response%$'\n'*}"
+
                     if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
                         echo "${current_time} ${VM} API调用成功 (HTTP $http_code): $change_result" | tee -a "$log"
                         api_success=true
@@ -613,6 +614,7 @@ main() {
                         echo "${current_time} ${VM} API返回错误状态码 (HTTP $http_code): $change_result" | tee -a "$log"
                     fi
                 else
+                    change_result="$raw_response"
                     echo "${current_time} ${VM} API调用失败: $change_result" | tee -a "$log"
                 fi
                 
