@@ -53,6 +53,10 @@ ENABLE_SECURITY_AUDIT="false"  # 默认禁用安全审计
 INSTALL_DOCKER="false"
 # 新增：控制是否禁用root登录
 DISABLE_ROOT_LOGIN="false"
+# SSH环境分析结果（analyze_ssh_environment填充）
+SSH_ENV_HAS_SUDO_USER="false"
+SSH_ENV_HAS_ROOT_KEY="false"
+SSH_ENV_CAN_DISABLE_ROOT="false"
 
 # 设置安全的临时文件处理
 cleanup() {
@@ -105,11 +109,14 @@ safe_execute() {
     local cmd="$1"
     local description="${2:-执行命令}"
     local fatal="${3:-false}"
-    
+
     log_message "DEBUG" "执行: $cmd"
-    
-    if ! eval "$cmd"; then
-        local exit_code=$?
+
+    local exit_code
+    eval "$cmd"
+    exit_code=$?
+
+    if [ $exit_code -ne 0 ]; then
         if [ "$fatal" = "true" ]; then
             die "$description 失败" "$exit_code"
         else
@@ -117,7 +124,7 @@ safe_execute() {
             return "$exit_code"
         fi
     fi
-    
+
     log_message "DEBUG" "$description 成功"
     return 0
 }
@@ -912,16 +919,13 @@ analyze_ssh_environment() {
     
     # 检查是否有其他sudo用户
     if [ "$has_sudo_user" = "false" ]; then
-        if [ "$OS_TYPE" = "debian" ]; then
-            if getent group sudo | grep -q ":"; then
-                has_sudo_user="true"
-                log_message "INFO" "系统中存在其他sudo用户"
-            fi
-        else
-            if getent group wheel | grep -q ":"; then
-                has_sudo_user="true"
-                log_message "INFO" "系统中存在其他wheel用户"
-            fi
+        local priv_group
+        if [ "$OS_TYPE" = "debian" ]; then priv_group="sudo"; else priv_group="wheel"; fi
+        local members
+        members=$(getent group "$priv_group" 2>/dev/null | awk -F: '{print $4}')
+        if [ -n "$members" ]; then
+            has_sudo_user="true"
+            log_message "INFO" "系统中存在其他${priv_group}用户: $members"
         fi
     fi
     
@@ -1126,6 +1130,19 @@ EOF
     fi
 }
 
+# 从备份恢复SSH配置
+restore_ssh_config_from_backup() {
+    local backup_file="$CONFIG_BACKUP_DIR/sshd_config.$TIMESTAMP.bak"
+    if [ -f "$backup_file" ]; then
+        sudo cp "$backup_file" "$SSH_CONFIG"
+        log_message "INFO" "已从备份恢复SSH配置: $backup_file"
+        return 0
+    else
+        log_message "ERROR" "未找到SSH配置备份文件: $backup_file"
+        return 1
+    fi
+}
+
 # 验证并重启SSH服务
 validate_and_restart_ssh() {
     # 确保sshd特权分离目录存在（某些云镜像或容器中可能缺失）
@@ -1137,9 +1154,7 @@ validate_and_restart_ssh() {
 
     # 测试SSH配置
     if ! sudo sshd -t; then
-        log_message "ERROR" "SSH配置测试失败，正在还原配置..."
-        sudo cp "$CONFIG_BACKUP_DIR/sshd_config.$TIMESTAMP.bak" "$SSH_CONFIG"
-        log_message "ERROR" "SSH配置已还原，请检查配置后重试"
+        log_message "ERROR" "SSH配置测试失败"
         return 1
     fi
     
@@ -1170,7 +1185,12 @@ validate_and_restart_ssh() {
 display_ssh_status() {
     log_message "INFO" "SSH配置完成"
     log_message "INFO" "当前SSH配置状态："
-    log_message "INFO" "  端口: $(grep "^Port" "$SSH_CONFIG" 2>/dev/null || echo "22")"
+    local ssh_port
+    ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
+        || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
+        || ssh_port="22"
+    ssh_port="${ssh_port:-22}"
+    log_message "INFO" "  端口: $ssh_port"
     log_message "INFO" "  密码认证: $(grep "^PasswordAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PasswordAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
     log_message "INFO" "  公钥认证: $(grep "^PubkeyAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PubkeyAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
     log_message "INFO" "  Root登录: $(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
@@ -1242,12 +1262,12 @@ configure_ssh() {
         log_message "INFO" "尝试恢复SSH配置..."
         
         # 尝试恢复备份配置
-        if [ -f "${SSH_CONFIG}.backup" ]; then
-            log_message "INFO" "恢复SSH配置备份"
-            sudo cp "${SSH_CONFIG}.backup" "$SSH_CONFIG" && \
-            sudo systemctl restart sshd && \
-            log_message "SUCCESS" "SSH配置已恢复到备份状态" || \
-            log_message "ERROR" "SSH配置恢复失败，需要手动检查"
+        if restore_ssh_config_from_backup; then
+            if sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null; then
+                log_message "SUCCESS" "SSH配置已恢复到备份状态"
+            else
+                log_message "ERROR" "SSH配置恢复失败，需要手动检查"
+            fi
         fi
         
         return 1
@@ -1348,7 +1368,10 @@ configure_timezone_ntp() {
             fi
             sudo systemctl stop systemd-timesyncd 2>/dev/null || true
             sudo systemctl disable systemd-timesyncd 2>/dev/null || true
-            
+
+            # 确保chrony日志目录存在
+            sudo mkdir -p /var/log/chrony
+
             sudo tee /etc/chrony/chrony.conf > /dev/null << EOF
 pool $ntp_server iburst
 keyfile /etc/chrony/chrony.keys
@@ -1358,8 +1381,10 @@ maxupdateskew 100.0
 rtcsync
 makestep 1 3
 EOF
-            sudo systemctl restart chrony
-            sudo systemctl enable chrony
+            # 某些云服务商镜像会预先mask chrony服务，需要先unmask
+            sudo systemctl unmask chrony 2>/dev/null || true
+            sudo systemctl enable chrony || log_message "WARNING" "chrony enable失败，可能仍处于masked状态"
+            sudo systemctl restart chrony || log_message "ERROR" "chrony启动失败"
         else
             # 使用systemd-timesyncd
                 sudo systemctl stop chrony 2>/dev/null || true
@@ -1401,16 +1426,16 @@ configure_system_optimization() {
         sudo modprobe tcp_bbr
         
         # 检查并添加sysctl配置
-        if ! grep -q "net.core.default_qdisc = fq" /etc/sysctl.conf; then
+        if ! grep -q "net.core.default_qdisc = fq" /etc/sysctl.conf 2>/dev/null; then
             echo "net.core.default_qdisc = fq" | sudo tee -a /etc/sysctl.conf
         fi
-        if ! grep -q "net.ipv4.tcp_congestion_control = bbr" /etc/sysctl.conf; then
+        if ! grep -q "net.ipv4.tcp_congestion_control = bbr" /etc/sysctl.conf 2>/dev/null; then
             echo "net.ipv4.tcp_congestion_control = bbr" | sudo tee -a /etc/sysctl.conf
         fi
     fi
     
     # 启用IP转发
-    if ! grep -q "net.ipv4.ip_forward = 1" /etc/sysctl.conf; then
+    if ! grep -q "net.ipv4.ip_forward = 1" /etc/sysctl.conf 2>/dev/null; then
         echo "net.ipv4.ip_forward = 1" | sudo tee -a /etc/sysctl.conf
     fi
     
