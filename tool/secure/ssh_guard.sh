@@ -63,8 +63,7 @@ cleanup_port_rules() {
 
     # 清理带 ssh-guard 标记的规则
     while true; do
-        local rule_num
-        rule_num=$(iptables -L INPUT -n --line-numbers | grep "$COMMENT_MARK" | grep "dpt:${port}" | head -1 | awk '{print $1}')
+        local rule_num=$(iptables -L INPUT -n --line-numbers | grep "$COMMENT_MARK" | grep "dpt:${port}" | head -1 | awk '{print $1}')
         [ -z "$rule_num" ] && break
         iptables -D INPUT "$rule_num" 2>/dev/null || break
         ((removed++)) || true
@@ -72,8 +71,7 @@ cleanup_port_rules() {
 
     # 也清理不带标记但匹配端口的 SSH 相关规则（旧规则可能没有 comment）
     while true; do
-        local rule_num
-        rule_num=$(iptables -L INPUT -n --line-numbers | grep "dpt:${port}" | grep -i "recent" | head -1 | awk '{print $1}')
+        local rule_num=$(iptables -L INPUT -n --line-numbers | grep "dpt:${port}" | grep -i "recent" | head -1 | awk '{print $1}')
         [ -z "$rule_num" ] && break
         iptables -D INPUT "$rule_num" 2>/dev/null || break
         ((removed++)) || true
@@ -119,8 +117,7 @@ disable_protection() {
 
     local removed=0
     while true; do
-        local rule_num
-        rule_num=$(iptables -L INPUT -n --line-numbers | grep "$COMMENT_MARK" | head -1 | awk '{print $1}')
+        local rule_num=$(iptables -L INPUT -n --line-numbers | grep "$COMMENT_MARK" | head -1 | awk '{print $1}')
         [ -z "$rule_num" ] && break
         iptables -D INPUT "$rule_num" 2>/dev/null || break
         ((removed++)) || true
