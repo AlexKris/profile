@@ -611,7 +611,7 @@ EOF
             -e "s|__CHAT_ID__|$chat_id|g" \
             "$exec_script"
     fi
-    chmod +x "$exec_script"
+    chmod 700 "$exec_script"
     echo "$exec_script"
 }
 

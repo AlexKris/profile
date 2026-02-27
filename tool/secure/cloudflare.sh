@@ -230,13 +230,19 @@ add_cloudflare_rules() {
     local errors=0
     
     log_message "INFO" "添加新的 Cloudflare 规则..."
-    
+
+    # 提前检查 Docker 状态，避免循环内重复调用
+    local has_docker=false
+    if check_docker_status; then
+        has_docker=true
+    fi
+
     # 获取插入位置
     local insert_pos_input=$(iptables -L INPUT -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
     [ -z "$insert_pos_input" ] && insert_pos_input=8
-    
+
     local insert_pos_docker=1
-    if check_docker_status; then
+    if [ "$has_docker" = "true" ]; then
         insert_pos_docker=$(iptables -L DOCKER-USER -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
         [ -z "$insert_pos_docker" ] && insert_pos_docker=9
     fi
@@ -258,7 +264,7 @@ add_cloudflare_rules() {
                 fi
                 
                 # DOCKER-USER 链
-                if check_docker_status; then
+                if [ "$has_docker" = "true" ]; then
                     if iptables -I DOCKER-USER $((++insert_pos_docker)) -s "$ip" -p tcp --dport "$port" -j RETURN -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
                         ((count++))
                     else
@@ -316,7 +322,11 @@ ensure_drop_rules_last() {
 create_update_script() {
     log_message "INFO" "创建 Cloudflare IP 自动更新脚本..."
     
-    tee "$CF_UPDATE_SCRIPT" > /dev/null << 'EOF'
+    # 获取当前脚本的绝对路径，写入更新脚本中
+    local self_script
+    self_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+    cat > "$CF_UPDATE_SCRIPT" << UPDATEEOF
 #!/bin/bash
 
 # Cloudflare IP 自动更新脚本
@@ -325,24 +335,22 @@ create_update_script() {
 LOG_FILE="/var/log/cloudflare_ip_update.log"
 
 log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> "\$LOG_FILE"
 }
 
 log_message "开始更新 Cloudflare IP 规则"
 
-# 调用主脚本进行更新
-SCRIPT_DIR="$(dirname "$0")"
-CLOUDFLARE_SCRIPT="$SCRIPT_DIR/../opt/profile/tool/secure/cloudflare.sh"
+CLOUDFLARE_SCRIPT="$self_script"
 
-if [ -f "$CLOUDFLARE_SCRIPT" ]; then
-    bash "$CLOUDFLARE_SCRIPT" --update-internal 2>&1 | tee -a "$LOG_FILE"
+if [ -f "\$CLOUDFLARE_SCRIPT" ]; then
+    bash "\$CLOUDFLARE_SCRIPT" --update-internal 2>&1 | tee -a "\$LOG_FILE"
 else
-    log_message "错误: 找不到 cloudflare.sh 脚本"
+    log_message "错误: 找不到 cloudflare.sh 脚本: \$CLOUDFLARE_SCRIPT"
     exit 1
 fi
 
 log_message "Cloudflare IP 规则更新完成"
-EOF
+UPDATEEOF
 
     chmod +x "$CF_UPDATE_SCRIPT"
     log_message "INFO" "更新脚本已创建: $CF_UPDATE_SCRIPT"

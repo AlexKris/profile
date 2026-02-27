@@ -518,10 +518,12 @@ main() {
         # Netflix非自制剧不可用，需要更换IP
         echo "${current_time} ${VM} 当前IP不解锁Netflix非自制剧 当前IP: ${current_ip}" | tee -a "$log"
         
+        # 冷却时间相关变量（在条件块外初始化，避免set -u报错）
+        local last_change_file="$WORK_DIR/.last_ip_change"
+        local current_timestamp=$(date +%s)
+
         # 检查冷却时间（仅在启用时检查）
         if [ "$COOLDOWN_MINUTES" -gt 0 ]; then
-            local last_change_file="$WORK_DIR/.last_ip_change"
-            local current_timestamp=$(date +%s)
             local cooldown_seconds=$((COOLDOWN_MINUTES * 60))
             
             if [ -f "$last_change_file" ]; then
@@ -740,7 +742,7 @@ EOF
             "$exec_script"
     fi
     
-    chmod +x "$exec_script"
+    chmod 700 "$exec_script"
     echo "$exec_script"
 }
 

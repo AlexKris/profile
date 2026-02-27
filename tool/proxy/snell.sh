@@ -218,13 +218,13 @@ configure_snell() {
     # 创建配置目录
     execute_cmd "创建配置目录" sudo mkdir -p /etc/snell
 
-    # 创建临时配置文件并安装
-    sudo bash -c "cat > /etc/snell/snell-server.conf <<EOF
+    # 创建配置文件
+    sudo tee /etc/snell/snell-server.conf > /dev/null <<EOF
 [snell-server]
 listen = 0.0.0.0:${SNELL_PORT}
 psk = ${SNELL_PSK}
 ipv6 = false
-EOF"
+EOF
     
     log_info "Snell 配置文件已生成。"
     log_info "请保存以下信息："
