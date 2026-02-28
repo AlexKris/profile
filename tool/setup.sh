@@ -105,15 +105,32 @@ check_error() {
 }
 
 # 安全执行命令 - 带错误检查的命令执行
+# 用法: safe_execute [-f] [-d 描述] 命令 [参数...]
+#   -d 描述    命令描述（默认 "执行命令"）
+#   -f         致命模式，失败时退出脚本
 safe_execute() {
-    local cmd="$1"
-    local description="${2:-执行命令}"
-    local fatal="${3:-false}"
+    local description="执行命令"
+    local fatal="false"
 
-    log_message "DEBUG" "执行: $cmd"
+    while [ $# -gt 0 ] && [ "${1:0:1}" = "-" ] 2>/dev/null; do
+        case "$1" in
+            -d) [ $# -lt 2 ] && { log_message "ERROR" "safe_execute: -d 需要参数"; return 1; }
+                description="$2"; shift 2 ;;
+            -f) fatal="true"; shift ;;
+            --) shift; break ;;
+            *)  break ;;
+        esac
+    done
+
+    if [ $# -eq 0 ]; then
+        log_message "ERROR" "safe_execute: 未指定命令"
+        return 1
+    fi
+
+    log_message "DEBUG" "执行: $*"
 
     local exit_code
-    eval "$cmd"
+    "$@"
     exit_code=$?
 
     if [ $exit_code -ne 0 ]; then
@@ -398,13 +415,6 @@ parse_args() {
         shift
     done
     
-    # 确保备份目录存在并设置安全权限
-    if [ ! -d "$CONFIG_BACKUP_DIR" ]; then
-        sudo mkdir -p "$CONFIG_BACKUP_DIR"
-        # 设置备份目录权限（仅root可访问）
-        sudo chmod 700 "$CONFIG_BACKUP_DIR"
-    fi
-    
     # 验证创建用户时必须提供SSH密钥
     if [ "$CREATE_DEVOPS_USER" = "true" ]; then
         if [ -z "$SSH_KEY" ]; then
@@ -681,23 +691,23 @@ update_system_install_dependencies() {
         log_message "DEBUG" "系统更新 - 执行系统更新"
         
         # 更新软件包列表（关键步骤）
-        if ! safe_execute "sudo apt-get update -y" "更新软件包列表"; then
+        if ! safe_execute -d "更新软件包列表" sudo apt-get update -y; then
             log_message "ERROR" "软件包列表更新失败，可能影响后续安装"
             return 1
         fi
         
         # 系统升级（允许失败但记录）
-        safe_execute "sudo apt-get upgrade -y" "系统升级" || \
+        safe_execute -d "系统升级" sudo apt-get upgrade -y || \
             check_error $? "系统升级" "可能有包冲突或网络问题"
         
-        safe_execute "sudo apt-get full-upgrade -y" "完整系统升级" || \
+        safe_execute -d "完整系统升级" sudo apt-get full-upgrade -y || \
             check_error $? "完整系统升级" "某些包可能需要手动处理"
         
         # 清理操作（失败不影响主流程）
-        safe_execute "sudo apt-get autoclean -y" "清理软件包缓存" || \
+        safe_execute -d "清理软件包缓存" sudo apt-get autoclean -y || \
             log_message "WARNING" "软件包缓存清理失败"
         
-        safe_execute "sudo apt-get autoremove -y" "移除不需要的软件包" || \
+        safe_execute -d "移除不需要的软件包" sudo apt-get autoremove -y || \
             log_message "WARNING" "自动移除软件包失败"
         
         # 阶段3：安装基础软件包（关键功能，失败则退出）
@@ -729,13 +739,13 @@ update_system_install_dependencies() {
         log_message "INFO" "使用包管理器: $pkg_manager"
         
         # 系统更新
-        if ! safe_execute "sudo $pkg_manager update -y" "RedHat系统更新"; then
+        if ! safe_execute -d "RedHat系统更新" sudo "$pkg_manager" update -y; then
             log_message "ERROR" "RedHat系统更新失败"
             return 1
         fi
         
         # 软件包安装
-        if ! safe_execute "sudo $pkg_manager install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc" "安装基础软件包"; then
+        if ! safe_execute -d "安装基础软件包" sudo "$pkg_manager" install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc; then
             log_message "ERROR" "RedHat基础软件包安装失败"
             return 1
         fi
@@ -1068,12 +1078,28 @@ handle_ssh_config_dir() {
         # 创建99-security.conf以确保我们的配置优先级最高
         log_message "INFO" "创建SSH安全配置覆盖文件"
         
-        # 先从sshd_config中捕获configure_ssh_authentication刚设置的值（必须在注释掉之前）
-        local effective_port="${SSH_PORT:-$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')}"
+        # 先捕获当前生效的值（优先 sshd -T，回退 grep）
+        local _sshd_cfg=""
+        if command -v sshd &>/dev/null; then
+            _sshd_cfg=$(sshd -T 2>/dev/null || true)
+        fi
+
+        local effective_port="$SSH_PORT"
+        if [ -z "$effective_port" ]; then
+            if [ -n "$_sshd_cfg" ]; then
+                effective_port=$(echo "$_sshd_cfg" | awk '/^port / {print $2}')
+            else
+                effective_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
+            fi
+        fi
         effective_port="${effective_port:-22}"
 
         local current_permit_root
-        current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
+        if [ -n "$_sshd_cfg" ]; then
+            current_permit_root=$(echo "$_sshd_cfg" | awk '/^permitrootlogin / {print $2}')
+        else
+            current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
+        fi
         current_permit_root="${current_permit_root:-yes}"
 
         # 如果用户明确设置了--disable_root_login，确保覆盖
@@ -1190,13 +1216,18 @@ validate_and_restart_ssh() {
     # 等待SSH服务启动
     sleep 2
     
-    # 验证SSH服务状态（从实际配置文件读取端口，而非依赖命令行参数）
-    local ssh_port
-    ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
-        || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
-        || ssh_port="22"
+    # 验证SSH服务状态（优先 sshd -T 读取生效端口）
+    local ssh_port=""
+    if command -v sshd &>/dev/null; then
+        ssh_port=$(sshd -T 2>/dev/null | awk '/^port / {print $2}')
+    fi
+    if [ -z "$ssh_port" ]; then
+        ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
+            || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
+            || ssh_port="22"
+    fi
     ssh_port="${ssh_port:-22}"
-    if sudo ss -tlnp | grep -q ":$ssh_port"; then
+    if sudo ss -tlnp | grep -qE "[:.]${ssh_port}[[:space:]]"; then
         log_message "INFO" "SSH服务正在监听端口 $ssh_port"
     else
         log_message "ERROR" "SSH服务未能在端口 $ssh_port 上启动"
@@ -1210,15 +1241,31 @@ validate_and_restart_ssh() {
 display_ssh_status() {
     log_message "INFO" "SSH配置完成"
     log_message "INFO" "当前SSH配置状态："
-    local ssh_port
-    ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
-        || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
-        || ssh_port="22"
+    local ssh_port=""
+    if command -v sshd &>/dev/null; then
+        ssh_port=$(sshd -T 2>/dev/null | awk '/^port / {print $2}')
+    fi
+    if [ -z "$ssh_port" ]; then
+        ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
+            || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
+            || ssh_port="22"
+    fi
     ssh_port="${ssh_port:-22}"
     log_message "INFO" "  端口: $ssh_port"
-    log_message "INFO" "  密码认证: $(grep "^PasswordAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PasswordAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
-    log_message "INFO" "  公钥认证: $(grep "^PubkeyAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PubkeyAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
-    log_message "INFO" "  Root登录: $(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+    # 优先使用 sshd -T 读取实际生效配置
+    local sshd_effective=""
+    if command -v sshd &>/dev/null; then
+        sshd_effective=$(sshd -T 2>/dev/null || true)
+    fi
+    if [ -n "$sshd_effective" ]; then
+        log_message "INFO" "  密码认证: $(echo "$sshd_effective" | awk '/^passwordauthentication/ {print $2}')"
+        log_message "INFO" "  公钥认证: $(echo "$sshd_effective" | awk '/^pubkeyauthentication/ {print $2}')"
+        log_message "INFO" "  Root登录: $(echo "$sshd_effective" | awk '/^permitrootlogin/ {print $2}')"
+    else
+        log_message "INFO" "  密码认证: $(grep "^PasswordAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PasswordAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+        log_message "INFO" "  公钥认证: $(grep "^PubkeyAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PubkeyAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+        log_message "INFO" "  Root登录: $(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
+    fi
     
     # 检查authorized_keys文件
     if [ -n "$SSH_KEY" ]; then
@@ -1631,29 +1678,26 @@ install_docker() {
         return 0
     fi
     
-    # 安全的Docker安装方式
+    # 使用 Docker 官方安装脚本 (get.docker.com)
     local docker_script="/tmp/get-docker.sh"
-    local docker_script_url="https://get.docker.com"
-    
-    # 下载脚本
-    log_message "INFO" "下载Docker安装脚本..."
-    if ! curl -fsSL "$docker_script_url" -o "$docker_script"; then
+
+    log_message "INFO" "下载Docker官方安装脚本..."
+    if ! curl -fsSL https://get.docker.com -o "$docker_script"; then
         log_message "ERROR" "下载Docker安装脚本失败"
         return 1
     fi
-    
+
     # 验证脚本大小（防止下载不完整）
-    local script_size=$(stat -c%s "$docker_script" 2>/dev/null || stat -f%z "$docker_script" 2>/dev/null || echo 0)
+    local script_size
+    script_size=$(stat -c%s "$docker_script" 2>/dev/null || stat -f%z "$docker_script" 2>/dev/null || echo 0)
     if [ "$script_size" -lt 1000 ]; then
         log_message "ERROR" "Docker安装脚本可能不完整"
         rm -f "$docker_script"
-            return 1
-        fi
-        
-    # 设置脚本权限
+        return 1
+    fi
+
     chmod 700 "$docker_script"
-    
-    # 执行安装脚本
+
     if sudo bash "$docker_script"; then
         rm -f "$docker_script"
         sudo systemctl start docker
@@ -1738,7 +1782,15 @@ show_summary() {
         echo "  ssh -p $ssh_port $SUDO_USERNAME@服务器IP"
     fi
     if [ -f "/root/.ssh/authorized_keys" ] && [ -s "/root/.ssh/authorized_keys" ]; then
-        local root_login=$(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}' || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}' || echo "yes")
+        local root_login=""
+        if command -v sshd &>/dev/null; then
+            root_login=$(sshd -T 2>/dev/null | awk '/^permitrootlogin/ {print $2}')
+        fi
+        if [ -z "$root_login" ]; then
+            root_login=$(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
+                || root_login=$(grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
+                || root_login="yes"
+        fi
         if [ "$root_login" != "no" ]; then
             echo "  ssh -p $ssh_port root@服务器IP"
         fi
@@ -1773,7 +1825,13 @@ main() {
         check_error $? "修复sudo问题"
         log_message "WARNING" "sudo问题修复失败，可能影响后续操作"
     }
-    
+
+    # 确保备份目录存在并设置安全权限（在权限检查之后）
+    if [ ! -d "$CONFIG_BACKUP_DIR" ]; then
+        sudo mkdir -p "$CONFIG_BACKUP_DIR"
+        sudo chmod 700 "$CONFIG_BACKUP_DIR"
+    fi
+
     # 阶段2：系统更新和软件安装（重要但允许部分失败）
     log_message "INFO" "=== 阶段2：系统更新和软件安装 ==="
     update_system_install_dependencies || {
@@ -1856,8 +1914,9 @@ execute_script() {
 }
 
 # 主入口：执行脚本并处理退出状态
-if ! execute_script "$@"; then
-    exit_code=$?
+execute_script "$@"
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
     log_message "ERROR" "脚本执行失败，退出码: $exit_code"
     exit $exit_code
 fi
