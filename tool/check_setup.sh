@@ -6,16 +6,16 @@
 
 set -uo pipefail
 
-# 参数解析：--cn（默认）| --global
-REGION="cn"
+# 参数解析：--cn | --global（默认）
+REGION="global"
 while [ $# -gt 0 ]; do
     case "$1" in
         --global) REGION="global" ;;
         --cn)     REGION="cn" ;;
         --help|-h)
             echo "用法: $0 [--cn|--global]"
-            echo "  --cn      大陆 VPS（默认），DNS 测试用 baidu.com"
-            echo "  --global  海外 VPS，DNS 测试用 example.com"
+            echo "  --global  海外 VPS（默认），DNS 测试用 google.com"
+            echo "  --cn      大陆 VPS，DNS 测试用 baidu.com"
             exit 0 ;;
         *) echo "未知参数: $1"; echo "用法: $0 [--cn|--global]"; exit 1 ;;
     esac
@@ -386,7 +386,7 @@ fi
 if [ "$REGION" = "cn" ]; then
     dns_test_domain="baidu.com"
 else
-    dns_test_domain="example.com"
+    dns_test_domain="google.com"
 fi
 if command -v dig &>/dev/null; then
     dig_result=$(dig +short +time=3 +tries=1 "$dns_test_domain" 2>/dev/null | head -1)
