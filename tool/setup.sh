@@ -665,13 +665,10 @@ fix_sudo_issue() {
     fi
     
     # 修复hostname解析问题
-    if sudo -v 2>&1 | grep -q "unable to resolve host"; then
-        log_message "INFO" "修复sudo主机名解析问题..."
-        # 安全地获取和处理hostname
-        local hostname=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
-        if [ -n "$hostname" ] && ! grep -q "$hostname" /etc/hosts; then
-            echo "127.0.1.1   $hostname" | sudo tee -a /etc/hosts >/dev/null
-        fi
+    local current_hostname=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
+    if [ -n "$current_hostname" ] && ! grep -wq "$current_hostname" /etc/hosts; then
+        log_message "INFO" "将主机名 $current_hostname 添加到 /etc/hosts..."
+        echo "127.0.1.1   $current_hostname" >> /etc/hosts
     fi
 }
 

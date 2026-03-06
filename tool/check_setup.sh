@@ -637,7 +637,7 @@ fi
 section "其他"
 
 hostname_str=$(hostname)
-if grep -q "$hostname_str" /etc/hosts 2>/dev/null; then
+if grep -wq "$hostname_str" /etc/hosts 2>/dev/null; then
     ok "hostname 已在 /etc/hosts 中"
 else
     warning "hostname ($hostname_str) 不在 /etc/hosts 中"
