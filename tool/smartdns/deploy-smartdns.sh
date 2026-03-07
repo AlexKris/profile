@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # ============================================================
-# SmartDNS 部署脚本
-# 功能：DNS 缓存 + 分流解锁 + Fallback
-# 目标系统：Debian 12/13
+# SmartDNS 部署脚本（Docker 方案）
+# 功能：DNS 缓存 + 强制 IPv6 + 可选流媒体分流解锁
+# 目标系统：Debian/Ubuntu
 # ============================================================
 
 # 默认配置
@@ -14,11 +14,10 @@ DOCKER_DIR="${SMARTDNS_DIR}/docker"
 DOMAIN_LIST_DIR="${CONFIG_DIR}/domain-lists"
 
 # DNS 配置
-INTRANET_DNS=""                # 内网 DNS（可选）
-UNLOCK_DNS="103.214.22.32"     # 解锁 DNS（流媒体解锁服务）
-PUBLIC_DNS_1="1.1.1.1"
-PUBLIC_DNS_2="8.8.8.8"
+INTRANET_DNS=""
+UNLOCK_DNS="103.214.22.32"
 TIMEZONE="Asia/Hong_Kong"
+FORCE_IPV6=false
 
 # ============================================================
 # 工具函数
@@ -28,7 +27,10 @@ log() { echo "[$1] $2"; }
 
 is_valid_ip() {
     local ip="$1"
-    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    local IFS='.'
+    read -r a b c d <<< "$ip"
+    (( a <= 255 && b <= 255 && c <= 255 && d <= 255 ))
 }
 
 show_help() {
@@ -36,11 +38,13 @@ show_help() {
 用法: $0 [选项]
 
 模式:
-  默认模式                   纯 DNS 缓存（公共 DNS）
-  -d 模式                    DNS 缓存 + 流媒体分流解锁
+  默认模式                 纯 DNS 缓存（公共 DNS）
+  -d 模式                  DNS 缓存 + 流媒体分流解锁
+  -6 模式                  启用强制 IPv6（可与 -d 组合）
 
 选项:
   -d, --download-lists       启用分流模式：下载域名列表 + 生成更新脚本
+  -6, --force-ipv6           启用强制 IPv6：屏蔽指定域名的 A 记录，只返回 AAAA
   -i, --intranet-dns <IP>    设置内网 DNS（可选）
   -u, --unlock-dns <IP>      设置解锁 DNS（默认: 103.214.22.32，仅 -d 模式）
   -t, --timezone <TZ>        设置时区（默认: Asia/Hong_Kong）
@@ -49,7 +53,9 @@ show_help() {
 
 示例:
   $0                         # 纯 DNS 缓存
+  $0 -6                      # DNS 缓存 + 强制 IPv6
   $0 -d                      # DNS 缓存 + 流媒体分流
+  $0 -d -6                   # DNS 缓存 + 流媒体分流 + 强制 IPv6
   $0 -d -u 1.2.3.4           # 自定义解锁 DNS
 EOF
 }
@@ -82,14 +88,12 @@ check_docker() {
 
 create_directories() {
     log INFO "创建目录结构..."
-    mkdir -p "${CONFIG_DIR}" "${DOCKER_DIR}"
+    mkdir -p "${CONFIG_DIR}" "${DOCKER_DIR}" "${DOMAIN_LIST_DIR}"
     log OK "目录创建完成: ${SMARTDNS_DIR}"
 }
 
 download_domain_lists() {
     log INFO "下载域名列表..."
-
-    mkdir -p "${DOMAIN_LIST_DIR}"
 
     local BASE_URL="https://raw.githubusercontent.com/v2fly/domain-list-community/master/data"
     local SERVICES=(netflix disney youtube)
@@ -98,10 +102,11 @@ download_domain_lists() {
         local local_path="${DOMAIN_LIST_DIR}/${name}.conf"
 
         log INFO "  下载 ${name}..."
-        if curl -sL "${BASE_URL}/${name}" -o "${local_path}" 2>/dev/null; then
+        if curl -fsSL "${BASE_URL}/${name}" -o "${local_path}" 2>/dev/null; then
             # 清理：移除注释、空行、include、regexp、full 前缀行
             sed -i '/^#/d; /^$/d; /^@/d; /^include:/d; /^regexp:/d; /^full:/d' "${local_path}" 2>/dev/null || true
-            local line_count=$(wc -l < "${local_path}")
+            local line_count
+            line_count=$(wc -l < "${local_path}")
             log OK "    ${name}: ${line_count} 条域名"
         else
             log WARN "    ${name} 下载失败，跳过"
@@ -130,7 +135,7 @@ echo "[INFO] 开始更新域名列表..."
 for name in "${SERVICES[@]}"; do
     local_path="${DOMAIN_LIST_DIR}/${name}.conf"
 
-    if curl -sL "${BASE_URL}/${name}" -o "${local_path}" 2>/dev/null; then
+    if curl -fsSL "${BASE_URL}/${name}" -o "${local_path}" 2>/dev/null; then
         sed -i '/^#/d; /^$/d; /^@/d; /^include:/d; /^regexp:/d; /^full:/d' "${local_path}" 2>/dev/null || true
         echo "[OK] ${name}: $(wc -l < "${local_path}") 条域名"
     else
@@ -165,6 +170,28 @@ services:
 EOF
 
     log OK "docker-compose.yaml 生成完成"
+}
+
+setup_force_ipv6() {
+    if [[ "$FORCE_IPV6" != true ]]; then
+        return
+    fi
+
+    local list_file="${CONFIG_DIR}/force-ipv6.list"
+
+    if [[ -f "$list_file" ]]; then
+        log OK "强制 IPv6 域名列表已存在，保留现有内容: ${list_file}"
+        return
+    fi
+
+    log INFO "生成强制 IPv6 域名列表..."
+
+    cat > "${list_file}" <<EOF
+anthropic.com
+claude.ai
+EOF
+
+    log OK "强制 IPv6 域名列表已生成: ${list_file}"
 }
 
 generate_smartdns_config() {
@@ -207,11 +234,21 @@ EOF
     cat >> "${CONFIG_DIR}/smartdns.conf" <<EOF
 
 # 公共 DNS（默认组）
-server ${PUBLIC_DNS_1}
-server ${PUBLIC_DNS_2}
+server 1.1.1.1
+server 8.8.8.8
 server 9.9.9.9
 server 208.67.222.222
 EOF
+
+    # 强制 IPv6
+    if [[ "$FORCE_IPV6" == true && -f "${CONFIG_DIR}/force-ipv6.list" ]]; then
+        cat >> "${CONFIG_DIR}/smartdns.conf" <<EOF
+
+# ===== 强制 IPv6（屏蔽 A 记录） =====
+domain-set -name force-ipv6 -file /etc/smartdns/force-ipv6.list
+address /domain-set:force-ipv6/#4
+EOF
+    fi
 
     # 检查是否存在域名列表（启用分流模式）
     local has_domain_lists=false
@@ -222,7 +259,7 @@ EOF
     if [[ "$has_domain_lists" == true ]]; then
         cat >> "${CONFIG_DIR}/smartdns.conf" <<EOF
 
-# 解锁 DNS 组
+# ===== 流媒体分流 =====
 server ${UNLOCK_DNS} -group unlock -exclude-default-group
 EOF
 
@@ -254,7 +291,13 @@ EOF
 configure_system_dns() {
     log INFO "配置系统 DNS..."
 
-    [[ -f /etc/resolv.conf ]] && cp /etc/resolv.conf "/etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)"
+    # 解锁以便修改
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+
+    # 仅在 resolv.conf 不是指向 127.0.0.1 时才备份
+    if [[ -f /etc/resolv.conf ]] && ! grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
+        cp /etc/resolv.conf "/etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)"
+    fi
 
     if systemctl is-active --quiet systemd-resolved; then
         log WARN "检测到 systemd-resolved，正在停止..."
@@ -270,13 +313,12 @@ configure_system_dns() {
 start_service() {
     log INFO "启动 SmartDNS..."
 
-    cd "${DOCKER_DIR}"
-    docker compose down 2>/dev/null || true
-    docker compose up -d
+    docker compose -f "${DOCKER_DIR}/docker-compose.yaml" down 2>/dev/null || true
+    docker compose -f "${DOCKER_DIR}/docker-compose.yaml" up -d
 
     local i
     for i in $(seq 1 15); do
-        if docker compose ps --format json 2>/dev/null | grep -q '"running"'; then
+        if docker inspect -f '{{.State.Status}}' smartdns 2>/dev/null | grep -q 'running'; then
             log OK "SmartDNS 启动成功"
             return
         fi
@@ -293,22 +335,45 @@ verify_deployment() {
     log INFO "验证部署..."
     echo "=========================================="
 
-    local domains="google.com"
-    [[ -f "${DOMAIN_LIST_DIR}/netflix.conf" ]] && domains="$domains netflix.com"
-
+    # 通用域名测试
     local result
-    for domain in $domains; do
-        echo -n "测试 ${domain}: "
-        result=$(dig +short "$domain" @127.0.0.1 2>/dev/null | head -1) && echo "${result:-解析失败}" || echo "dig 命令失败"
-    done
+    echo -n "测试 google.com: "
+    result=$(dig +short google.com @127.0.0.1 2>/dev/null | head -1) && echo "${result:-解析失败}" || echo "dig 命令失败"
+
+    # 流媒体分流测试
+    if [[ -f "${DOMAIN_LIST_DIR}/netflix.conf" ]]; then
+        echo -n "测试 netflix.com: "
+        result=$(dig +short netflix.com @127.0.0.1 2>/dev/null | head -1) && echo "${result:-解析失败}" || echo "dig 命令失败"
+    fi
+
+    # 强制 IPv6 测试
+    if [[ "$FORCE_IPV6" == true ]]; then
+        echo ""
+        echo "--- 强制 IPv6 验证 ---"
+
+        echo -n "api.anthropic.com A (应为空): "
+        result=$(dig +short api.anthropic.com @127.0.0.1 A 2>/dev/null | head -1)
+        echo "${result:-空（正确）}"
+
+        echo -n "api.anthropic.com AAAA: "
+        result=$(dig +short api.anthropic.com @127.0.0.1 AAAA 2>/dev/null | head -1)
+        echo "${result:-解析失败}"
+
+        echo -n "claude.ai A (应为空): "
+        result=$(dig +short claude.ai @127.0.0.1 A 2>/dev/null | head -1)
+        echo "${result:-空（正确）}"
+    fi
 
     echo "=========================================="
 }
 
 show_deployment_info() {
-    # 检查是否启用了分流模式
     local has_unlock=false
     [[ -f "${SMARTDNS_DIR}/update-lists.sh" ]] && has_unlock=true
+
+    local mode="纯 DNS 缓存"
+    [[ "$FORCE_IPV6" == true ]] && mode="${mode} + 强制 IPv6"
+    [[ "$has_unlock" == true ]] && mode="${mode} + 流媒体分流"
 
     cat <<EOF
 
@@ -316,9 +381,18 @@ show_deployment_info() {
 部署完成
 ==========================================
 
-模式: $(${has_unlock} && echo "DNS 缓存 + 流媒体分流" || echo "纯 DNS 缓存")
+模式: ${mode}
 配置目录: ${SMARTDNS_DIR}
 配置文件: ${CONFIG_DIR}/smartdns.conf
+EOF
+
+    if [[ "$FORCE_IPV6" == true ]]; then
+        cat <<EOF
+IPv6 列表: ${CONFIG_DIR}/force-ipv6.list
+EOF
+    fi
+
+    cat <<EOF
 
 常用命令:
   查看状态:    docker ps | grep smartdns
@@ -329,10 +403,20 @@ show_deployment_info() {
 
 测试命令:
   dig google.com @127.0.0.1
+EOF
+
+    if [[ "$FORCE_IPV6" == true ]]; then
+        cat <<EOF
+  dig api.anthropic.com @127.0.0.1 A +short     # 应为空
+  dig api.anthropic.com @127.0.0.1 AAAA +short   # 应返回 IPv6
+EOF
+    fi
+
+    cat <<EOF
 
 DNS 配置:
   ${INTRANET_DNS:+内网: ${INTRANET_DNS}
-  }公共: ${PUBLIC_DNS_1}, ${PUBLIC_DNS_2}
+  }公共: 1.1.1.1, 8.8.8.8, 9.9.9.9, 208.67.222.222
 
 EOF
 
@@ -361,10 +445,11 @@ uninstall() {
 
     log WARN "正在卸载 SmartDNS..."
 
-    cd "${DOCKER_DIR}" 2>/dev/null && docker compose down 2>/dev/null || true
+    (cd "${DOCKER_DIR}" 2>/dev/null && docker compose down 2>/dev/null) || true
     chattr -i /etc/resolv.conf 2>/dev/null || true
 
-    local backup=$(ls -t /etc/resolv.conf.bak.* 2>/dev/null | head -1)
+    local backup
+    backup=$(ls -t /etc/resolv.conf.bak.* 2>/dev/null | head -1) || true
     if [[ -n "$backup" ]]; then
         cp "$backup" /etc/resolv.conf
         log INFO "已恢复 DNS 配置: $backup"
@@ -373,9 +458,9 @@ uninstall() {
         log INFO "已设置默认 DNS: 1.1.1.1"
     fi
 
-    read -p "是否删除配置目录 ${SMARTDNS_DIR}? [y/N] " -n 1 -r
+    read -p "是否删除配置目录 ${SMARTDNS_DIR}? [y/N] " -n 1 -r REPLY || true
     echo
-    [[ $REPLY =~ ^[Yy]$ ]] && rm -rf "${SMARTDNS_DIR}" && log OK "配置目录已删除"
+    [[ "${REPLY:-}" =~ ^[Yy]$ ]] && rm -rf "${SMARTDNS_DIR}" && log OK "配置目录已删除"
     log OK "SmartDNS 已卸载"
 }
 
@@ -399,8 +484,9 @@ main() {
                 [[ -z "${2:-}" ]] && { log ERR "$1 需要参数"; exit 1; }
                 TIMEZONE="$2"; shift 2 ;;
             -d|--download-lists) DOWNLOAD_LISTS=true; shift ;;
-            --uninstall)       UNINSTALL=true; shift ;;
-            -h|--help)         show_help; exit 0 ;;
+            -6|--force-ipv6)     FORCE_IPV6=true; shift ;;
+            --uninstall)         UNINSTALL=true; shift ;;
+            -h|--help)           show_help; exit 0 ;;
             *) log ERR "未知参数: $1"; show_help; exit 1 ;;
         esac
     done
@@ -428,6 +514,7 @@ main() {
 
     [[ "$DOWNLOAD_LISTS" == true ]] && download_domain_lists
 
+    setup_force_ipv6
     generate_docker_compose
     generate_smartdns_config
     start_service
