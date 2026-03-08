@@ -690,6 +690,9 @@ main() {
     fi
 
     check_docker
+    # 在 DNS 仍可用时预拉取镜像（停 resolved 后 Docker 守护进程可能无法解析）
+    log INFO "拉取 SmartDNS 镜像..."
+    docker pull pymumu/smartdns:latest
     create_directories
 
     if [[ "$DOWNLOAD_LISTS" == true ]]; then
