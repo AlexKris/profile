@@ -168,7 +168,6 @@ services:
       api: webapi
       webapi_url: ${PANEL_URL}
       webapi_key: ${PANEL_KEY}
-      proxy_protocol: 'true'
       forbidden_bit_torrent: 'true'
       geo_update_enable: 'true'
       log_level: ${LOG_LEVEL}
