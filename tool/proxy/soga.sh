@@ -178,7 +178,6 @@ EOF
 
     log "info" "正在启动 soga ..."
     cd "$BASE_DIR"
-    $DOCKER_COMPOSE_CMD down
     $DOCKER_COMPOSE_CMD up -d
 
     log "info" "soga 已经成功安装并启动"
