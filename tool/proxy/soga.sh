@@ -14,6 +14,7 @@ CONTAINER_NAME=""
 PANEL_URL=""
 PANEL_KEY=""
 NODE_ID=""
+LOG_LEVEL="info"
 ACTION=""
 
 # Function for logging
@@ -61,10 +62,6 @@ update_system() {
         fi
     else
         log "error" "不支持的操作系统，只支持Debian/Ubuntu和CentOS/RHEL。"
-        exit 1
-    fi
-    if [ $? -ne 0 ]; then
-        log "error" "系统更新或安装软件包失败，请检查网络连接。"
         exit 1
     fi
     log "info" "系统更新完成。"
@@ -144,30 +141,12 @@ validate_params() {
     fi
 }
 
-# 配置并运行 soga
-config_run_soga(){
-    local CONTAINER_NAME="$1"
-    local PANEL_URL="$2"
-    local PANEL_KEY="$3"
-    local NODE_ID="$4"
-
-    log "info" "正在安装 soga..."
-    docker run --restart=always --name "$CONTAINER_NAME" -d \
-    -v /etc/soga/:/etc/soga/ \
-    --network host \
-    -e type=v2board \
-    -e server_type=ss \
-    -e node_id="$NODE_ID" \
-    -e api=webapi \
-    -e webapi_url="$PANEL_URL" \
-    -e webapi_key="$PANEL_KEY" \
-    -e forbidden_bit_torrent=true \
-    -e log_level=info \
-    vaxilu/soga
-    log "info" "soga 已经安装..."
-}
-
 # 配置并运行 soga_compose
+# 可选环境变量（按需取消注释）:
+#   soga_key: 授权码
+#   listen: 监听地址
+#   default_dns: 自定义 DNS（如 1.1.1.1,8.8.8.8）
+#   dns_strategy: DNS 策略（如 ipv4_first）
 config_run_soga_compose() {
     log "info" "开始配置 soga..."
     log "info" "使用镜像标签: $IMAGE_TAG"
@@ -189,7 +168,11 @@ services:
       api: webapi
       webapi_url: ${PANEL_URL}
       webapi_key: ${PANEL_KEY}
-      log_level: info
+      proxy_protocol: 'true'
+      forbidden_bit_torrent: 'true'
+      geo_update_enable: 'true'
+      log_level: ${LOG_LEVEL}
+      log_file_dir: /etc/soga/
     volumes:
       - $CONFIG_DIR:/etc/soga
 EOF
@@ -199,14 +182,10 @@ EOF
     $DOCKER_COMPOSE_CMD down
     $DOCKER_COMPOSE_CMD up -d
 
-    if [ $? -eq 0 ]; then
-        log "info" "soga 已经成功安装并启动"
-        log "info" "容器名称: $CONTAINER_NAME"
-        log "info" "镜像版本: $DOCKER_IMAGE:$IMAGE_TAG"
-        log "info" "节点ID: $NODE_ID"
-    else
-        log "error" "服务启动失败，请检查日志."
-    fi
+    log "info" "soga 已经成功安装并启动"
+    log "info" "容器名称: $CONTAINER_NAME"
+    log "info" "镜像版本: $DOCKER_IMAGE:$IMAGE_TAG"
+    log "info" "节点ID: $NODE_ID"
 }
 
 # 安装 soga
@@ -258,11 +237,13 @@ show_help() {
   --panel-key KEY       面板API密钥 (必需)
   --node-id ID          节点ID (必需)
   --image-tag TAG       Docker镜像标签 (默认: latest)
+  --log-level LEVEL     日志等级: debug/info/warn/error (默认: info)
 
 示例:
   $0 --update
   $0 --install --container-name soga1 --panel-url https://example.com --panel-key your_key --node-id 1
   $0 --install --container-name soga1 --panel-url https://example.com --panel-key your_key --node-id 1 --image-tag v1.7.11
+  $0 --install --container-name soga1 --panel-url https://example.com --panel-key your_key --node-id 1 --log-level debug
   $0 --restart
   $0 --stop
 EOF
@@ -339,6 +320,20 @@ parse_arguments() {
                     shift 2
                 else
                     log "error" "--image-tag 需要提供镜像标签"
+                    exit 1
+                fi
+                ;;
+            --log-level)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    if [[ "$2" =~ ^(debug|info|warn|error)$ ]]; then
+                        LOG_LEVEL="$2"
+                        shift 2
+                    else
+                        log "error" "--log-level 值无效: $2，合法值: debug/info/warn/error"
+                        exit 1
+                    fi
+                else
+                    log "error" "--log-level 需要提供日志等级"
                     exit 1
                 fi
                 ;;
