@@ -37,6 +37,15 @@ log() {
     fi
 }
 
+remove_update_cron() {
+    local current
+    current=$(crontab -l 2>/dev/null) || return 0
+    if echo "$current" | grep -qF "${SMARTDNS_DIR}/update-lists.sh"; then
+        echo "$current" | grep -vF "${SMARTDNS_DIR}/update-lists.sh" | crontab - || crontab -r 2>/dev/null || true
+        log OK "已清除域名列表更新 cron"
+    fi
+}
+
 is_valid_ip() {
     local ip="$1"
     [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
@@ -529,11 +538,7 @@ uninstall() {
     restore_resolv_conf
     rm -f /etc/resolv.conf.bak.smartdns.* 2>/dev/null || true
 
-    # 清除 cron job
-    if crontab -l 2>/dev/null | grep -qF "${SMARTDNS_DIR}/update-lists.sh"; then
-        crontab -l 2>/dev/null | grep -vF "${SMARTDNS_DIR}/update-lists.sh" | crontab -
-        log OK "已清除域名列表更新 cron"
-    fi
+    remove_update_cron
 
     if [[ -t 0 ]]; then
         read -p "是否删除配置目录 ${SMARTDNS_DIR}? [y/N] " -n 1 -r REPLY || true
@@ -635,11 +640,13 @@ restore_dns_on_failure() {
 
 setup_cron_update() {
     local cron_cmd="0 3 * * 0 ${SMARTDNS_DIR}/update-lists.sh >> /var/log/smartdns-update.log 2>&1"
-    if crontab -l 2>/dev/null | grep -qF "${SMARTDNS_DIR}/update-lists.sh"; then
+    local current
+    current=$(crontab -l 2>/dev/null) || current=""
+    if echo "$current" | grep -qF "${SMARTDNS_DIR}/update-lists.sh"; then
         log OK "域名列表更新 cron 已存在"
         return
     fi
-    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
+    { echo "$current"; echo "$cron_cmd"; } | crontab -
     log OK "已注册每周日凌晨 3 点自动更新域名列表"
 }
 
@@ -698,6 +705,17 @@ main() {
     if [[ "$DOWNLOAD_LISTS" == true ]]; then
         download_domain_lists
         setup_cron_update
+    else
+        # 清理旧 -d 模式残留
+        if ls "${DOMAIN_LIST_DIR}"/*.conf &>/dev/null; then
+            rm -f "${DOMAIN_LIST_DIR}"/*.conf
+            log OK "已清理旧域名列表文件"
+        fi
+        if [[ -f "${SMARTDNS_DIR}/update-lists.sh" ]]; then
+            rm -f "${SMARTDNS_DIR}/update-lists.sh"
+            log OK "已清理旧更新脚本"
+        fi
+        remove_update_cron
     fi
 
     setup_force_ipv6
