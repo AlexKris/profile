@@ -23,14 +23,26 @@ FORCE_IPV6=false
 # 工具函数
 # ============================================================
 
-log() { echo "[$1] $2"; }
+log() {
+    local level="$1" msg="$2"
+    if [[ -t 1 ]]; then
+        case "$level" in
+            OK)   echo -e "\033[32m[OK]\033[0m $msg" ;;
+            WARN) echo -e "\033[33m[WARN]\033[0m $msg" ;;
+            ERR)  echo -e "\033[31m[ERR]\033[0m $msg" ;;
+            *)    echo "[${level}] $msg" ;;
+        esac
+    else
+        echo "[$level] $msg"
+    fi
+}
 
 is_valid_ip() {
     local ip="$1"
     [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
     local IFS='.'
     read -r a b c d <<< "$ip"
-    (( a <= 255 && b <= 255 && c <= 255 && d <= 255 ))
+    (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 ))
 }
 
 show_help() {
@@ -48,6 +60,7 @@ show_help() {
   -i, --intranet-dns <IP>    设置内网 DNS（可选）
   -u, --unlock-dns <IP>      设置解锁 DNS（默认: 103.214.22.32，仅 -d 模式）
   -t, --timezone <TZ>        设置时区（默认: Asia/Hong_Kong）
+  -s, --status               显示 SmartDNS 状态
   --uninstall                卸载 SmartDNS
   -h, --help                 显示帮助
 
@@ -84,6 +97,13 @@ check_docker() {
     else
         log OK "Docker Compose 已安装"
     fi
+
+    # 预装 dnsutils（此时原有 DNS 仍可用）
+    if ! command -v dig &>/dev/null; then
+        if ! { apt-get update -qq && apt-get install -y -qq dnsutils; } 2>/dev/null; then
+            log WARN "dnsutils 安装失败，部署验证将受限"
+        fi
+    fi
 }
 
 create_directories() {
@@ -104,7 +124,7 @@ download_domain_lists() {
         log INFO "  下载 ${name}..."
         if curl -fsSL "${BASE_URL}/${name}" -o "${local_path}" 2>/dev/null; then
             # 清理：移除注释、空行、include、regexp、full 前缀行
-            sed -i '/^#/d; /^$/d; /^@/d; /^include:/d; /^regexp:/d; /^full:/d' "${local_path}" 2>/dev/null || true
+            sed -i '/^#/d; /^$/d; /^@/d; /^include:/d; /^regexp:/d; /^full:/d; s/^domain://g' "${local_path}" 2>/dev/null || true
             local line_count
             line_count=$(wc -l < "${local_path}")
             log OK "    ${name}: ${line_count} 条域名"
@@ -136,7 +156,7 @@ for name in "${SERVICES[@]}"; do
     local_path="${DOMAIN_LIST_DIR}/${name}.conf"
 
     if curl -fsSL "${BASE_URL}/${name}" -o "${local_path}" 2>/dev/null; then
-        sed -i '/^#/d; /^$/d; /^@/d; /^include:/d; /^regexp:/d; /^full:/d' "${local_path}" 2>/dev/null || true
+        sed -i '/^#/d; /^$/d; /^@/d; /^include:/d; /^regexp:/d; /^full:/d; s/^domain://g' "${local_path}" 2>/dev/null || true
         echo "[OK] ${name}: $(wc -l < "${local_path}") 条域名"
     else
         echo "[WARN] ${name} 下载失败"
@@ -144,7 +164,7 @@ for name in "${SERVICES[@]}"; do
 done
 
 # 重载 SmartDNS 配置
-docker kill -s HUP smartdns 2>/dev/null || docker restart smartdns 2>/dev/null || true
+docker restart smartdns 2>/dev/null || true
 
 echo "[OK] 域名列表更新完成"
 SCRIPT
@@ -288,23 +308,50 @@ EOF
     log OK "SmartDNS 配置生成完成"
 }
 
-configure_system_dns() {
-    log INFO "配置系统 DNS..."
+release_port53() {
+    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        log WARN "检测到 systemd-resolved，正在停止以释放端口 53..."
+        systemctl disable --now systemd-resolved
+    fi
+    # 若其他进程占用 53（TCP 或 UDP），给出警告
+    if ss -tlnp 'sport = :53' 2>/dev/null | grep -q ':53' || \
+       ss -ulnp 'sport = :53' 2>/dev/null | grep -q ':53'; then
+        log WARN "端口 53 仍被占用:"
+        ss -tlunp 'sport = :53' 2>/dev/null || true
+    fi
+}
 
-    # 解锁以便修改
+backup_resolv_conf() {
+    # 兼容旧脚本：将 .bak.TIMESTAMP 迁移为 .bak.smartdns.TIMESTAMP
+    for f in /etc/resolv.conf.bak.[0-9]*; do
+        [[ -f "$f" ]] || continue
+        mv "$f" "${f/.bak./.bak.smartdns.}"
+    done
+
+    # 已有备份则跳过（避免重复部署覆盖原始备份）
+    if ls /etc/resolv.conf.bak.smartdns.* &>/dev/null; then
+        return
+    fi
+
     chattr -i /etc/resolv.conf 2>/dev/null || true
 
-    # 仅在 resolv.conf 不是指向 127.0.0.1 时才备份
-    if [[ -f /etc/resolv.conf ]] && ! grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
-        cp /etc/resolv.conf "/etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)"
+    if [[ -L /etc/resolv.conf ]]; then
+        # 符号链接：备份链接目标内容（resolved 停止前调用，目标仍可读）
+        local link_target
+        link_target=$(readlink -f /etc/resolv.conf 2>/dev/null) || true
+        if [[ -n "$link_target" && -f "$link_target" ]]; then
+            cp "$link_target" "/etc/resolv.conf.bak.smartdns.$(date +%Y%m%d%H%M%S)"
+        fi
+    elif [[ -f /etc/resolv.conf ]]; then
+        cp /etc/resolv.conf "/etc/resolv.conf.bak.smartdns.$(date +%Y%m%d%H%M%S)"
     fi
+}
 
-    if systemctl is-active --quiet systemd-resolved; then
-        log WARN "检测到 systemd-resolved，正在停止..."
-        systemctl disable --now systemd-resolved
-        rm -f /etc/resolv.conf
-    fi
+set_system_dns() {
+    log INFO "配置系统 DNS..."
 
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    rm -f /etc/resolv.conf 2>/dev/null || true
     echo "nameserver 127.0.0.1" > /etc/resolv.conf
     chattr +i /etc/resolv.conf 2>/dev/null || true
     log OK "系统 DNS 配置完成"
@@ -313,24 +360,50 @@ configure_system_dns() {
 start_service() {
     log INFO "启动 SmartDNS..."
 
-    docker compose -f "${DOCKER_DIR}/docker-compose.yaml" down 2>/dev/null || true
     docker compose -f "${DOCKER_DIR}/docker-compose.yaml" up -d
 
     local i
     for i in $(seq 1 15); do
         if docker inspect -f '{{.State.Status}}' smartdns 2>/dev/null | grep -q 'running'; then
-            log OK "SmartDNS 启动成功"
-            return
+            log OK "SmartDNS 容器启动成功"
+            break
         fi
         sleep 1
     done
 
-    log ERR "SmartDNS 在 15s 内未就绪，请检查: docker compose -f ${DOCKER_DIR}/docker-compose.yaml ps"
-    exit 1
+    if ! docker inspect -f '{{.State.Status}}' smartdns 2>/dev/null | grep -q 'running'; then
+        log ERR "SmartDNS 在 15s 内未就绪，请检查: docker compose -f ${DOCKER_DIR}/docker-compose.yaml ps"
+        exit 1
+    fi
+
+    # 验证端口 53 监听（TCP + UDP）
+    sleep 2
+    if ! ss -ulnp 'sport = :53' 2>/dev/null | grep -q ':53' && \
+       ! ss -tlnp 'sport = :53' 2>/dev/null | grep -q ':53'; then
+        log ERR "SmartDNS 容器运行中但未监听端口 53，请检查: docker logs smartdns"
+        exit 1
+    fi
+    log OK "SmartDNS 已监听端口 53"
+
+    # 验证 DNS 实际可响应
+    if command -v dig &>/dev/null; then
+        for i in $(seq 1 10); do
+            if dig +short +time=1 +tries=1 google.com @127.0.0.1 &>/dev/null; then
+                log OK "SmartDNS DNS 解析验证通过"
+                return
+            fi
+            sleep 1
+        done
+        log ERR "SmartDNS 监听端口 53 但无法解析，请检查: docker logs smartdns"
+        exit 1
+    fi
 }
 
 verify_deployment() {
-    command -v dig &>/dev/null || { apt-get update -qq && apt-get install -y -qq dnsutils 2>/dev/null || true; }
+    if ! command -v dig &>/dev/null; then
+        log WARN "dig 未安装，跳过 DNS 验证"
+        return
+    fi
 
     log INFO "验证部署..."
     echo "=========================================="
@@ -430,8 +503,7 @@ EOF
 
 域名列表更新:
   手动更新: ${SMARTDNS_DIR}/update-lists.sh
-  定时更新: crontab -e 添加以下内容
-            0 3 * * 0 ${SMARTDNS_DIR}/update-lists.sh >> /var/log/smartdns-update.log 2>&1
+  定时更新: 已自动注册（每周日凌晨 3 点），查看: crontab -l
 
 EOF
     fi
@@ -448,8 +520,14 @@ uninstall() {
     (cd "${DOCKER_DIR}" 2>/dev/null && docker compose down 2>/dev/null) || true
     chattr -i /etc/resolv.conf 2>/dev/null || true
 
+    # 兼容旧脚本备份格式
+    for f in /etc/resolv.conf.bak.[0-9]*; do
+        [[ -f "$f" ]] || continue
+        mv "$f" "${f/.bak./.bak.smartdns.}"
+    done
+
     local backup
-    backup=$(ls -t /etc/resolv.conf.bak.* 2>/dev/null | head -1) || true
+    backup=$(ls -t /etc/resolv.conf.bak.smartdns.* 2>/dev/null | head -1) || true
     if [[ -n "$backup" ]]; then
         cp "$backup" /etc/resolv.conf
         log INFO "已恢复 DNS 配置: $backup"
@@ -457,11 +535,107 @@ uninstall() {
         echo "nameserver 1.1.1.1" > /etc/resolv.conf
         log INFO "已设置默认 DNS: 1.1.1.1"
     fi
+    # 清理备份文件
+    rm -f /etc/resolv.conf.bak.smartdns.* 2>/dev/null || true
 
-    read -p "是否删除配置目录 ${SMARTDNS_DIR}? [y/N] " -n 1 -r REPLY || true
-    echo
-    [[ "${REPLY:-}" =~ ^[Yy]$ ]] && rm -rf "${SMARTDNS_DIR}" && log OK "配置目录已删除"
+    # 清除 cron job
+    if crontab -l 2>/dev/null | grep -qF "${SMARTDNS_DIR}/update-lists.sh"; then
+        crontab -l 2>/dev/null | grep -vF "${SMARTDNS_DIR}/update-lists.sh" | crontab -
+        log OK "已清除域名列表更新 cron"
+    fi
+
+    if [[ -t 0 ]]; then
+        read -p "是否删除配置目录 ${SMARTDNS_DIR}? [y/N] " -n 1 -r REPLY || true
+        echo
+        [[ "${REPLY:-}" =~ ^[Yy]$ ]] && rm -rf "${SMARTDNS_DIR}" && log OK "配置目录已删除"
+    else
+        log INFO "非交互式模式，保留配置目录: ${SMARTDNS_DIR}"
+    fi
     log OK "SmartDNS 已卸载"
+}
+
+show_status() {
+    echo "=========================================="
+    echo "SmartDNS 状态检查"
+    echo "=========================================="
+
+    # 1. 容器状态
+    echo -n "容器状态: "
+    if docker inspect -f '{{.State.Status}}' smartdns 2>/dev/null | grep -q 'running'; then
+        echo "运行中 ✓"
+    else
+        echo "未运行 ✗"
+    fi
+
+    # 2. 端口监听
+    echo -n "端口 53:  "
+    if ss -ulnp 'sport = :53' 2>/dev/null | grep -q ':53' || \
+       ss -tlnp 'sport = :53' 2>/dev/null | grep -q ':53'; then
+        echo "监听中 ✓"
+    else
+        echo "未监听 ✗"
+    fi
+
+    # 3. DNS 解析
+    if command -v dig &>/dev/null; then
+        echo -n "DNS 解析: "
+        local result
+        result=$(dig +short +time=2 +tries=1 google.com @127.0.0.1 2>/dev/null | head -1)
+        if [[ -n "$result" ]]; then
+            echo "正常 ✓ (${result})"
+        else
+            echo "失败 ✗"
+        fi
+    fi
+
+    # 4. resolv.conf
+    echo -n "系统 DNS: "
+    if grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
+        echo "127.0.0.1 (SmartDNS) ✓"
+    else
+        echo "$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1) (非 SmartDNS)"
+    fi
+
+    # 5. 配置摘要
+    echo ""
+    echo "配置:"
+    if [[ -f "${CONFIG_DIR}/smartdns.conf" ]]; then
+        echo "  上游 DNS: $(grep '^server ' "${CONFIG_DIR}/smartdns.conf" 2>/dev/null | grep -v '#' | awk '{print $2}' | tr '\n' ' ')"
+        [[ -f "${CONFIG_DIR}/force-ipv6.list" ]] && echo "  强制 IPv6: $(wc -l < "${CONFIG_DIR}/force-ipv6.list") 个域名"
+        local unlock_count=0
+        for f in "${DOMAIN_LIST_DIR}"/*.conf; do
+            [[ -f "$f" ]] && unlock_count=$((unlock_count + $(wc -l < "$f")))
+        done
+        [[ $unlock_count -gt 0 ]] && echo "  分流规则: ${unlock_count} 条"
+    else
+        echo "  配置文件不存在"
+    fi
+
+    echo "=========================================="
+}
+
+restore_dns_on_failure() {
+    log WARN "部署中断，正在恢复 DNS..."
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    local backup
+    backup=$(ls -t /etc/resolv.conf.bak.smartdns.* 2>/dev/null | head -1) || true
+    if [[ -n "$backup" ]]; then
+        cp "$backup" /etc/resolv.conf
+        log WARN "已恢复原始 DNS: $backup"
+    else
+        echo "nameserver 1.1.1.1" > /etc/resolv.conf
+        log WARN "DNS 已设为 1.1.1.1（临时），请手动检查"
+    fi
+}
+
+setup_cron_update() {
+    local cron_cmd="0 3 * * 0 ${SMARTDNS_DIR}/update-lists.sh >> /var/log/smartdns-update.log 2>&1"
+    if crontab -l 2>/dev/null | grep -qF "update-lists.sh"; then
+        log OK "域名列表更新 cron 已存在"
+        return
+    fi
+    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
+    log OK "已注册每周日凌晨 3 点自动更新域名列表"
 }
 
 # ============================================================
@@ -485,18 +659,11 @@ main() {
                 TIMEZONE="$2"; shift 2 ;;
             -d|--download-lists) DOWNLOAD_LISTS=true; shift ;;
             -6|--force-ipv6)     FORCE_IPV6=true; shift ;;
+            -s|--status)         show_status; exit 0 ;;
             --uninstall)         UNINSTALL=true; shift ;;
             -h|--help)           show_help; exit 0 ;;
             *) log ERR "未知参数: $1"; show_help; exit 1 ;;
         esac
-    done
-
-    # 验证 IP 参数
-    local ip
-    for var in INTRANET_DNS UNLOCK_DNS; do
-        ip="${!var}"
-        [[ -z "$ip" ]] && continue
-        is_valid_ip "$ip" || { log ERR "无效的 IP: $ip"; exit 1; }
     done
 
     if [[ "$UNINSTALL" == true ]]; then
@@ -509,16 +676,38 @@ main() {
         exit 1
     fi
 
+    # 验证 IP 参数（仅安装路径需要）
+    local ip
+    for var in INTRANET_DNS UNLOCK_DNS; do
+        ip="${!var}"
+        [[ -z "$ip" ]] && continue
+        is_valid_ip "$ip" || { log ERR "无效的 IP: $ip"; exit 1; }
+    done
+
     check_docker
     create_directories
 
-    [[ "$DOWNLOAD_LISTS" == true ]] && download_domain_lists
+    if [[ "$DOWNLOAD_LISTS" == true ]]; then
+        download_domain_lists
+        setup_cron_update
+    fi
 
     setup_force_ipv6
     generate_docker_compose
     generate_smartdns_config
+    # 备份原始 resolv.conf（首次部署时，resolved 尚未停止，链接目标可读）
+    backup_resolv_conf
+    # 停旧容器前，先确保系统有可用 DNS（重复部署时 resolv.conf 指向 127.0.0.1）
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    if grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
+        echo "nameserver 1.1.1.1" > /etc/resolv.conf
+    fi
+    trap restore_dns_on_failure ERR
+    docker compose -f "${DOCKER_DIR}/docker-compose.yaml" down 2>/dev/null || true
+    release_port53
     start_service
-    configure_system_dns
+    trap - ERR
+    set_system_dns
     verify_deployment
     show_deployment_info
 }
