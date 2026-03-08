@@ -630,7 +630,7 @@ restore_dns_on_failure() {
 
 setup_cron_update() {
     local cron_cmd="0 3 * * 0 ${SMARTDNS_DIR}/update-lists.sh >> /var/log/smartdns-update.log 2>&1"
-    if crontab -l 2>/dev/null | grep -qF "update-lists.sh"; then
+    if crontab -l 2>/dev/null | grep -qF "${SMARTDNS_DIR}/update-lists.sh"; then
         log OK "域名列表更新 cron 已存在"
         return
     fi
@@ -676,13 +676,13 @@ main() {
         exit 1
     fi
 
-    # 验证 IP 参数（仅安装路径需要）
-    local ip
-    for var in INTRANET_DNS UNLOCK_DNS; do
-        ip="${!var}"
-        [[ -z "$ip" ]] && continue
-        is_valid_ip "$ip" || { log ERR "无效的 IP: $ip"; exit 1; }
-    done
+    # 验证 IP 参数
+    if [[ -n "$INTRANET_DNS" ]]; then
+        is_valid_ip "$INTRANET_DNS" || { log ERR "无效的内网 DNS: $INTRANET_DNS"; exit 1; }
+    fi
+    if [[ "$DOWNLOAD_LISTS" == true ]]; then
+        is_valid_ip "$UNLOCK_DNS" || { log ERR "无效的解锁 DNS: $UNLOCK_DNS"; exit 1; }
+    fi
 
     check_docker
     create_directories
