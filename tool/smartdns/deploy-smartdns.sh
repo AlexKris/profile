@@ -526,16 +526,7 @@ uninstall() {
         mv "$f" "${f/.bak./.bak.smartdns.}"
     done
 
-    local backup
-    backup=$(ls -t /etc/resolv.conf.bak.smartdns.* 2>/dev/null | head -1) || true
-    if [[ -n "$backup" ]]; then
-        cp "$backup" /etc/resolv.conf
-        log INFO "已恢复 DNS 配置: $backup"
-    else
-        echo "nameserver 1.1.1.1" > /etc/resolv.conf
-        log INFO "已设置默认 DNS: 1.1.1.1"
-    fi
-    # 清理备份文件
+    restore_resolv_conf
     rm -f /etc/resolv.conf.bak.smartdns.* 2>/dev/null || true
 
     # 清除 cron job
@@ -614,18 +605,32 @@ show_status() {
     echo "=========================================="
 }
 
-restore_dns_on_failure() {
-    log WARN "部署中断，正在恢复 DNS..."
+restore_resolv_conf() {
     chattr -i /etc/resolv.conf 2>/dev/null || true
+    # 如果系统有 systemd-resolved，优先恢复它
+    if systemctl list-unit-files systemd-resolved.service &>/dev/null; then
+        if systemctl enable --now systemd-resolved 2>/dev/null; then
+            ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
+            log OK "已恢复 systemd-resolved"
+            return
+        fi
+    fi
+    # resolved 不可用，尝试从备份恢复（备份内容不含 127.* 才有意义）
     local backup
     backup=$(ls -t /etc/resolv.conf.bak.smartdns.* 2>/dev/null | head -1) || true
-    if [[ -n "$backup" ]]; then
+    if [[ -n "$backup" ]] && ! grep -qE '^nameserver 127\.' "$backup" 2>/dev/null; then
         cp "$backup" /etc/resolv.conf
-        log WARN "已恢复原始 DNS: $backup"
-    else
-        echo "nameserver 1.1.1.1" > /etc/resolv.conf
-        log WARN "DNS 已设为 1.1.1.1（临时），请手动检查"
+        log OK "已恢复 DNS: $backup"
+        return
     fi
+    # 兜底：公共 DNS
+    echo "nameserver 1.1.1.1" > /etc/resolv.conf
+    log WARN "DNS 已设为 1.1.1.1（临时），请手动检查"
+}
+
+restore_dns_on_failure() {
+    log WARN "部署中断，正在恢复 DNS..."
+    restore_resolv_conf
 }
 
 setup_cron_update() {
@@ -697,9 +702,11 @@ main() {
     generate_smartdns_config
     # 备份原始 resolv.conf（首次部署时，resolved 尚未停止，链接目标可读）
     backup_resolv_conf
-    # 停旧容器前，先确保系统有可用 DNS（重复部署时 resolv.conf 指向 127.0.0.1）
+    # 停旧容器/resolved 前，确保系统有可用 DNS
+    # 覆盖：127.0.0.1（SmartDNS 重复部署）、127.0.0.53（systemd-resolved）、符号链接
     chattr -i /etc/resolv.conf 2>/dev/null || true
-    if grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
+    if [[ -L /etc/resolv.conf ]] || grep -qE '^nameserver 127\.' /etc/resolv.conf 2>/dev/null; then
+        rm -f /etc/resolv.conf 2>/dev/null || true
         echo "nameserver 1.1.1.1" > /etc/resolv.conf
     fi
     trap restore_dns_on_failure ERR
