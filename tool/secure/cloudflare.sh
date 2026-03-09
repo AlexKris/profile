@@ -19,6 +19,7 @@ readonly CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
 
 # 内网地址段
 readonly INTERNAL_NETWORKS=("127.0.0.1" "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16")
+readonly INTERNAL_NETWORKS_V6=("::1" "fe80::/10")
 
 # Docker 状态缓存（避免重复检测）
 _DOCKER_CHECKED=false
@@ -47,19 +48,19 @@ log_message() {
             echo "[错误] $message" >&2
             ;;
         "WARNING"|"WARN")
-            echo "[警告] $message"
+            echo "[警告] $message" >&2
             ;;
         "INFO")
-            echo "[信息] $message"
+            echo "[信息] $message" >&2
             ;;
         "DEBUG")
-            [ "${DEBUG:-}" = "1" ] && echo "[调试] $message"
+            [ "${DEBUG:-}" = "1" ] && echo "[调试] $message" >&2
             ;;
         "SUCCESS"|"OK")
-            echo "[成功] $message"
+            echo "[成功] $message" >&2
             ;;
         *)
-            echo "[日志] $message"
+            echo "[日志] $message" >&2
             ;;
     esac
 
@@ -137,8 +138,7 @@ get_cloudflare_ips() {
     local ipv6_list=""
 
     # 获取 IPv4 列表
-    ipv4_list=$(curl -s --connect-timeout 10 --max-time 30 "$CF_IPV4_URL")
-    if [ $? -ne 0 ] || [ -z "$ipv4_list" ]; then
+    if ! ipv4_list=$(curl -s --connect-timeout 10 --max-time 30 "$CF_IPV4_URL") || [ -z "$ipv4_list" ]; then
         log_message "ERROR" "无法获取 Cloudflare IPv4 地址列表"
         return 1
     fi
@@ -151,8 +151,7 @@ get_cloudflare_ips() {
 
     # 获取 IPv6 列表
     if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
-        ipv6_list=$(curl -s --connect-timeout 10 --max-time 30 "$CF_IPV6_URL")
-        if [ $? -eq 0 ] && [ -n "$ipv6_list" ]; then
+        if ipv6_list=$(curl -s --connect-timeout 10 --max-time 30 "$CF_IPV6_URL") && [ -n "$ipv6_list" ]; then
             log_message "INFO" "成功获取 IPv6 地址列表"
         else
             log_message "WARNING" "无法获取 IPv6 地址列表"
@@ -175,12 +174,12 @@ save_config() {
 
     log_message "INFO" "保存配置到 $CF_CONFIG_FILE"
 
-    cat > "$CF_CONFIG_FILE" << CFGEOF
+    cat > "$CF_CONFIG_FILE" << 'CFGEOF'
 # Cloudflare 防护配置文件
 # 由 cloudflare.sh --enable 生成，请勿手动修改
-NGINX_REALIP_CONF=$nginx_conf
-NGINX_RELOAD_CMD=$nginx_reload_cmd
 CFGEOF
+    echo "NGINX_REALIP_CONF=$nginx_conf" >> "$CF_CONFIG_FILE"
+    echo "NGINX_RELOAD_CMD=$nginx_reload_cmd" >> "$CF_CONFIG_FILE"
 
     chmod 600 "$CF_CONFIG_FILE"
 }
@@ -304,6 +303,35 @@ ensure_internal_rules() {
             done
         done
     fi
+
+    # IPv6 内网规则
+    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+        for network in "${INTERNAL_NETWORKS_V6[@]}"; do
+            for port in 80 443; do
+                if ! ip6tables -C INPUT -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
+                    ip6tables -I INPUT 1 -p tcp -s "$network" --dport "$port" -j ACCEPT -m comment --comment "$INTERNAL_MARK"
+                    log_message "INFO" "添加 IPv6 内网规则: $network -> $port"
+                fi
+            done
+        done
+
+        # IPv6 DOCKER-USER 链规则
+        if check_docker_status && ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+            if ! ip6tables -C DOCKER-USER -i lo -j RETURN -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
+                ip6tables -I DOCKER-USER 1 -i lo -j RETURN -m comment --comment "$INTERNAL_MARK"
+                log_message "INFO" "添加 IPv6 DOCKER-USER lo 接口规则"
+            fi
+
+            for network in "${INTERNAL_NETWORKS_V6[@]}"; do
+                for port in 80 443; do
+                    if ! ip6tables -C DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK" 2>/dev/null; then
+                        ip6tables -A DOCKER-USER -s "$network" -p tcp --dport "$port" -j RETURN -m comment --comment "$INTERNAL_MARK"
+                        log_message "INFO" "添加 IPv6 DOCKER-USER 内网规则: $network -> $port"
+                    fi
+                done
+            done
+        fi
+    fi
 }
 
 # 清理旧的 Cloudflare 规则
@@ -333,6 +361,15 @@ clean_cloudflare_rules() {
             [ -z "$rule_num" ] && break
             ip6tables -D INPUT "$rule_num" 2>/dev/null || break
         done
+
+        # 清理 IPv6 DOCKER-USER 链
+        if ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+            while true; do
+                local rule_num=$(ip6tables -L DOCKER-USER -n --line-numbers | grep "$COMMENT_MARK" | head -1 | awk '{print $1}')
+                [ -z "$rule_num" ] && break
+                ip6tables -D DOCKER-USER "$rule_num" 2>/dev/null || break
+            done
+        fi
     fi
 
     log_message "INFO" "旧规则清理完成"
@@ -352,7 +389,7 @@ add_cloudflare_rules() {
         has_docker=true
     fi
 
-    # 获取插入位置
+    # 获取 IPv4 插入位置
     local insert_pos_input=$(iptables -L INPUT -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
     [ -z "$insert_pos_input" ] && insert_pos_input=8
 
@@ -360,6 +397,21 @@ add_cloudflare_rules() {
     if [ "$has_docker" = "true" ]; then
         insert_pos_docker=$(iptables -L DOCKER-USER -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
         [ -z "$insert_pos_docker" ] && insert_pos_docker=9
+    fi
+
+    # 获取 IPv6 独立插入位置
+    local insert_pos_input_v6=0
+    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+        insert_pos_input_v6=$(ip6tables -L INPUT -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
+        [ -z "$insert_pos_input_v6" ] && insert_pos_input_v6=0
+    fi
+
+    local has_docker_v6=false
+    local insert_pos_docker_v6=0
+    if [ "$has_docker" = "true" ] && command -v ip6tables &>/dev/null && ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+        has_docker_v6=true
+        insert_pos_docker_v6=$(ip6tables -L DOCKER-USER -n --line-numbers | grep "$INTERNAL_MARK" | tail -1 | awk '{print $1}')
+        [ -z "$insert_pos_docker_v6" ] && insert_pos_docker_v6=0
     fi
 
     while IFS= read -r ip; do
@@ -392,11 +444,22 @@ add_cloudflare_rules() {
             # IPv6 规则
             if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
                 for port in 80 443; do
-                    if ip6tables -I INPUT $((++insert_pos_input)) -p tcp -s "$ip" --dport "$port" -j ACCEPT -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
+                    # INPUT 链
+                    if ip6tables -I INPUT $((++insert_pos_input_v6)) -p tcp -s "$ip" --dport "$port" -j ACCEPT -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
                         ((count++)) || true
                     else
                         ((errors++)) || true
-                        log_message "WARNING" "无法添加 IPv6 规则: $ip:$port"
+                        log_message "WARNING" "无法添加 IPv6 INPUT 规则: $ip:$port"
+                    fi
+
+                    # DOCKER-USER 链
+                    if [ "$has_docker_v6" = "true" ]; then
+                        if ip6tables -I DOCKER-USER $((++insert_pos_docker_v6)) -s "$ip" -p tcp --dport "$port" -j RETURN -m comment --comment "$COMMENT_MARK" 2>/dev/null; then
+                            ((count++)) || true
+                        else
+                            ((errors++)) || true
+                            log_message "WARNING" "无法添加 IPv6 DOCKER-USER 规则: $ip:$port"
+                        fi
                     fi
                 done
             fi
@@ -428,8 +491,29 @@ ensure_drop_rules_last() {
         iptables -A DOCKER-USER -p tcp --dport 443 -j DROP
 
         # 确保最后有 RETURN 规则
-        iptables -D DOCKER-USER -j RETURN 2>/dev/null || true
+        while iptables -D DOCKER-USER -j RETURN 2>/dev/null; do :; done
         iptables -A DOCKER-USER -j RETURN
+    fi
+
+    # IPv6 DROP 规则
+    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+        while ip6tables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+        while ip6tables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+
+        ip6tables -A INPUT -p tcp --dport 80 -j DROP
+        ip6tables -A INPUT -p tcp --dport 443 -j DROP
+
+        # IPv6 DOCKER-USER DROP 规则
+        if check_docker_status && ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+            while ip6tables -D DOCKER-USER -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+            while ip6tables -D DOCKER-USER -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+
+            ip6tables -A DOCKER-USER -p tcp --dport 80 -j DROP
+            ip6tables -A DOCKER-USER -p tcp --dport 443 -j DROP
+
+            while ip6tables -D DOCKER-USER -j RETURN 2>/dev/null; do :; done
+            ip6tables -A DOCKER-USER -j RETURN
+        fi
     fi
 }
 
@@ -511,9 +595,17 @@ save_rules() {
     elif [ -f /etc/redhat-release ]; then
         # RHEL/CentOS
         if iptables-save > /etc/sysconfig/iptables 2>/dev/null; then
-            log_message "INFO" "规则已保存"
+            log_message "INFO" "IPv4 规则已保存"
         else
-            log_message "WARNING" "无法保存规则"
+            log_message "WARNING" "无法保存 IPv4 规则"
+        fi
+
+        if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+            if ip6tables-save > /etc/sysconfig/ip6tables 2>/dev/null; then
+                log_message "INFO" "IPv6 规则已保存"
+            else
+                log_message "WARNING" "无法保存 IPv6 规则"
+            fi
         fi
     fi
 }
@@ -538,6 +630,23 @@ show_status() {
         echo "DOCKER-USER 链规则:"
         echo "  内网规则: $docker_internal 条"
         echo "  Cloudflare 规则: $docker_cloudflare 条"
+    fi
+
+    # IPv6 规则统计
+    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+        local internal_count_v6=$(ip6tables -L INPUT -n | grep -c "$INTERNAL_MARK" 2>/dev/null || echo 0)
+        local cloudflare_count_v6=$(ip6tables -L INPUT -n | grep -c "$COMMENT_MARK" 2>/dev/null || echo 0)
+        echo "INPUT 链规则 (IPv6):"
+        echo "  内网规则: $internal_count_v6 条"
+        echo "  Cloudflare 规则: $cloudflare_count_v6 条"
+
+        if ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+            local docker_internal_v6=$(ip6tables -L DOCKER-USER -n | grep -c "$INTERNAL_MARK" 2>/dev/null || echo 0)
+            local docker_cloudflare_v6=$(ip6tables -L DOCKER-USER -n | grep -c "$COMMENT_MARK" 2>/dev/null || echo 0)
+            echo "DOCKER-USER 链规则 (IPv6):"
+            echo "  内网规则: $docker_internal_v6 条"
+            echo "  Cloudflare 规则: $docker_cloudflare_v6 条"
+        fi
     fi
 
     # 检查脚本和定时任务
@@ -597,8 +706,7 @@ enable_protection() {
 
     # 获取 Cloudflare IP
     local cf_ips
-    cf_ips=$(get_cloudflare_ips)
-    if [ $? -ne 0 ] || [ -z "$cf_ips" ]; then
+    if ! cf_ips=$(get_cloudflare_ips) || [ -z "$cf_ips" ]; then
         log_message "ERROR" "无法获取 Cloudflare IP 列表"
         return 1
     fi
@@ -631,8 +739,38 @@ enable_protection() {
 disable_protection() {
     log_message "INFO" "禁用 Cloudflare 保护..."
 
-    # 清理 iptables 规则
+    # 清理 Cloudflare 规则
     clean_cloudflare_rules
+
+    # 清理内网规则
+    while iptables -D INPUT -m comment --comment "$INTERNAL_MARK" 2>/dev/null; do :; done
+    if iptables -L DOCKER-USER -n &>/dev/null 2>&1; then
+        while iptables -D DOCKER-USER -m comment --comment "$INTERNAL_MARK" 2>/dev/null; do :; done
+    fi
+    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+        while ip6tables -D INPUT -m comment --comment "$INTERNAL_MARK" 2>/dev/null; do :; done
+        if ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+            while ip6tables -D DOCKER-USER -m comment --comment "$INTERNAL_MARK" 2>/dev/null; do :; done
+        fi
+    fi
+    log_message "INFO" "内网规则已清理"
+
+    # 清理 DROP 规则
+    while iptables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+    while iptables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+    if iptables -L DOCKER-USER -n &>/dev/null 2>&1; then
+        while iptables -D DOCKER-USER -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+        while iptables -D DOCKER-USER -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+    fi
+    if command -v ip6tables &>/dev/null && ip6tables -L -n &>/dev/null 2>&1; then
+        while ip6tables -D INPUT -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+        while ip6tables -D INPUT -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+        if ip6tables -L DOCKER-USER -n &>/dev/null 2>&1; then
+            while ip6tables -D DOCKER-USER -p tcp --dport 80 -j DROP 2>/dev/null; do :; done
+            while ip6tables -D DOCKER-USER -p tcp --dport 443 -j DROP 2>/dev/null; do :; done
+        fi
+    fi
+    log_message "INFO" "DROP 规则已清理"
 
     # 清理 nginx realip 配置
     if [ -f "$CF_CONFIG_FILE" ]; then
@@ -668,8 +806,7 @@ update_ips_internal() {
 
     # 获取最新 IP（只请求一次）
     local cf_ips
-    cf_ips=$(get_cloudflare_ips)
-    if [ $? -ne 0 ] || [ -z "$cf_ips" ]; then
+    if ! cf_ips=$(get_cloudflare_ips) || [ -z "$cf_ips" ]; then
         log_message "ERROR" "无法获取 Cloudflare IP 列表"
         return 1
     fi
@@ -720,8 +857,6 @@ show_help() {
 
 # 主函数
 main() {
-    check_root
-
     local action=""
     local nginx_conf=""
     local nginx_reload_cmd=""
@@ -777,6 +912,14 @@ main() {
         esac
     done
 
+    # --help 不需要 root 权限
+    if [ "$action" = "help" ] || [ -z "$action" ]; then
+        show_help
+        return 0
+    fi
+
+    check_root
+
     case "$action" in
         enable)
             enable_protection "$nginx_conf" "$nginx_reload_cmd"
@@ -789,9 +932,6 @@ main() {
             ;;
         status)
             show_status
-            ;;
-        help|"")
-            show_help
             ;;
     esac
 }
