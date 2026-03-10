@@ -1,0 +1,11 @@
+# > Latency Test - Proxy
+DOMAIN,detectportal.firefox.com
+DOMAIN,www.qualcomm.cn
+DOMAIN,www.gstatic.com
+DOMAIN,i.ytimg.com
+DOMAIN,connectivitycheck.gstatic.com
+DOMAIN,connectivitycheck.android.com
+DOMAIN,captive.v2ex.co
+DOMAIN,www.v2ex.com
+DOMAIN,cdn.jsdelivr.net
+DOMAIN,cp.cloudflare.com
