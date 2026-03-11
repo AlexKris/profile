@@ -281,7 +281,6 @@ server-tls 8.8.8.8:853 -tls-host-verify dns.google
 server-tls 9.9.9.9:853 -tls-host-verify dns.quad9.net
 server-https https://cloudflare-dns.com/dns-query
 server-https https://dns.google/dns-query
-server-https https://dns.quad9.net/dns-query
 EOF
     fi
 
