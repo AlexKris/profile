@@ -522,7 +522,7 @@ EOF
 
 DNS 配置:
   ${INTRANET_DNS:+内网: ${INTRANET_DNS}
-  }公共: 1.1.1.1, 8.8.8.8, 9.9.9.9 (DoT/DoH)
+  }公共: 1.1.1.1, 8.8.8.8 (DoT/DoH) + 9.9.9.9 (DoT)
 
 EOF
     fi

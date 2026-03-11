@@ -27,6 +27,11 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/AlexKris/profile/main/tool/
 
 # 全部组合
 bash <(curl -fsSL "https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh?$(date +%s)") -d -6 -u 22.22.22.22
+
+# UDP 被禁的 VPS：先临时启用 TCP DNS，再部署
+chattr -i /etc/resolv.conf 2>/dev/null
+echo -e "nameserver 1.1.1.1\noptions use-vc" > /etc/resolv.conf
+bash <(curl -fsSL "https://raw.githubusercontent.com/AlexKris/profile/main/tool/smartdns/deploy-smartdns.sh?$(date +%s)")
 ```
 
 ## 参数说明
