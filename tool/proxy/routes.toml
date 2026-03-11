@@ -1,0 +1,423 @@
+enable=true
+
+# ============================================================
+# 劫持检测 -> 直连
+# ============================================================
+[[routes]]
+rules=[
+    "domain:cp.cloudflare.com",
+    "domain:gstatic.com",
+    "domain:i.ytimg.com",
+    "domain:nmcheck.gnome.org",
+    "domain:detectportal.firefox.com",
+    "domain:captive.apple.com",
+    "domain:captive.v2ex.co",
+    "domain:latency-test.skk.moe",
+    "domain:connectivitycheck.android.com",
+]
+
+[[routes.Outs]]
+type="direct"
+
+# ============================================================
+# Emby -> 直连
+# ============================================================
+[[routes]]
+rules=[
+    "domain:cancanbi.com",
+    "domain:cdn.sexemby.com",
+    "domain:emby.to",
+    "domain:ikuramoe.com",
+    "domain:st8.one",
+    "domain:mcjoker.xyz",
+    "domain:mobaiemby.site",
+    "domain:guguemby.site",
+    "domain:gugu.media",
+    "domain:223789.xyz",
+    "domain:023168.xyz",
+    "domain:ii00.cc",
+    "domain:odysseyplus.site",
+    "domain:newneeship.com",
+    "domain:shrekmedia.org",
+]
+
+[[routes.Outs]]
+type="direct"
+
+# ============================================================
+# Download (YouTube / Game / Android) -> 直连
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:youtube",
+    "geosite:category-game-platforms-download",
+    "geosite:category-android-app-download",
+]
+
+[[routes.Outs]]
+type="direct"
+
+# ============================================================
+# Claude/Anthropic -> IPv6 直连
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:anthropic",
+]
+
+[[routes.Outs]]
+listen="YOUR_IPV6_ADDRESS"
+type="direct"
+
+# ============================================================
+# AI -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    # > ChatGPT
+    "geosite:openai",
+    "domain:chatgpt.com",
+    "domain:openai.com",
+    "domain:cdn.auth0.com",
+    "domain:azureedge.net",
+    "domain:sentry.io",
+    "domain:azurefd.net",
+    "domain:intercomcdn.com",
+    "domain:intercom.io",
+    "domain:google-analytics.com",
+    "domain:identrust.com",
+    "domain:challenges.cloudflare.com",
+    "domain:ai.com",
+    # > Copilot
+    "domain:api.trongrid.io",
+    "domain:www.bing.com",
+    "domain:bing.com",
+    "domain:sydney.bing.com",
+    "domain:sydney.vcanbb.chat",
+    "domain:bingai.nothingnessvoid.tech",
+    # > Gemini
+    "domain:gemini.google.com",
+    "domain:proactivebackend-pa.googleapis.com",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# MY (Hotstar / Meta AI / Perplexity) -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:hotstar",
+    "domain:meta.ai",
+    "geosite:perplexity",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 香港 -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:tvb",
+    "geosite:bilibili",
+    # > VIU
+    "domain:www.viu.tv",
+    "domain:www.viu.com",
+    "domain:viu.tv",
+    "domain:viu.com",
+    "domain:d3o7oi00quuwqu.cloudfront.net",
+    # > NowE
+    "geosite:now",
+    "domain:nowestatic.com",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 台湾 -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:bahamut",
+    "geosite:kktv",
+    "geosite:catchplay",
+    "geosite:hamivideo",
+    # > LiTV
+    "domain:litv.tv",
+    "domain:cdn.hinet.net",
+    # > LineTV.TW
+    "domain:chocotv.com.tw",
+    "domain:line-cdn.net",
+    "domain:line-scdn.net",
+    "domain:linetv.tw",
+    # > Hami (geosite 未覆盖的 CDN)
+    "domain:hls-hichannel.cdn.hinet.net",
+    "domain:hamivideo.hinet.net",
+    "domain:hamivideo.cdn.hinet.net",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 日本 -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:hulu",
+    "geosite:niconico",
+    "geosite:abema",
+    "geosite:dmm",
+    "geosite:rakuten",
+    # > DAM
+    "domain:clubdam.com",
+    "domain:cds1.clubdam.com",
+    # > U-NEXT
+    "domain:unext.jp",
+    "domain:nxtv.jp",
+    # > WOWOW
+    "domain:wowow.co.jp",
+    # > J:com On Demand
+    "domain:auth.id2.zaq.ne.jp",
+    # > FOD
+    "domain:fod.fujitv.co.jp",
+    "domain:fod-sp.fujitv.co.jp",
+    "domain:i.fod.fujitv.co.jp",
+    "domain:stream.ne.jp",
+    # > Music.JP
+    "domain:music-book.jp",
+    "domain:overseaauth.music-book.jp",
+    # > Radiko
+    "domain:radiko.jp",
+    "domain:radionikkei.jp",
+    "domain:smartstream.ne.jp",
+    # > Telasa
+    "domain:telasa.jp",
+    "domain:kddi-video.com",
+    "domain:videopass.jp",
+    "domain:d2lmsumy47c8as.cloudfront.net",
+    # > Japanese Games
+    "domain:cygames.jp",
+    "domain:konosubafd.jp",
+    "domain:colorfulpalette.org",
+    "domain:api.worldflipper.jp",
+    # > AnimeFesta JP
+    "domain:iowl.jp",
+    # > Lemino
+    "domain:lemino.docomo.ne.jp",
+    # > D Anime Store
+    "domain:animestore.docomo.ne.jp",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 韩国 -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    # > Wavve
+    "domain:wavve.com",
+    "domain:pooq.co.kr",
+    # > Tving
+    "domain:tving.com",
+    # > Coupang Play
+    "domain:coupangplay.com",
+    # > Naver TV
+    "domain:naver.com",
+    "domain:navercorp.com",
+    "domain:pstatic.net",
+    "domain:smartmediarep.com",
+    # > Afreeca TV
+    "domain:afreecatv.com",
+    # > KBS Domestic
+    "domain:kbs.co.kr",
+    # > Watcha
+    "domain:watcha.com",
+    # > SpotvNow
+    "domain:spotvnow.co.kr",
+    "domain:edge.api.brightcove.com",
+    # > JeiTV
+    "domain:jeitv.com",
+    # > PandaTV
+    "domain:pandalive.co.kr",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 美国 -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    # > Philo
+    "domain:philo.com",
+    "geosite:discoveryplus",
+    "geosite:espn",
+    "geosite:fox",
+    # > FuboTV
+    "domain:www.fubo.tv",
+    "domain:fubo.tv",
+    # > Paramount+
+    "domain:paramountplus.com",
+    "domain:cbsi.live.ott.irdeto.com",
+    "domain:cbsplaylistserver.aws.syncbak.com",
+    "domain:cbsservice.aws.syncbak.com",
+    "domain:link.theplatform.com",
+    "domain:cbsaavideo.com",
+    "domain:cbsi.com",
+    "domain:cbsivideo.com",
+    "domain:pplusstatic.com",
+    # > PeacockTV (无 geosite)
+    "domain:geolocation.onetrust.com",
+    "domain:peacocktv.com",
+    "domain:peacock.com",
+    # > Star+
+    "geosite:starplus",
+    # > BritBox
+    "domain:britbox.com",
+    "domain:www.britbox.com",
+    "domain:britbox.co.uk",
+    # > FXNOW
+    "domain:fxnow.fxnetworks.com",
+    # > Shudder
+    "domain:shudder.com",
+    "domain:www.shudder.com",
+    # > TLCGO
+    "domain:www.tlc.com",
+    "domain:tlc.com",
+    "domain:go.tlc.com",
+    # > PlutoTV
+    "geosite:plutotv",
+    # > SlingTV
+    "geosite:sling",
+    # > StarZ
+    "domain:starz.com",
+    # > encoreTVB
+    "domain:encoretvb.com",
+    "domain:bcbolt446c5271-a.akamaihd.net",
+    "domain:videos-f.jwpsrv.com",
+    "domain:content.jwplatform.com",
+    "domain:edge.api.brightcove.com",
+    # > Directv Stream
+    "domain:atttvnow.com",
+    # > Epix
+    "domain:epix.com",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 加拿大 -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    # > CBC Gem
+    "domain:cbc.ca",
+    "domain:cbchd1dynamicads-i.akamaihd.net",
+    "domain:cbclivedai5-i.akamaihd.net",
+    "domain:cbcnewshd-f.akamaihd.net",
+    "domain:cbcrcott-gem-key.akamaized.net",
+    "domain:cbcrcott-gem.akamaized.net",
+    "domain:go-mpulse.net",
+    "domain:theplatform.com",
+    # > Crave TV
+    "domain:crave.ca",
+    "domain:9c9media.com",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 跨国 (Netflix / Disney / Spotify / HBO 等) -> 出口
+# ============================================================
+[[routes]]
+rules=[
+    "geosite:netflix",
+    "geosite:tiktok",
+    "geosite:tvb",
+    "geosite:dazn",
+    "geosite:primevideo",
+    "geosite:disney",
+    "geosite:spotify",
+    "geosite:hbo",
+    # > Wikipedia (无 geosite)
+    "domain:wikipedia.org",
+    "domain:www.wikipedia.org",
+    # > Setanta
+    "domain:www.setantasports.com",
+    "domain:setantasports.com",
+    "domain:app.setantasports.com",
+    "domain:imggaming.com",
+    "domain:diceplatform.com",
+    "domain:dicelaboratory.com",
+    "domain:pndsn.com",
+    "domain:imggaming.s3-eu-west-1.amazonaws.com",
+    "domain:ux1kpaebv0.execute-api.eu-west-1.amazonaws.com",
+    "domain:1ok961aaca.execute-api.eu-west-1.amazonaws.com",
+]
+
+[[routes.Outs]]
+listen=""
+type="xxx"
+server="xxx"
+port=12345
+password="xxx"
+cipher="xxx"
+
+# ============================================================
+# 兜底 -> 直连
+# ============================================================
+[[routes]]
+rules=["*"]
+
+[[routes.Outs]]
+type="direct"
