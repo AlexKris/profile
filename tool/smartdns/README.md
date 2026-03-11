@@ -6,9 +6,10 @@
 
 | 模式 | 命令 | 功能 |
 |------|------|------|
-| 纯缓存 | `./deploy-smartdns.sh` | DNS 缓存加速 |
+| 纯缓存 | `./deploy-smartdns.sh` | DNS 缓存加速（DoT/DoH） |
 | 分流解锁 | `./deploy-smartdns.sh -d` | DNS 缓存 + 流媒体分流 |
 | 强制 IPv6 | `./deploy-smartdns.sh -6` | DNS 缓存 + 指定域名强制 IPv6 |
+| 明文模式 | `./deploy-smartdns.sh --plain-dns` | DNS 缓存（UDP 明文） |
 
 模式可组合，例如 `-d -6` 同时启用分流解锁和强制 IPv6。
 
@@ -33,9 +34,11 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/AlexKris/profile/main/tool/
 ```
 -d, --download-lists       启用分流模式
 -6, --force-ipv6           启用强制 IPv6（屏蔽指定域名 A 记录，只返回 AAAA）
+--plain-dns                使用 UDP 明文 DNS（默认使用 DoT/DoH）
 -i, --intranet-dns <IP>    设置内网 DNS（可选）
 -u, --unlock-dns <IP>      设置解锁 DNS（默认: 103.214.22.32，仅 -d 模式）
 -t, --timezone <TZ>        设置时区（默认: Asia/Hong_Kong）
+-s, --status               显示 SmartDNS 状态
 --uninstall                卸载
 -h, --help                 帮助
 ```

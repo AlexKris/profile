@@ -18,6 +18,7 @@ INTRANET_DNS=""
 UNLOCK_DNS="103.214.22.32"
 TIMEZONE="Asia/Hong_Kong"
 FORCE_IPV6=false
+PLAIN_DNS=false
 
 # ============================================================
 # 工具函数
@@ -66,6 +67,7 @@ show_help() {
 选项:
   -d, --download-lists       启用分流模式：下载域名列表 + 生成更新脚本
   -6, --force-ipv6           启用强制 IPv6：屏蔽指定域名的 A 记录，只返回 AAAA
+  --plain-dns                使用 UDP 明文 DNS（默认使用 DoT/DoH）
   -i, --intranet-dns <IP>    设置内网 DNS（可选）
   -u, --unlock-dns <IP>      设置解锁 DNS（默认: 103.214.22.32，仅 -d 模式）
   -t, --timezone <TZ>        设置时区（默认: Asia/Hong_Kong）
@@ -79,6 +81,7 @@ show_help() {
   $0 -d                      # DNS 缓存 + 流媒体分流
   $0 -d -6                   # DNS 缓存 + 流媒体分流 + 强制 IPv6
   $0 -d -u 1.2.3.4           # 自定义解锁 DNS
+  $0 --plain-dns             # 使用 UDP 明文 DNS
 EOF
 }
 
@@ -260,14 +263,27 @@ server ${INTRANET_DNS} -group intranet -exclude-default-group
 EOF
     fi
 
-    cat >> "${CONFIG_DIR}/smartdns.conf" <<EOF
+    if [[ "$PLAIN_DNS" == true ]]; then
+        cat >> "${CONFIG_DIR}/smartdns.conf" <<EOF
 
-# 公共 DNS（默认组）
+# 公共 DNS（默认组）— UDP 明文
 server 1.1.1.1
 server 8.8.8.8
 server 9.9.9.9
 server 208.67.222.222
 EOF
+    else
+        cat >> "${CONFIG_DIR}/smartdns.conf" <<EOF
+
+# 公共 DNS（默认组）— DoT/DoH
+server-tls 1.1.1.1:853 -tls-host-verify cloudflare-dns.com
+server-tls 8.8.8.8:853 -tls-host-verify dns.google
+server-tls 9.9.9.9:853 -tls-host-verify dns.quad9.net
+server-https https://cloudflare-dns.com/dns-query
+server-https https://dns.google/dns-query
+server-https https://dns.quad9.net/dns-query
+EOF
+    fi
 
     # 强制 IPv6
     if [[ "$FORCE_IPV6" == true && -f "${CONFIG_DIR}/force-ipv6.list" ]]; then
@@ -494,13 +510,23 @@ EOF
 EOF
     fi
 
-    cat <<EOF
+    if [[ "$PLAIN_DNS" == true ]]; then
+        cat <<EOF
 
 DNS 配置:
   ${INTRANET_DNS:+内网: ${INTRANET_DNS}
-  }公共: 1.1.1.1, 8.8.8.8, 9.9.9.9, 208.67.222.222
+  }公共: 1.1.1.1, 8.8.8.8, 9.9.9.9, 208.67.222.222 (UDP)
 
 EOF
+    else
+        cat <<EOF
+
+DNS 配置:
+  ${INTRANET_DNS:+内网: ${INTRANET_DNS}
+  }公共: 1.1.1.1, 8.8.8.8, 9.9.9.9 (DoT/DoH)
+
+EOF
+    fi
 
     # 分流模式额外信息
     if [[ "$has_unlock" == true ]]; then
@@ -596,7 +622,7 @@ show_status() {
     echo ""
     echo "配置:"
     if [[ -f "${CONFIG_DIR}/smartdns.conf" ]]; then
-        echo "  上游 DNS: $(grep '^server ' "${CONFIG_DIR}/smartdns.conf" 2>/dev/null | grep -v '#' | awk '{print $2}' | tr '\n' ' ')"
+        echo "  上游 DNS: $(grep -E '^server(-tls|-https)? ' "${CONFIG_DIR}/smartdns.conf" 2>/dev/null | grep -v '#' | awk '{print $2}' | tr '\n' ' ')"
         [[ -f "${CONFIG_DIR}/force-ipv6.list" ]] && echo "  强制 IPv6: $(wc -l < "${CONFIG_DIR}/force-ipv6.list") 个域名"
         local unlock_count=0
         for f in "${DOMAIN_LIST_DIR}"/*.conf; do
@@ -671,6 +697,7 @@ main() {
                 TIMEZONE="$2"; shift 2 ;;
             -d|--download-lists) DOWNLOAD_LISTS=true; shift ;;
             -6|--force-ipv6)     FORCE_IPV6=true; shift ;;
+            --plain-dns)         PLAIN_DNS=true; shift ;;
             -s|--status)         show_status; exit 0 ;;
             --uninstall)         UNINSTALL=true; shift ;;
             -h|--help)           show_help; exit 0 ;;
