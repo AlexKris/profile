@@ -101,6 +101,16 @@ cd /root/smartdns/docker && docker compose pull && docker compose up -d
 
 # 测试解析
 dig google.com @127.0.0.1
+
+# 临时开启 debug 日志（排查上游连接等问题）
+sed -i 's/log-level notice/log-level debug/' /root/smartdns/config/smartdns.conf
+docker restart smartdns
+dig example.com @127.0.0.1
+docker logs smartdns 2>&1 | tail -30
+
+# 排查完改回 notice
+sed -i 's/log-level debug/log-level notice/' /root/smartdns/config/smartdns.conf
+docker restart smartdns
 ```
 
 ### 域名列表更新（分流模式）
