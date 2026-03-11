@@ -1,0 +1,9 @@
+1.1.1.1:
+  strategy: ipv4_only
+  rules:
+    # > Netflix
+    - geosite:netflix
+    # > Youtube
+    - geosite:youtube
+    # > Disney
+    - geosite:disney
