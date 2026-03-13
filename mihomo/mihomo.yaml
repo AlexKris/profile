@@ -1,0 +1,751 @@
+# Mihomo Configuration
+# Based on Surge.conf proxy group structure and skk.moe rule sets
+# Author: AlexKris
+# Date: 2026-03-13
+
+# ==================== 锚点配置 ====================
+# 代理提供者模板
+BaseProvider: &BaseProvider
+  type: http
+  interval: 86400
+  proxy: DIRECT
+  health-check:
+    enable: true
+    url: 'http://1.1.1.1/generate_204'
+    interval: 300
+    timeout: 5000
+    lazy: true
+  filter: '^(?!.*(群|邀请|返利|循环|官网|客服|网站|流量|到期|机场|过期|已用|TOTAL|EXPIRE))'
+
+# 策略组类型模板
+BaseSelect: &BaseSelect
+  type: select
+
+BaseUrlTest: &BaseUrlTest
+  type: url-test
+  interval: 300
+  tolerance: 50
+  lazy: true
+  url: 'http://1.1.1.1/generate_204'
+  hidden: true
+
+BaseFallback: &BaseFallback
+  type: fallback
+  interval: 300
+  lazy: true
+  url: 'http://1.1.1.1/generate_204'
+  hidden: true
+
+# 节点筛选正则 - 镜像 Surge 的 policy-regex-filter
+# ISP 级筛选（需要节点名包含 ISP 标识和 thru/@ 标记）
+FilterHK: &FilterHK '^(?!.*(?:Kaze))(?=.*(?:🇭🇰|HK|Hong))(?=.*(?:HKT|HKBN|CMHK|Cable|HGC))(?=.*(?:thru|@))'
+FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))(?=.*(?:Hinet|Seed))(?=.*(?:thru|@))'
+FilterJP: &FilterJP '(?=.*(?:🇯🇵|JP|Japan))(?=.*(?:SoftBank|Nuro|Ucom|Starlink|Sakura))(?=.*(?:thru|@))'
+FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))(?=.*(?:thru|@))'
+FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))(?=.*(?:ATT|Hawaii))(?=.*(?:thru|@))'
+FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
+
+# 地区宽泛筛选（不需要 ISP 标识）
+FilterHK_All: &FilterHK_All '(?=.*(?:🇭🇰|HK|Hong))'
+FilterJP_All: &FilterJP_All '(?=.*(?:🇯🇵|JP|Japan))'
+FilterSG_All: &FilterSG_All '(?=.*(?:🇸🇬|SG|Sing))'
+FilterUS_All: &FilterUS_All '(?=.*(?:🇺🇸|US|USA))'
+
+# 组合筛选
+FilterOpt: &FilterOpt '(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR|Hong|Japan|Korea))'
+FilterEdge: &FilterEdge '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))(?=.*(?:thru|@))'
+FilterYouTube: &FilterYouTube '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
+FilterNetflix: &FilterNetflix '^(?!.*(?:Misaka|Stacks|Zenlayer|Sakura))(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG))'
+FilterGlobalEmby: &FilterGlobalEmby '^(?!.*(?:Neburst|Gen2))(?=.*(?:🇭🇰|🇯🇵|HK|JP))'
+FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|HK|JP))(?=.*(?:RFC|Jinx))'
+FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|TW|JP|SG|US))(?=.*(?:SoftBank|Nuro|Ucom|ATT|Hawaii|Sakura))'
+FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
+FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|🇺🇸|HK|TW|JP|SG|US))'
+FilterDownload: &FilterDownload '^(?!.*(?:Neburst|Gen2))'
+FilterAll: &FilterAll '^(?!.*(群|邀请|返利|循环|官网|客服|网站|流量|到期|机场|过期|已用|TOTAL|EXPIRE))'
+FilterHosting: &FilterHosting '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|🇺🇸|HK|TW|JP|SG|US))(?=.*(?:Misaka|DMIT|Stacks|Eons|Jinx|CTC|Hytron|Zenlayer|DDPS|Sakura|NewMedia|HostHatch))(?=.*(?:thru|@))'
+
+# 规则集模板
+BehaviorDN: &BehaviorDN
+  type: http
+  behavior: domain
+  format: text
+  interval: 86400
+
+BehaviorCL: &BehaviorCL
+  type: http
+  behavior: classical
+  format: text
+  interval: 86400
+
+BehaviorIP: &BehaviorIP
+  type: http
+  behavior: classical
+  format: text
+  interval: 86400
+
+BehaviorMrsDN: &BehaviorMrsDN
+  type: http
+  behavior: domain
+  format: mrs
+  interval: 86400
+
+BehaviorMrsIP: &BehaviorMrsIP
+  type: http
+  behavior: ipcidr
+  format: mrs
+  interval: 86400
+
+# ==================== 代理提供者 ====================
+proxy-providers:
+  Kirsi:
+    <<: *BaseProvider
+    url: '订阅地址'
+    path: ./proxy_providers/kirsi.yaml
+    override:
+      additional-prefix: "[K] "
+
+# ==================== 核心配置 ====================
+mode: rule
+mixed-port: 7893
+port: 7890
+socks-port: 7891
+redir-port: 7892
+tproxy-port: 7895
+ipv6: false
+allow-lan: true
+unified-delay: true
+tcp-concurrent: true
+log-level: warning
+find-process-mode: always
+keep-alive-interval: 15
+keep-alive-idle: 600
+
+# 管理面板
+external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+external-ui-name: zashboard
+external-ui: ui
+external-controller: 127.0.0.1:9090
+secret: ''
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+# ==================== 流量嗅探 ====================
+sniffer:
+  enable: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "Mijia Cloud"
+    - "+.push.apple.com"
+
+# ==================== TUN 模式 ====================
+tun:
+  enable: true
+  stack: mixed
+  dns-hijack:
+    - "any:53"
+    - "tcp://any:53"
+  auto-route: true
+  # auto-redirect: true  # 仅 Linux 支持，macOS 无效
+  auto-detect-interface: true
+
+# ==================== DNS 配置 ====================
+dns:
+  enable: true
+  ipv6: false
+  cache-algorithm: arc
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: blacklist
+  fake-ip-filter:
+    # skk.moe 维护的 fake-ip-filter（系统/LAN/NTP/游戏手柄等）
+    - "+.m2m"
+    - injections.adguard.org
+    - local.adguard.org
+    - "+.bogon"
+    - "+.local"
+    - "+.lan"
+    - "+.internal"
+    - "+.localdomain"
+    - home.arpa
+    - 127.0.0.1.sslip.io
+    - 127.atlas.skk.moe
+    - dns.msftncsi.com
+    - "*.srv.nintendo.net"
+    - "*.stun.playstation.net"
+    - xbox.*.microsoft.com
+    - "*.xboxlive.com"
+    - "*.turn.twilio.com"
+    - "*.stun.twilio.com"
+    - stun.syncthing.net
+    - "stun.*"
+    - lancache.steamcontent.com
+    # Netflix 真实 IP（等价 Surge always-real-ip）
+    - "+.netflix.com"
+    - "+.netflix.net"
+    - "+.nflxext.com"
+    - "+.nflximg.com"
+    - "+.nflximg.net"
+    - "+.nflxso.net"
+    - "+.nflxvideo.net"
+    - "+.onetrust.com"
+    - e13252.dscg.akamaiedge.net
+    - "+.cookielaw.org"
+    - "+.fast.com"
+    - "+.flxvpn.net"
+    # 游戏域名 — UDP 兼容
+    # Apex Legends / EA
+    - "+.ea.com"
+    - "+.eaassets-a.akamaihd.net"
+    # Overwatch 2 / Blizzard
+    - "+.battle.net"
+    - "+.battlenet.com"
+    - "+.battlenet.com.cn"
+    - "+.blizzard.com"
+    - "+.blzstatic.cn"
+    # CS2 / Steam
+    - "+.steamserver.net"
+    - "+.steampowered.com"
+    - "+.steamcontent.com"
+    # 通用游戏
+    - "+.xboxlive.com"
+    - stun.l.google.com
+    # 系统连通性检测
+    - "+.msftconnecttest.com"
+    - "+.msftncsi.com"
+    # 小米/路由器
+    - "+.miwifi.com"
+    - "+.market.xiaomi.com"
+
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+
+  # DNS 分流策略（等价 Surge [Host] 部分 + skk.moe DNS Mapping）
+  nameserver-policy:
+    # skk.moe 维护的国内 DNS 分流（避免公共 DNS 歧视）
+    dns.alidns.com: quic://223.5.5.5:853
+    dot.pub: 119.29.29.29
+    doh.pub: 119.29.29.29
+    dns.pub: 119.29.29.29
+    doh.360.cn: 101.198.198.198
+    rule-set:nsp_alibaba: quic://dns.alidns.com:853
+    rule-set:nsp_tencent: https://doh.pub/dns-query
+    rule-set:nsp_bilibili: https://doh.pub/dns-query
+    rule-set:nsp_xiaomi: https://doh.pub/dns-query
+    rule-set:nsp_bytedance: 180.184.2.2
+    rule-set:nsp_baidu: 180.76.76.76
+    rule-set:nsp_qihoo360: https://doh.360.cn/dns-query
+    rule-set:nsp_hotspot: system
+    "*.m2m": system
+    injections.adguard.org: system
+    local.adguard.org: system
+    "*.bogon": system
+    rule-set:nsp_lan: system
+    # Netflix 走 Cloudflare DoH（等价 Surge [Host] 中 *netflix* = server:https://cloudflare-dns.com/dns-query）
+    "+.netflix.com": https://cloudflare-dns.com/dns-query
+    "+.netflix.net": https://cloudflare-dns.com/dns-query
+    "+.nflxext.com": https://cloudflare-dns.com/dns-query
+    "+.nflximg.com": https://cloudflare-dns.com/dns-query
+    "+.nflximg.net": https://cloudflare-dns.com/dns-query
+    "+.nflxso.net": https://cloudflare-dns.com/dns-query
+    "+.nflxvideo.net": https://cloudflare-dns.com/dns-query
+    "+.onetrust.com": https://cloudflare-dns.com/dns-query
+    e13252.dscg.akamaiedge.net: https://cloudflare-dns.com/dns-query
+    "+.cookielaw.org": https://cloudflare-dns.com/dns-query
+    "+.fast.com": https://cloudflare-dns.com/dns-query
+    "+.flxvpn.net": https://cloudflare-dns.com/dns-query
+    # Google 下载 / PlayStation 用腾讯 DNS（等价 Surge [Host]）
+    dl.google.com: https://doh.pub/dns-query
+    dl.l.google.com: https://doh.pub/dns-query
+    update.googleapis.com: https://doh.pub/dns-query
+    "+.dl.playstation.net": https://doh.pub/dns-query
+    # Kirsi 订阅域名用阿里 DNS
+    "+.kirsime.net": https://dns.alidns.com/dns-query
+
+# ==================== 代理策略组 ====================
+proxy-groups:
+  # ===== 顶层策略 =====
+  - name: Proxy
+    <<: *BaseSelect
+    proxies: [DIRECT, Opt, Core, Edge]
+
+  - name: Final
+    <<: *BaseSelect
+    proxies: [Proxy, DIRECT]
+    hidden: true
+
+  # ===== 二级策略 =====
+  - name: Opt
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterOpt
+
+  - name: Core
+    <<: *BaseSelect
+    proxies: [HK, TW, JP]
+
+  - name: Edge
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterEdge
+
+  # ===== 地区策略（ISP 级筛选）=====
+  - name: HK
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterHK
+
+  - name: TW
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterTW
+
+  - name: JP
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterJP
+
+  - name: SG
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterSG
+
+  - name: US
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterUS
+
+  - name: DE
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterDE
+
+  # ===== 专用策略 =====
+  - name: Telegram
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterTelegram
+
+  - name: GlobalMedia
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterGlobalMedia
+
+  - name: YouTube
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterYouTube
+
+  - name: Netflix
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterNetflix
+
+  - name: GlobalEmby
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterGlobalEmby
+
+  - name: RFCEmby
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterRFCEmby
+
+  - name: DirectEmby
+    <<: *BaseSelect
+    proxies: [DIRECT, GlobalEmby]
+
+  - name: ChinaMedia
+    <<: *BaseSelect
+    proxies: [DIRECT, GlobalMedia]
+
+  - name: AIGC
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterAIGC
+
+  - name: Google
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterGoogle
+
+  - name: Speedtest
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterSpeedtest
+
+  - name: AgentIDE
+    type: url-test
+    include-all-providers: true
+    filter: *FilterJP_All
+    interval: 300
+    tolerance: 50
+    url: 'http://1.1.1.1/generate_204'
+
+  - name: Download
+    <<: *BaseSelect
+    proxies: [Opt, Edge]
+
+  - name: CDN
+    <<: *BaseSelect
+    proxies: [Edge, Opt]
+
+  - name: Instagram
+    <<: *BaseSelect
+    proxies: [HK, TW, JP]
+
+  - name: Twitter
+    <<: *BaseSelect
+    proxies: [HK, TW, JP]
+
+  - name: Crypto
+    <<: *BaseSelect
+    proxies: [TW, Proxy, DIRECT]
+
+  - name: PayPal
+    <<: *BaseSelect
+    proxies: [US, HK, DIRECT]
+
+  - name: AppleCDN
+    <<: *BaseSelect
+    proxies: [DIRECT, Edge]
+    hidden: true
+
+  - name: AppleCN
+    <<: *BaseSelect
+    proxies: [DIRECT, Proxy]
+    hidden: true
+
+  - name: MicrosoftCDN
+    <<: *BaseSelect
+    proxies: [Edge, DIRECT]
+
+  - name: Self
+    <<: *BaseSelect
+    proxies: [Opt, Core, Edge]
+
+  - name: Gaming
+    <<: *BaseSelect
+    proxies: [HK-Auto, JP-Auto, SG-Auto, US-Auto, HK, JP, SG, US]
+
+  # ===== 自动测速辅助组（hidden）=====
+  - name: HK-Auto
+    <<: *BaseUrlTest
+    include-all-providers: true
+    filter: *FilterHK_All
+
+  - name: JP-Auto
+    <<: *BaseUrlTest
+    include-all-providers: true
+    filter: *FilterJP_All
+
+  - name: SG-Auto
+    <<: *BaseUrlTest
+    include-all-providers: true
+    filter: *FilterSG_All
+
+  - name: US-Auto
+    <<: *BaseUrlTest
+    include-all-providers: true
+    filter: *FilterUS_All
+
+# ==================== 规则路由 ====================
+rules:
+  # QUIC 阻止（海外 UDP 443）
+  - AND,((DST-PORT,443),(NETWORK,UDP),(NOT,((GEOIP,CN)))),REJECT
+
+  # ===== 域名规则 start =====
+  # > 自定义域名
+  - DOMAIN-SUFFIX,kirsime.com,Self
+  - DOMAIN-SUFFIX,drkirsi.net,Self
+  - DOMAIN-SUFFIX,candypath.eu.org,Opt
+  - DOMAIN-SUFFIX,fantaike.ai,DIRECT
+
+  # > 进程规则（macOS/Windows 生效）
+  - RULE-SET,process_rule,DIRECT
+
+  # > Emby
+  - DOMAIN-SUFFIX,023168.xyz,GlobalEmby
+  - DOMAIN,cfcdn.longemby.com,GlobalEmby
+  - DOMAIN,cfstream.longemby.top,GlobalEmby
+  - DOMAIN,hkcdn.longemby.com,DirectEmby
+  - DOMAIN,pkstream-hk.longemby.top,DirectEmby
+  - DOMAIN,jpcdn.longemby.com,DirectEmby
+  - DOMAIN,pkstream-jp.longemby.top,DirectEmby
+  - DOMAIN,rfc.uhdnow.com,RFCEmby
+
+  # > AgentIDE
+  - RULE-SET,agentide_rule,AgentIDE
+
+  # > Other
+  - DOMAIN-KEYWORD,hanime,Opt
+
+  # > 测速网站
+  - RULE-SET,skk_speedtest_domain,Speedtest
+
+  # > 静态 CDN 域名
+  - RULE-SET,skk_cdn_domain,CDN
+  - RULE-SET,skk_cdn_nonip,CDN
+
+  # > AIGC
+  - RULE-SET,skk_ai,AIGC
+
+  # > PayPal
+  - RULE-SET,paypal_rule,PayPal
+
+  # > Crypto
+  - RULE-SET,crypto_rule,Crypto
+
+  # > Instagram（666OS Facebook.mrs 包含 Instagram/Meta 全系）
+  - RULE-SET,666os_instagram,Instagram
+
+  # > Twitter
+  - RULE-SET,twitter_rule,Twitter
+
+  # > ChinaMedia
+  - RULE-SET,bilibili_rule,ChinaMedia
+  - RULE-SET,iqiyi_rule,ChinaMedia
+  - RULE-SET,tencent_rule,ChinaMedia
+
+  # > Gaming
+  - RULE-SET,666os_games,Gaming
+
+  # > Bahamut
+  - RULE-SET,bahamut_rule,TW
+
+  # > Netflix
+  - RULE-SET,netflix_rule,Netflix
+  - DOMAIN,cloudflare-dns.com,Netflix
+
+  # > YouTube
+  - RULE-SET,youtube_rule,YouTube
+
+  # > 流媒体（JP）
+  - RULE-SET,skk_stream_jp,JP
+
+  # > 流媒体（TW）
+  - RULE-SET,skk_stream_tw,TW
+
+  # > 流媒体（通用）
+  - RULE-SET,skk_stream,GlobalMedia
+
+  # > Telegram 域名
+  - RULE-SET,skk_telegram,Telegram
+
+  # > Apple CDN
+  - RULE-SET,skk_apple_cdn,AppleCDN
+
+  # > Microsoft CDN
+  - RULE-SET,skk_microsoft_cdn,MicrosoftCDN
+
+  # > Download
+  - RULE-SET,skk_download_domain,Download
+  - RULE-SET,skk_download_nonip,Download
+
+  # > Apple CN
+  - RULE-SET,skk_apple_cn,AppleCN
+
+  # > Apple/Microsoft 服务
+  - RULE-SET,skk_apple_services,Proxy
+  - RULE-SET,skk_microsoft,Proxy
+
+  # > Google 服务（666OS Google 域名规则集）
+  - RULE-SET,666os_google,Google
+
+  # > 常见海外域名（Google 流量也会匹配此规则走 Proxy，Google 组仅用于面板手动选择）
+  - RULE-SET,skk_global,Proxy
+
+  # > 国内常见域名
+  - RULE-SET,skk_domestic,DIRECT
+
+  # > 内网域名
+  - RULE-SET,skk_lan_nonip,DIRECT
+
+  # ===== 域名规则 end =====
+
+  # ===== IP 规则 start =====
+  # > Telegram IP
+  - RULE-SET,skk_telegram_ip,Telegram
+
+  # > Telegram 进程隐私保护（macOS）
+  - PROCESS-NAME,Telegram,REJECT-DROP
+
+  # > 中国大陆 IP
+  - RULE-SET,skk_domestic_ip,DIRECT
+  - RULE-SET,skk_china_ip,DIRECT
+
+  # > LAN IP
+  - RULE-SET,skk_lan_ip,DIRECT
+
+  # ===== IP 规则 end =====
+
+  # > Final
+  - MATCH,Final
+
+# ==================== 规则集提供者 ====================
+rule-providers:
+  # ===== skk.moe 域名规则集 =====
+  skk_speedtest_domain:
+    <<: *BehaviorDN
+    url: 'https://ruleset.skk.moe/Clash/domainset/speedtest.txt'
+  skk_cdn_domain:
+    <<: *BehaviorDN
+    url: 'https://ruleset.skk.moe/Clash/domainset/cdn.txt'
+  skk_cdn_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/cdn.txt'
+  skk_ai:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/ai.txt'
+  skk_stream:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream.txt'
+  skk_stream_jp:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream_jp.txt'
+  skk_stream_tw:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt'
+  skk_telegram:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/telegram.txt'
+  skk_apple_cdn:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/apple_cdn.txt'
+  skk_apple_cn:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/apple_cn.txt'
+  skk_apple_services:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/apple_services.txt'
+  skk_microsoft_cdn:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/microsoft_cdn.txt'
+  skk_microsoft:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/microsoft.txt'
+  skk_download_domain:
+    <<: *BehaviorDN
+    url: 'https://ruleset.skk.moe/Clash/domainset/download.txt'
+  skk_download_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/download.txt'
+  skk_global:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/global.txt'
+  skk_domestic:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/domestic.txt'
+  skk_lan_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/lan.txt'
+
+  # ===== skk.moe IP 规则集 =====
+  skk_telegram_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/telegram.txt'
+  skk_domestic_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/domestic.txt'
+  skk_china_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'
+  skk_lan_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
+
+  # ===== 666OS 规则集 =====
+  666os_games:
+    <<: *BehaviorMrsDN
+    url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Games.mrs'
+  666os_instagram:
+    <<: *BehaviorMrsDN
+    url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Facebook.mrs'
+  666os_google:
+    <<: *BehaviorMrsDN
+    url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Google.mrs'
+
+  # ===== 自定义规则集 =====
+  netflix_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/netflix.txt'
+  youtube_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/youtube.txt'
+  bilibili_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/bilibili.txt'
+  bahamut_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/bahamut.txt'
+  iqiyi_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/iqiyi.txt'
+  tencent_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/tencent.txt'
+  paypal_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/paypal.txt'
+  twitter_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/twitter.txt'
+  crypto_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/crypto.txt'
+  agentide_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/agentide.txt'
+  process_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/process.txt'
+
+  # ===== skk.moe Nameserver Policy 规则集 =====
+  nsp_alibaba:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/alibaba.txt'
+  nsp_tencent:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/tencent.txt'
+  nsp_bilibili:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/bilibili.txt'
+  nsp_xiaomi:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/xiaomi.txt'
+  nsp_bytedance:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/bytedance.txt'
+  nsp_baidu:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/baidu.txt'
+  nsp_qihoo360:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/qihoo360.txt'
+  nsp_hotspot:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/hotspot_captive_portal.txt'
+  nsp_lan:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/lan_without_real_ip.txt'
+# ==================== EOF ====================

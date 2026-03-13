@@ -1,0 +1,9 @@
+# Twitter/X
+DOMAIN-SUFFIX,twitter.com
+DOMAIN-SUFFIX,x.com
+DOMAIN-SUFFIX,t.co
+DOMAIN-SUFFIX,twimg.com
+DOMAIN,video.twimg.com
+DOMAIN,abs.twimg.com
+DOMAIN,api.twitter.com
+DOMAIN,api.x.com
