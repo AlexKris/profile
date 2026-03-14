@@ -1,3 +1,10 @@
 # Tencent Video
+DOMAIN-SUFFIX,v.qq.com
+DOMAIN-SUFFIX,video.qq.com
+DOMAIN-SUFFIX,wetv.vip
+DOMAIN-SUFFIX,wetvinfo.com
 DOMAIN-SUFFIX,v.smtcdns.com
-DOMAIN-SUFFIX,vv.video.qq.com
+DOMAIN,vv.video.qq.com
+DOMAIN-SUFFIX,livep.l.qq.com
+DOMAIN-SUFFIX,vd.l.qq.com
+DOMAIN-SUFFIX,tm.video.qq.com

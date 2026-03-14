@@ -1,4 +1,10 @@
 # AgentIDE
-DOMAIN-KEYWORD,kiro
-DOMAIN-KEYWORD,cursor
-DOMAIN-KEYWORD,trae
+# Cursor
+DOMAIN-SUFFIX,cursor.sh
+DOMAIN-SUFFIX,cursor.com
+DOMAIN-SUFFIX,cursorapi.com
+# Kiro (AWS)
+DOMAIN-SUFFIX,kiro.dev
+# Trae (ByteDance)
+DOMAIN-SUFFIX,trae.ai
+DOMAIN-SUFFIX,trae.io

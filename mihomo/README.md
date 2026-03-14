@@ -46,17 +46,16 @@ mihomo/
 ```
 Proxy (手动选择)
 ├── DIRECT
-├── Opt        ← HK/JP/KR 节点（ISP 级筛选）
 ├── Core       ← HK / TW / JP（手动切换地区）
 └── Edge       ← HK/JP 节点
 
 专用策略组:
 ├── Telegram / YouTube / Netflix / GlobalMedia / ChinaMedia
-├── AIGC / Google / Speedtest / Download / CDN
+├── AIGC / Google / Speedtest / AgentIDE
+├── Download / CDN（← Edge / Core）
 ├── Instagram / Twitter / Crypto / PayPal
-├── GlobalEmby / RFCEmby / DirectEmby
 ├── AppleCDN / AppleCN / MicrosoftCDN
-└── Gaming    ← HK-Auto / JP-Auto / SG-Auto / US-Auto（自动测速）
+└── Gaming    ← HK/JP 节点（手动选择）
 
 Final (兜底) → Proxy / DIRECT
 ```
@@ -102,6 +101,6 @@ Final (兜底) → Proxy / DIRECT
 
 ## 已知限制
 
-- **Netflix DoH 走向**：mihomo 没有 Surge 的 `encrypted-dns-follow-outbound-mode`，Cloudflare DoH 请求默认走 DIRECT。如果 Netflix 掉解锁，在 DNS 配置中加 `respect-rules: true`
+- **Netflix DoH 走向**：已启用 `respect-rules: true`，Cloudflare DoH 请求经规则路由走代理，确保 Netflix 解锁稳定
 - **Snell 协议**：mihomo 不支持 Snell，仅使用订阅源返回的 SS 等兼容协议
 - **USER-AGENT 规则**：mihomo 不支持，由 sniffer TLS SNI 嗅探替代

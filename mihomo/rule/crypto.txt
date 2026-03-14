@@ -13,7 +13,6 @@ DOMAIN-SUFFIX,bybit.com
 DOMAIN-SUFFIX,bybit.eu
 DOMAIN-SUFFIX,coinbase.com
 DOMAIN-SUFFIX,coincheck.com
-DOMAIN-SUFFIX,coinone.co.kr
 DOMAIN-SUFFIX,gemini.com
 DOMAIN-SUFFIX,korbit.co.kr
 DOMAIN-SUFFIX,kraken.com
@@ -207,7 +206,6 @@ DOMAIN-SUFFIX,btc.com
 DOMAIN-SUFFIX,f2pool.com
 DOMAIN-SUFFIX,cbeci.org
 DOMAIN-SUFFIX,digiconomist.net
-DOMAIN-SUFFIX,1ml.com
 DOMAIN-SUFFIX,bitcoinvisuals.com
 DOMAIN-SUFFIX,crypto51.app
 DOMAIN-SUFFIX,masternodes.online
@@ -215,9 +213,6 @@ DOMAIN-SUFFIX,bitnodes.earn.com
 DOMAIN-SUFFIX,poolin.com
 DOMAIN-SUFFIX,ethermine.org
 DOMAIN-SUFFIX,ewapool.net
-
-# FTX
-DOMAIN-SUFFIX,ftx.com
 
 # Metamask
 DOMAIN-KEYWORD,metamask

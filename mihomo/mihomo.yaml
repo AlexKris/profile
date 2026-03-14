@@ -21,20 +21,6 @@ BaseProvider: &BaseProvider
 BaseSelect: &BaseSelect
   type: select
 
-BaseUrlTest: &BaseUrlTest
-  type: url-test
-  interval: 300
-  tolerance: 50
-  lazy: true
-  url: 'http://1.1.1.1/generate_204'
-  hidden: true
-
-BaseFallback: &BaseFallback
-  type: fallback
-  interval: 300
-  lazy: true
-  url: 'http://1.1.1.1/generate_204'
-  hidden: true
 
 # 节点筛选正则 - 镜像 Surge 的 policy-regex-filter
 # ISP 级筛选（需要节点名包含 ISP 标识和 thru/@ 标记）
@@ -46,26 +32,17 @@ FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))(?=.*(?:ATT|Hawaii))(?=.*(?:thru|@
 FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
 # 地区宽泛筛选（不需要 ISP 标识）
-FilterHK_All: &FilterHK_All '(?=.*(?:🇭🇰|HK|Hong))'
 FilterJP_All: &FilterJP_All '(?=.*(?:🇯🇵|JP|Japan))'
-FilterSG_All: &FilterSG_All '(?=.*(?:🇸🇬|SG|Sing))'
-FilterUS_All: &FilterUS_All '(?=.*(?:🇺🇸|US|USA))'
 
 # 组合筛选
-FilterOpt: &FilterOpt '(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR|Hong|Japan|Korea))'
 FilterEdge: &FilterEdge '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))(?=.*(?:thru|@))'
 FilterYouTube: &FilterYouTube '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
 FilterNetflix: &FilterNetflix '^(?!.*(?:Misaka|Stacks|Zenlayer|Sakura))(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG))'
-FilterGlobalEmby: &FilterGlobalEmby '^(?!.*(?:Neburst|Gen2))(?=.*(?:🇭🇰|🇯🇵|HK|JP))'
-FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|HK|JP))(?=.*(?:RFC|Jinx))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|TW|JP|SG|US))(?=.*(?:SoftBank|Nuro|Ucom|ATT|Hawaii|Sakura))'
 FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
 FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|🇺🇸|HK|TW|JP|SG|US))'
-FilterDownload: &FilterDownload '^(?!.*(?:Neburst|Gen2))'
-FilterAll: &FilterAll '^(?!.*(群|邀请|返利|循环|官网|客服|网站|流量|到期|机场|过期|已用|TOTAL|EXPIRE))'
-FilterHosting: &FilterHosting '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|🇺🇸|HK|TW|JP|SG|US))(?=.*(?:Misaka|DMIT|Stacks|Eons|Jinx|CTC|Hytron|Zenlayer|DDPS|Sakura|NewMedia|HostHatch))(?=.*(?:thru|@))'
 
 # 规则集模板
 BehaviorDN: &BehaviorDN
@@ -163,6 +140,7 @@ tun:
 # ==================== DNS 配置 ====================
 dns:
   enable: true
+  respect-rules: true
   ipv6: false
   cache-algorithm: arc
   enhanced-mode: fake-ip
@@ -185,7 +163,6 @@ dns:
     - "*.srv.nintendo.net"
     - "*.stun.playstation.net"
     - xbox.*.microsoft.com
-    - "*.xboxlive.com"
     - "*.turn.twilio.com"
     - "*.stun.twilio.com"
     - stun.syncthing.net
@@ -279,15 +256,13 @@ dns:
     dl.l.google.com: https://doh.pub/dns-query
     update.googleapis.com: https://doh.pub/dns-query
     "+.dl.playstation.net": https://doh.pub/dns-query
-    # Kirsi 订阅域名用阿里 DNS
-    "+.kirsime.net": https://dns.alidns.com/dns-query
 
 # ==================== 代理策略组 ====================
 proxy-groups:
   # ===== 顶层策略 =====
   - name: Proxy
     <<: *BaseSelect
-    proxies: [DIRECT, Opt, Core, Edge]
+    proxies: [DIRECT, Core, Edge]
 
   - name: Final
     <<: *BaseSelect
@@ -295,11 +270,6 @@ proxy-groups:
     hidden: true
 
   # ===== 二级策略 =====
-  - name: Opt
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterOpt
-
   - name: Core
     <<: *BaseSelect
     proxies: [HK, TW, JP]
@@ -361,20 +331,6 @@ proxy-groups:
     include-all-providers: true
     filter: *FilterNetflix
 
-  - name: GlobalEmby
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterGlobalEmby
-
-  - name: RFCEmby
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterRFCEmby
-
-  - name: DirectEmby
-    <<: *BaseSelect
-    proxies: [DIRECT, GlobalEmby]
-
   - name: ChinaMedia
     <<: *BaseSelect
     proxies: [DIRECT, GlobalMedia]
@@ -395,20 +351,17 @@ proxy-groups:
     filter: *FilterSpeedtest
 
   - name: AgentIDE
-    type: url-test
+    <<: *BaseSelect
     include-all-providers: true
     filter: *FilterJP_All
-    interval: 300
-    tolerance: 50
-    url: 'http://1.1.1.1/generate_204'
 
   - name: Download
     <<: *BaseSelect
-    proxies: [Opt, Edge]
+    proxies: [Edge, Core]
 
   - name: CDN
     <<: *BaseSelect
-    proxies: [Edge, Opt]
+    proxies: [Edge, Core]
 
   - name: Instagram
     <<: *BaseSelect
@@ -440,34 +393,10 @@ proxy-groups:
     <<: *BaseSelect
     proxies: [Edge, DIRECT]
 
-  - name: Self
-    <<: *BaseSelect
-    proxies: [Opt, Core, Edge]
-
   - name: Gaming
     <<: *BaseSelect
-    proxies: [HK-Auto, JP-Auto, SG-Auto, US-Auto, HK, JP, SG, US]
-
-  # ===== 自动测速辅助组（hidden）=====
-  - name: HK-Auto
-    <<: *BaseUrlTest
     include-all-providers: true
-    filter: *FilterHK_All
-
-  - name: JP-Auto
-    <<: *BaseUrlTest
-    include-all-providers: true
-    filter: *FilterJP_All
-
-  - name: SG-Auto
-    <<: *BaseUrlTest
-    include-all-providers: true
-    filter: *FilterSG_All
-
-  - name: US-Auto
-    <<: *BaseUrlTest
-    include-all-providers: true
-    filter: *FilterUS_All
+    filter: *FilterEdge
 
 # ==================== 规则路由 ====================
 rules:
@@ -475,30 +404,14 @@ rules:
   - AND,((DST-PORT,443),(NETWORK,UDP),(NOT,((GEOIP,CN)))),REJECT
 
   # ===== 域名规则 start =====
-  # > 自定义域名
-  - DOMAIN-SUFFIX,kirsime.com,Self
-  - DOMAIN-SUFFIX,drkirsi.net,Self
-  - DOMAIN-SUFFIX,candypath.eu.org,Opt
-  - DOMAIN-SUFFIX,fantaike.ai,DIRECT
-
   # > 进程规则（macOS/Windows 生效）
   - RULE-SET,process_rule,DIRECT
-
-  # > Emby
-  - DOMAIN-SUFFIX,023168.xyz,GlobalEmby
-  - DOMAIN,cfcdn.longemby.com,GlobalEmby
-  - DOMAIN,cfstream.longemby.top,GlobalEmby
-  - DOMAIN,hkcdn.longemby.com,DirectEmby
-  - DOMAIN,pkstream-hk.longemby.top,DirectEmby
-  - DOMAIN,jpcdn.longemby.com,DirectEmby
-  - DOMAIN,pkstream-jp.longemby.top,DirectEmby
-  - DOMAIN,rfc.uhdnow.com,RFCEmby
 
   # > AgentIDE
   - RULE-SET,agentide_rule,AgentIDE
 
   # > Other
-  - DOMAIN-KEYWORD,hanime,Opt
+  - DOMAIN-KEYWORD,hanime,Edge
 
   # > 测速网站
   - RULE-SET,skk_speedtest_domain,Speedtest
