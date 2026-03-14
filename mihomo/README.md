@@ -16,17 +16,9 @@
 mihomo/
 ├── mihomo.yaml              # 主配置文件
 ├── rule/                    # 自定义规则（classical 格式）
-│   ├── netflix.txt          # Netflix
-│   ├── youtube.txt          # YouTube
-│   ├── bilibili.txt         # Bilibili（含港澳台）
-│   ├── bahamut.txt          # 巴哈姆特
-│   ├── iqiyi.txt            # 爱奇艺
-│   ├── tencent.txt          # 腾讯视频
 │   ├── crypto.txt           # 加密货币（交易所/DeFi/NFT/钱包）
-│   ├── paypal.txt           # PayPal
-│   ├── twitter.txt          # Twitter/X
 │   ├── agentide.txt         # AgentIDE
-│   └── process.txt          # 进程直连规则
+│   └── process.txt          # 进程直连规则（macOS + Windows）
 ├── MihomoPro.yaml           # 参考配置（MihomoPro）
 ├── iKeLeeMihomo.yaml        # 参考配置（iKeLee）
 └── MihomoProREADME.md       # MihomoPro 说明
@@ -37,8 +29,9 @@ mihomo/
 | 来源 | 用途 | 格式 |
 |---|---|---|
 | [skk.moe](https://ruleset.skk.moe) | CDN / Global / Domestic / AI / Telegram / 流媒体 / Apple / Microsoft / Download / Speedtest | text (domain/classical) |
+| [MetaCubeX](https://github.com/MetaCubeX/meta-rules-dat) | Netflix / YouTube / Bilibili / Bahamut / iQiyi / Tencent Video / PayPal / Twitter / 国内游戏 / 国内域名兜底 | mrs (domain) |
 | [666OS/rules](https://github.com/666OS/rules) | Games / Google / Instagram(Facebook) | mrs (domain) |
-| 自定义 (`mihomo/rule/`) | Netflix / YouTube / Bilibili / Crypto 等 | text (classical) |
+| 自定义 (`mihomo/rule/`) | Crypto / AgentIDE / Process | text (classical) |
 | [skk.moe NSP](https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/) | DNS 分流（阿里/腾讯/百度/字节等） | text (classical) |
 
 ## 策略组结构
@@ -55,7 +48,7 @@ Proxy (手动选择)
 ├── Download / CDN（← Edge / Core）
 ├── Instagram / Twitter / Crypto / PayPal
 ├── AppleCDN / AppleCN / MicrosoftCDN
-└── Gaming    ← HK/JP 节点（手动选择）
+└── Gaming    ← 国内直连(games_cn) + 海外代理(666os_games)
 
 Final (兜底) → Proxy / DIRECT
 ```
@@ -64,7 +57,7 @@ Final (兜底) → Proxy / DIRECT
 
 1. **替换订阅地址**：编辑 `mihomo.yaml` 第 105 行，将 `'订阅地址'` 改为实际的订阅 URL
 2. **设置管理密码**：第 131 行 `secret: ''` 设置密码
-3. **推送规则文件**：`mihomo/rule/*.txt` 需要推送到 GitHub，rule-providers 引用的是 `raw.githubusercontent.com` 地址
+3. **推送规则文件**：`mihomo/rule/*.txt`（crypto / agentide / process）需要推送到 GitHub，rule-providers 引用的是 `raw.githubusercontent.com` 地址
 
 ## DNS 配置
 

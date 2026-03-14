@@ -13,7 +13,17 @@ PROCESS-NAME,Transmission
 PROCESS-NAME,uTorrent
 PROCESS-NAME,WebTorrent
 PROCESS-NAME,WebTorrent Helper
+# Windows download processes
+PROCESS-NAME,aria2c.exe
+PROCESS-NAME,fdm.exe
+PROCESS-NAME,NetTransport.exe
+PROCESS-NAME,Thunder.exe
+PROCESS-NAME,Transmission.exe
+PROCESS-NAME,uTorrent.exe
+PROCESS-NAME,qbittorrent.exe
+PROCESS-NAME,BitComet.exe
 # Nutstore
 PROCESS-NAME,Nutstore
+PROCESS-NAME,Nutstore.exe
 # iPerf
 PROCESS-NAME,iperf3-darwin

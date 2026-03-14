@@ -440,7 +440,9 @@ rules:
   - RULE-SET,iqiyi_rule,ChinaMedia
   - RULE-SET,tencent_rule,ChinaMedia
 
-  # > Gaming
+  # > Gaming（国内直连）
+  - RULE-SET,games_cn,DIRECT
+  # > Gaming（海外代理）
   - RULE-SET,666os_games,Gaming
 
   # > Bahamut
@@ -490,6 +492,9 @@ rules:
 
   # > 国内常见域名
   - RULE-SET,skk_domestic,DIRECT
+
+  # > 国内域名兜底（MetaCubeX cn）
+  - RULE-SET,cn_domain,DIRECT
 
   # > 内网域名
   - RULE-SET,skk_lan_nonip,DIRECT
@@ -598,31 +603,39 @@ rule-providers:
     <<: *BehaviorMrsDN
     url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Google.mrs'
 
-  # ===== 自定义规则集 =====
+  # ===== MetaCubeX 域名规则集（MRS） =====
   netflix_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/netflix.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/netflix.mrs'
   youtube_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/youtube.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs'
   bilibili_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/bilibili.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/bilibili.mrs'
   bahamut_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/bahamut.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/bahamut.mrs'
   iqiyi_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/iqiyi.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/iqiyi.mrs'
   tencent_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/tencent.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tencent-video.mrs'
   paypal_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/paypal.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/paypal.mrs'
   twitter_rule:
-    <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/twitter.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs'
+  games_cn:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games@cn.mrs'
+  cn_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
+
+  # ===== 自定义规则集 =====
   crypto_rule:
     <<: *BehaviorCL
     url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/crypto.txt'
