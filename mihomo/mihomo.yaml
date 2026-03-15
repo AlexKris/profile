@@ -8,7 +8,7 @@
 BaseProvider: &BaseProvider
   type: http
   interval: 86400
-  proxy: DIRECT
+  proxy: Proxy
   health-check:
     enable: true
     url: 'http://1.1.1.1/generate_204'
