@@ -508,77 +508,186 @@ fi
 # ===== 11. 监听端口 =====
 section "监听端口"
 
-info "TCP 监听端口:"
-ss -tlnp 2>/dev/null | tail -n +2 | while IFS= read -r line; do
-    local_addr=$(echo "$line" | awk '{print $4}')
-    process=$(echo "$line" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p')
-    process="${process:-unknown}"
+# 缓存 ss 输出（TCP/UDP 各调用一次）
+_SS_TCP=$(ss -tlnp 2>/dev/null | tail -n +2)
+_SS_UDP=$(ss -ulnp 2>/dev/null | tail -n +2)
 
-    # 判断绑定地址
-    if echo "$local_addr" | grep -qE '^0\.0\.0\.0:|^\*:|\[::\]:'; then
-        bind_type="${YELLOW}全部接口${NC}"
-    elif echo "$local_addr" | grep -qE '^127\.0\.0\.1:|^\[::1\]:'; then
-        bind_type="${GREEN}仅本地${NC}"
-    else
-        bind_type="${CYAN}指定IP${NC}"
-    fi
-
-    port=$(echo "$local_addr" | awk -F: '{print $NF}')
-    port="${port:-?}"
-    printf "  ${DIM}       %-6s %-25s ${NC}%b  %b\n" "$port" "$local_addr" "$bind_type" "$process"
-done
-
-# UDP 监听
-udp_count=$(ss -ulnp 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
-if [ "$udp_count" -gt 0 ]; then
-    info "UDP 监听端口: $udp_count 个"
-    ss -ulnp 2>/dev/null | tail -n +2 | while IFS= read -r line; do
-        local_addr=$(echo "$line" | awk '{print $4}')
-        process=$(echo "$line" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p')
-        process="${process:-unknown}"
-        port=$(echo "$local_addr" | awk -F: '{print $NF}')
-        port="${port:-?}"
-        printf "  ${DIM}       %-6s %-25s ${NC}%b\n" "$port" "$local_addr" "$process"
-    done
-fi
-
-# 端口汇总
-tcp_total=$(ss -tlnp 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
-udp_total=$(ss -ulnp 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
-info "汇总: TCP ${tcp_total} 个, UDP ${udp_total} 个"
-# 按进程分组显示端口范围
-ss -tlnp 2>/dev/null | tail -n +2 | awk '{
-    proc = $0; sub(/.*users:\(\("/, "", proc); sub(/".*/, "", proc)
-    if (proc == $0) proc = "unknown"
-    port = $4; sub(/.*:/, "", port)
-    ports[proc] = ports[proc] ? ports[proc] " " port : port
+_get_ss_data() {
+    case "$1" in
+        tcp) [ -n "$_SS_TCP" ] && printf '%s\n' "$_SS_TCP" ;;
+        udp) [ -n "$_SS_UDP" ] && printf '%s\n' "$_SS_UDP" ;;
+    esac
 }
-END {
-    for (p in ports) {
-        n = split(ports[p], arr, " ")
-        # 去重并排序
-        delete seen; unique = ""
-        for (i = 1; i <= n; i++) {
-            if (!(arr[i] in seen)) {
-                seen[arr[i]] = 1
-                unique = unique ? unique " " arr[i] : arr[i]
-            }
+
+group_listeners() {
+    _get_ss_data "$1" | awk '
+    {
+        local_addr = $4
+        proc = $0
+        sub(/.*users:\(\("/, "", proc)
+        sub(/".*/, "", proc)
+        if (proc == $0) proc = "unknown"
+
+        port = local_addr
+        sub(/.*:/, "", port)
+        key = proc SUBSEP port
+
+        if (!(key in seen_key)) {
+            seen_key[key] = 1
+            order[++group_count] = key
         }
-        nu = split(unique, uarr, " ")
-        if (nu == 1) {
-            printf "         %s: %s\n", p, uarr[1]
-        } else {
-            # 找最小和最大
-            min = uarr[1]+0; max = uarr[1]+0
-            for (i = 2; i <= nu; i++) {
-                v = uarr[i]+0
-                if (v < min) min = v
-                if (v > max) max = v
+
+        addr_key = key SUBSEP local_addr
+        if (!(addr_key in seen_addr)) {
+            seen_addr[addr_key] = 1
+            addr_list[key] = addr_list[key] ? addr_list[key] ", " local_addr : local_addr
+
+            if (local_addr ~ /^0\.0\.0\.0:|^\*:|^\[::\]:/) {
+                bind_scope[key, "wild"] = 1
+            } else if (local_addr ~ /^127\.0\.0\.1:|^\[::1\]:/) {
+                bind_scope[key, "local"] = 1
+            } else {
+                bind_scope[key, "specific"] = 1
             }
-            printf "         %s: %d-%d (%d 端口)\n", p, min, max, nu
         }
     }
-}' | sort
+    END {
+        for (i = 1; i <= group_count; i++) {
+            key = order[i]
+            split(key, parts, SUBSEP)
+            proc = parts[1]
+            port = parts[2]
+
+            wild = bind_scope[key, "wild"]
+            local = bind_scope[key, "local"]
+            specific = bind_scope[key, "specific"]
+
+            if (wild && !local && !specific) {
+                bind_type = "全部接口"
+            } else if (local && !wild && !specific) {
+                bind_type = "仅本地"
+            } else if (specific && !wild && !local) {
+                bind_type = "指定IP"
+            } else {
+                bind_type = "混合绑定"
+            }
+
+            printf "%s\t%s\t%s\t%s\n", port, bind_type, proc, addr_list[key]
+        }
+    }'
+}
+
+count_listener_rows() {
+    _get_ss_data "$1" | awk 'END { print NR + 0 }'
+}
+
+colorize_bind_type() {
+    case "$1" in
+        全部接口) printf "%b" "${YELLOW}$1${NC}" ;;
+        仅本地)   printf "%b" "${GREEN}$1${NC}" ;;
+        指定IP)   printf "%b" "${CYAN}$1${NC}" ;;
+        *)        printf "%b" "${YELLOW}$1${NC}" ;;
+    esac
+}
+
+print_listener_groups() {
+    local proto="$1" label="$2"
+    local grouped raw_count group_count bind_color
+
+    grouped=$(group_listeners "$proto")
+    raw_count=$(count_listener_rows "$proto")
+    group_count=$(printf '%s\n' "$grouped" | awk 'NF { count++ } END { print count + 0 }')
+
+    info "${label} 监听端口: ${raw_count} 条，合并后 ${group_count} 组"
+    if [ "$group_count" -eq 0 ]; then
+        detail "无监听端口"
+        return
+    fi
+
+    while IFS=$'\t' read -r port bind_type process addrs; do
+        [ -n "$port" ] || continue
+        bind_color=$(colorize_bind_type "$bind_type")
+        printf "  ${DIM}       %-6s ${NC}%b  %b\n" "$port" "$bind_color" "$process"
+        detail "地址: $addrs"
+    done <<< "$grouped"
+}
+
+summarize_listeners_by_process() {
+    local proto="$1"
+    local proto_label
+    case "$proto" in
+        tcp) proto_label="TCP" ;;
+        udp) proto_label="UDP" ;;
+        *) return 1 ;;
+    esac
+
+    _get_ss_data "$proto" | awk -v proto_label="$proto_label" '{
+        proc = $0
+        sub(/.*users:\(\("/, "", proc)
+        sub(/".*/, "", proc)
+        if (proc == $0) proc = "unknown"
+
+        port = $4
+        sub(/.*:/, "", port)
+        key = proc SUBSEP port
+
+        if (!(key in seen)) {
+            seen[key] = 1
+            ports[proc] = ports[proc] ? ports[proc] " " port : port
+            if (!(proc in proc_seen)) {
+                proc_seen[proc] = 1
+                order[++proc_count] = proc
+            }
+        }
+    }
+    END {
+        for (oi = 1; oi <= proc_count; oi++) {
+            p = order[oi]
+            n = split(ports[p], arr, " ")
+            delete uniq_seen
+            uniq = ""
+            uniq_count = 0
+
+            for (i = 1; i <= n; i++) {
+                if (!(arr[i] in uniq_seen)) {
+                    uniq_seen[arr[i]] = 1
+                    uniq = uniq ? uniq " " arr[i] : arr[i]
+                    uniq_count++
+                }
+            }
+
+            split(uniq, uniq_arr, " ")
+            if (uniq_count == 1) {
+                printf "%s %s: %s\n", proto_label, p, uniq_arr[1]
+            } else if (uniq_count > 1) {
+                min = uniq_arr[1] + 0
+                max = uniq_arr[1] + 0
+                for (i = 2; i <= uniq_count; i++) {
+                    v = uniq_arr[i] + 0
+                    if (v < min) min = v
+                    if (v > max) max = v
+                }
+                printf "%s %s: %d-%d (%d 端口)\n", proto_label, p, min, max, uniq_count
+            }
+        }
+    }'
+}
+
+print_listener_groups "tcp" "TCP"
+print_listener_groups "udp" "UDP"
+
+tcp_total=$(count_listener_rows "tcp")
+udp_total=$(count_listener_rows "udp")
+tcp_group_total=$(group_listeners "tcp" | awk 'NF { count++ } END { print count + 0 }')
+udp_group_total=$(group_listeners "udp" | awk 'NF { count++ } END { print count + 0 }')
+info "汇总: TCP ${tcp_total} 条/${tcp_group_total} 组, UDP ${udp_total} 条/${udp_group_total} 组"
+info "按进程汇总:"
+summarize_listeners_by_process "tcp" | while IFS= read -r line; do
+    detail "$line"
+done
+summarize_listeners_by_process "udp" | while IFS= read -r line; do
+    detail "$line"
+done
 
 # ===== 12. Snell =====
 section "Snell"
