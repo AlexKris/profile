@@ -505,100 +505,6 @@ else
     info "Docker: 未安装"
 fi
 
-# --- 协议检测辅助函数 ---
-_probe_ssh() {
-    local result
-    result=$(timeout 1 bash -c "echo '' | nc -w1 127.0.0.1 $1 2>/dev/null" | head -c 4)
-    [[ "$result" == SSH-* ]] && echo "SSH" && return 0
-    return 1
-}
-
-_probe_socks5() {
-    command -v nc &>/dev/null || return 1
-    local result
-    result=$(printf '\x05\x01\x00' | timeout 1 nc -w1 127.0.0.1 "$1" 2>/dev/null | od -A n -t x1 -N 2 2>/dev/null | tr -d ' \n')
-    [[ "$result" == "0500" ]] && echo "SOCKS5" && return 0
-    return 1
-}
-
-_probe_tls() {
-    command -v openssl &>/dev/null || return 1
-    local result
-    result=$(echo "" | timeout 2 openssl s_client -connect "127.0.0.1:$1" 2>&1)
-    if echo "$result" | grep -q 'BEGIN CERTIFICATE'; then
-        echo "TLS" && return 0
-    fi
-    return 1
-}
-
-_probe_http() {
-    command -v curl &>/dev/null || return 1
-    local status
-    status=$(timeout 1 curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/" 2>/dev/null)
-    if [[ "$status" =~ ^[1-5][0-9][0-9]$ ]]; then
-        echo "HTTP" && return 0
-    fi
-    return 1
-}
-
-detect_protocol() {
-    local port="$1" process="$2" proto_type="$3"
-
-    # 阶段 1: 进程名映射（零成本）
-    case "$process" in
-        sshd)                       echo "SSH"; return ;;
-        nginx|caddy|apache2|httpd)  echo "HTTP/S"; return ;;
-        snell-server|snell)         echo "Snell"; return ;;
-        smartdns|named|dnsmasq|unbound) echo "DNS"; return ;;
-        soga)                       echo "Soga"; return ;;
-        haproxy)                    echo "Proxy/LB"; return ;;
-        v2ray|xray)                 echo "V2Ray"; return ;;
-        sing-box)                   echo "sing-box"; return ;;
-        ss-server|ssserver|sslocal) echo "SS"; return ;;
-        hysteria|hysteria2)         echo "Hysteria"; return ;;
-        trojan|trojan-go)           echo "Trojan"; return ;;
-        tuic|tuic-server)           echo "TUIC"; return ;;
-        realm|rel_nodeclient)       echo "Relay"; return ;;
-        gost)                       echo "GOST"; return ;;
-        brook)                      echo "Brook"; return ;;
-        naiveproxy|naive)           echo "NaiveProxy"; return ;;
-        chronyd|systemd-timesyn|ntpd) echo "NTP"; return ;;
-        wireguard|wg)               echo "WireGuard"; return ;;
-        openvpn)                    echo "OpenVPN"; return ;;
-        mysqld|mariadbd)            echo "MySQL"; return ;;
-        postgres)                   echo "PostgreSQL"; return ;;
-        redis-server)               echo "Redis"; return ;;
-        mongod)                     echo "MongoDB"; return ;;
-    esac
-
-    # UDP 不做主动探测
-    if [ "$proto_type" = "udp" ]; then
-        case "$port" in
-            53)   echo "DNS"; return ;;
-            51820) echo "WireGuard"; return ;;
-            443)  echo "QUIC"; return ;;
-        esac
-        echo "-"; return
-    fi
-
-    # 阶段 2: 端口号启发（仅进程名未命中时）
-    case "$port" in
-        22)  echo "SSH"; return ;;
-        53)  echo "DNS"; return ;;
-        80)  echo "HTTP"; return ;;
-        443) echo "HTTPS"; return ;;
-    esac
-
-    # 阶段 3-6: 主动探测（仅 TCP）
-    local result
-    result=$(_probe_ssh "$port")    && echo "$result" && return
-    result=$(_probe_socks5 "$port") && echo "$result" && return
-    result=$(_probe_tls "$port")    && echo "$result" && return
-    result=$(_probe_http "$port")   && echo "$result" && return
-
-    echo "-"
-}
-
 # ===== 11. 监听端口 =====
 section "监听端口"
 
@@ -619,13 +525,7 @@ ss -tlnp 2>/dev/null | tail -n +2 | while IFS= read -r line; do
 
     port=$(echo "$local_addr" | awk -F: '{print $NF}')
     port="${port:-?}"
-    protocol=$(detect_protocol "$port" "$process" "tcp")
-    if [ "$protocol" = "-" ]; then
-        proto_display=""
-    else
-        proto_display="${CYAN}[$protocol]${NC}"
-    fi
-    printf "  ${DIM}       %-6s %-25s ${NC}%b  %-14s %b\n" "$port" "$local_addr" "$bind_type" "$process" "$proto_display"
+    printf "  ${DIM}       %-6s %-25s ${NC}%b  %b\n" "$port" "$local_addr" "$bind_type" "$process"
 done
 
 # UDP 监听
@@ -638,15 +538,47 @@ if [ "$udp_count" -gt 0 ]; then
         process="${process:-unknown}"
         port=$(echo "$local_addr" | awk -F: '{print $NF}')
         port="${port:-?}"
-        protocol=$(detect_protocol "$port" "$process" "udp")
-        if [ "$protocol" = "-" ]; then
-            proto_display=""
-        else
-            proto_display="${CYAN}[$protocol]${NC}"
-        fi
-        printf "  ${DIM}       %-6s %-25s %-14s ${NC}%b\n" "$port" "$local_addr" "$process" "$proto_display"
+        printf "  ${DIM}       %-6s %-25s ${NC}%b\n" "$port" "$local_addr" "$process"
     done
 fi
+
+# 端口汇总
+tcp_total=$(ss -tlnp 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+udp_total=$(ss -ulnp 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+info "汇总: TCP ${tcp_total} 个, UDP ${udp_total} 个"
+# 按进程分组显示端口范围
+ss -tlnp 2>/dev/null | tail -n +2 | awk '{
+    proc = $0; sub(/.*users:\(\("/, "", proc); sub(/".*/, "", proc)
+    if (proc == $0) proc = "unknown"
+    port = $4; sub(/.*:/, "", port)
+    ports[proc] = ports[proc] ? ports[proc] " " port : port
+}
+END {
+    for (p in ports) {
+        n = split(ports[p], arr, " ")
+        # 去重并排序
+        delete seen; unique = ""
+        for (i = 1; i <= n; i++) {
+            if (!(arr[i] in seen)) {
+                seen[arr[i]] = 1
+                unique = unique ? unique " " arr[i] : arr[i]
+            }
+        }
+        nu = split(unique, uarr, " ")
+        if (nu == 1) {
+            printf "         %s: %s\n", p, uarr[1]
+        } else {
+            # 找最小和最大
+            min = uarr[1]+0; max = uarr[1]+0
+            for (i = 2; i <= nu; i++) {
+                v = uarr[i]+0
+                if (v < min) min = v
+                if (v > max) max = v
+            }
+            printf "         %s: %d-%d (%d 端口)\n", p, min, max, nu
+        }
+    }
+}' | sort
 
 # ===== 12. Snell =====
 section "Snell"
