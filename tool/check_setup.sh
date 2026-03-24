@@ -525,7 +525,7 @@ _probe_tls() {
     command -v openssl &>/dev/null || return 1
     local result
     result=$(echo "" | timeout 2 openssl s_client -connect "127.0.0.1:$1" 2>&1)
-    if echo "$result" | grep -q 'BEGIN CERTIFICATE\|SSL handshake'; then
+    if echo "$result" | grep -q 'BEGIN CERTIFICATE'; then
         echo "TLS" && return 0
     fi
     return 1
@@ -558,7 +558,7 @@ detect_protocol() {
         hysteria|hysteria2)         echo "Hysteria"; return ;;
         trojan|trojan-go)           echo "Trojan"; return ;;
         tuic|tuic-server)           echo "TUIC"; return ;;
-        realm)                      echo "Relay"; return ;;
+        realm|rel_nodeclient)       echo "Relay"; return ;;
         gost)                       echo "GOST"; return ;;
         brook)                      echo "Brook"; return ;;
         naiveproxy|naive)           echo "NaiveProxy"; return ;;
