@@ -562,6 +562,7 @@ detect_protocol() {
         gost)                       echo "GOST"; return ;;
         brook)                      echo "Brook"; return ;;
         naiveproxy|naive)           echo "NaiveProxy"; return ;;
+        chronyd|systemd-timesyn|ntpd) echo "NTP"; return ;;
         wireguard|wg)               echo "WireGuard"; return ;;
         openvpn)                    echo "OpenVPN"; return ;;
         mysqld|mariadbd)            echo "MySQL"; return ;;
