@@ -516,7 +516,7 @@ _probe_ssh() {
 _probe_socks5() {
     command -v nc &>/dev/null || return 1
     local result
-    result=$(printf '\x05\x01\x00' | timeout 1 nc -w1 127.0.0.1 "$1" 2>/dev/null | xxd -p -l 2)
+    result=$(printf '\x05\x01\x00' | timeout 1 nc -w1 127.0.0.1 "$1" 2>/dev/null | od -A n -t x1 -N 2 2>/dev/null | tr -d ' \n')
     [[ "$result" == "0500" ]] && echo "SOCKS5" && return 0
     return 1
 }
