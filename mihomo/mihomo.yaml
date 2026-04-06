@@ -42,7 +42,7 @@ FilterYouTube: &FilterYouTube '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW
 FilterNetflix: &FilterNetflix '^(?!.*(?:Misaka|Stacks|Zenlayer|Sakura))(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|TW|JP|SG|US))(?=.*(?:SoftBank|Nuro|Ucom|ATT|Hawaii|Sakura))'
 FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
-FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|🇺🇸|HK|TW|JP|SG|US))'
+FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
 
 # 规则集模板
 BehaviorDN: &BehaviorDN
@@ -73,6 +73,12 @@ BehaviorMrsIP: &BehaviorMrsIP
   type: http
   behavior: ipcidr
   format: mrs
+  interval: 86400
+
+BehaviorIPyaml: &BehaviorIPyaml
+  type: http
+  behavior: ipcidr
+  format: yaml
   interval: 86400
 
 # ==================== 代理提供者 ====================
@@ -114,10 +120,12 @@ profile:
 # ==================== 流量嗅探 ====================
 sniffer:
   enable: true
+  force-dns-mapping: true       # fake-ip 反查的连接也强制嗅探（防止落到 IP 兜底）
+  parse-pure-ip: true           # 纯 IP 直连（无 DNS 历史）也尝试嗅出域名
+  override-destination: true    # 全局：把目标地址改写为嗅出的真实域名
   sniff:
     HTTP:
       ports: [80, 8080-8880]
-      override-destination: true
     TLS:
       ports: [443, 8443]
     QUIC:
@@ -140,6 +148,9 @@ tun:
 # ==================== DNS 配置 ====================
 dns:
   enable: true
+  prefer-h3: false              # 显式声明：DoH 用 HTTP/2（H3 在国内 DoH 上不稳定）
+  use-hosts: true               # 读 mihomo 自身 hosts 块
+  use-system-hosts: true        # 读 /etc/hosts（镜像 SurgePro read-etc-hosts）
   respect-rules: true
   ipv6: false
   cache-algorithm: arc
@@ -198,6 +209,28 @@ dns:
     # 通用游戏
     - "+.xboxlive.com"
     - stun.l.google.com
+    # 米哈游全系（CN 品牌 + 国际品牌：原神/崩坏/星穹/绝区零 + hoyoverse/hoyolab）
+    - "+.mihoyo.com"
+    - "+.yuanshen.com"
+    - "+.bh3.com"
+    - "+.bhsr.com"
+    - "+.juequling.com"
+    - "+.miyoushe.com"
+    - "+.mhyurl.cn"
+    - "+.hoyoverse.com"
+    - "+.hoyolab.com"
+    - "+.genshinimpact.com"
+    - "+.honkaistarrail.com"
+    - "+.honkaiimpact3.com"
+    - "+.zenlesszonezero.com"
+    # KuroGame 鸣潮 / 战双
+    - "+.kurogames.com"
+    - "+.kurogame.com"
+    - "+.aki-game.com"
+    - "+.wutheringwaves.com"
+    # 腾讯 / 网易游戏
+    - "+.wegame.com.cn"
+    - game.163.com
     # 系统连通性检测
     - "+.msftconnecttest.com"
     - "+.msftncsi.com"
@@ -260,9 +293,11 @@ dns:
 # ==================== 代理策略组 ====================
 proxy-groups:
   # ===== 顶层策略 =====
+  # 注：proxies 首项 = 初始默认。Core 在前，确保新部署/清缓存后默认走代理，
+  # 避免 RULE-SET → Proxy 类规则误走 DIRECT 触发本地 DNS 解析（防 G2 泄漏）。
   - name: Proxy
     <<: *BaseSelect
-    proxies: [DIRECT, Core, Edge]
+    proxies: [Core, Edge, DIRECT]
 
   - name: Final
     <<: *BaseSelect
@@ -440,6 +475,13 @@ rules:
   - RULE-SET,iqiyi_rule,ChinaMedia
   - RULE-SET,tencent_rule,ChinaMedia
 
+  # > 米哈游全系（含国际品牌：原神/崩坏/星穹铁道/绝区零 + hoyoverse/hoyolab）
+  # 必须放在 games_cn 之前，因为 category-games-cn.mrs 只包含 mihoyo-cn 子集（不含 hoyoverse）
+  - RULE-SET,mihoyo_full,DIRECT
+  # > 鸣潮 / 战双（KuroGame 国际域名，v2fly kurogames 列表未收录）
+  - DOMAIN-SUFFIX,wutheringwaves.com,DIRECT
+  - DOMAIN-SUFFIX,kurogame.com,DIRECT
+
   # > Gaming（国内直连）
   - RULE-SET,games_cn,DIRECT
   # > Gaming（海外代理）
@@ -499,6 +541,10 @@ rules:
   # > 内网域名
   - RULE-SET,skk_lan_nonip,DIRECT
 
+  # > GFW 长尾兜底（catch skk_global 漏掉的 GFW 域名，避免落到 MATCH/Final）
+  # 放在 skk_domestic / cn_domain 之后，确保 CN 域名先判定为 DIRECT，gfw 只接长尾
+  - RULE-SET,geosite_gfw,Proxy
+
   # ===== 域名规则 end =====
 
   # ===== IP 规则 start =====
@@ -511,6 +557,7 @@ rules:
   # > 中国大陆 IP
   - RULE-SET,skk_domestic_ip,DIRECT
   - RULE-SET,skk_china_ip,DIRECT
+  - RULE-SET,loyalsoldier_cncidr,DIRECT
 
   # > LAN IP
   - RULE-SET,skk_lan_ip,DIRECT
@@ -592,6 +639,11 @@ rule-providers:
     <<: *BehaviorIP
     url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
 
+  # ===== Loyalsoldier 规则集 =====
+  loyalsoldier_cncidr:
+    <<: *BehaviorIPyaml
+    url: 'https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/cncidr.txt'
+
   # ===== 666OS 规则集 =====
   666os_games:
     <<: *BehaviorMrsDN
@@ -619,9 +671,6 @@ rule-providers:
   iqiyi_rule:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/iqiyi.mrs'
-  tencent_rule:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tencent-video.mrs'
   paypal_rule:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/paypal.mrs'
@@ -634,6 +683,15 @@ rule-providers:
   cn_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
+  # 米哈游全系（v2fly mihoyo = mihoyo-cn + hoyoverse，覆盖 CN 品牌 + 国际品牌
+  # 包括：原神/崩坏/星穹铁道/绝区零 全系，hoyolab，hoyoverse，genshinimpact，honkaistarrail 等）
+  mihoyo_full:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/mihoyo.mrs'
+  # GFW 列表兜底（catch skk_global 漏掉的 GFW 长尾域名，避免落到 MATCH/Final）
+  geosite_gfw:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/gfw.mrs'
 
   # ===== 自定义规则集 =====
   crypto_rule:
@@ -645,6 +703,9 @@ rule-providers:
   process_rule:
     <<: *BehaviorCL
     url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/process.txt'
+  tencent_rule:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/profile/main/mihomo/rule/tencent.txt'
 
   # ===== skk.moe Nameserver Policy 规则集 =====
   nsp_alibaba:
