@@ -1,0 +1,79 @@
+# ============================================================
+# Sparkle Override 模板（占位符版本，可 commit）
+# ============================================================
+#
+# 用法：
+#   1. cp sparkle-override.example.yaml sparkle-override.yaml
+#   2. 编辑 sparkle-override.yaml，把所有 your-* 占位符改成真实域名
+#   3. Sparkle → 覆写页面 → 新建 → 类型 Local → 扩展 yaml → 粘贴 sparkle-override.yaml 全部内容
+#   4. 在 profile 设置里把这个 override 启用到主 profile (mihomo.yaml)
+#
+# Sparkle deepMerge 语法（src/main/utils/merge.ts）：
+#   - 对象 (map)：默认递归 deep merge
+#   - 数组 (list)：默认整体替换
+#     - 键名前缀 +list_name → prepend (添加到主 list 前面)
+#     - 键名后缀 list_name+ → append (添加到主 list 后面)
+#   - 任意键名后缀 ! → 强制整体替换（不递归）
+#
+# 重要：YAML 锚点不能跨文件引用。Override 里的 filter 正则等必须写完整，
+# 不能用 *FilterEdge 这种引用主 mihomo.yaml 的锚点。
+
+# ============================================================
+# 1. dns.nameserver-policy 增量合并
+# ============================================================
+# 把订阅域名走国内 DNS（避免污染 + 提速）
+dns:
+  nameserver-policy:
+    # 替换 your-subscription.net 为你的订阅服务/私有服务域名
+    "+.your-subscription.net": https://dns.alidns.com/dns-query
+
+# ============================================================
+# 2. proxy-groups: prepend 个人 group 到主 list 前
+# ============================================================
++proxy-groups:
+  # Self: 个人服务路由（订阅相关、个人 VPS 等）
+  - name: Self
+    type: select
+    proxies: [Core, Edge]
+
+  # GlobalEmby: 海外 Emby 服务器（HK/JP 节点优先，排除廉价转发）
+  - name: GlobalEmby
+    type: select
+    include-all-providers: true
+    filter: '^(?!.*(?:Neburst|Gen2))(?=.*(?:🇭🇰|🇯🇵|HK|JP))'
+
+  # RFCEmby: 特定 RFC/Jinx 系列 Emby（仅含 RFC 标识的 HK/JP 节点）
+  - name: RFCEmby
+    type: select
+    include-all-providers: true
+    filter: '(?=.*(?:🇭🇰|🇯🇵|HK|JP))(?=.*(?:RFC|Jinx))'
+
+  # DirectEmby: 国内可直连的 Emby（如有 HK/JP 专线 CDN）
+  - name: DirectEmby
+    type: select
+    proxies: [DIRECT, GlobalEmby]
+
+# ============================================================
+# 3. rules: prepend 个人 DOMAIN 规则到 rules 数组前
+# 这些是高优先级显式匹配，会先于主 yaml 的 QUIC 阻止 / 通用规则判定
+# ============================================================
++rules:
+  # 自定义域名（替换为你的真实个人域名）
+  - DOMAIN-SUFFIX,your-personal-domain.com,Self
+  - DOMAIN-SUFFIX,your-other-domain.net,Self
+  - DOMAIN-SUFFIX,your-host-domain.com,Proxy
+  - DOMAIN-SUFFIX,your-direct-domain.ai,DIRECT
+
+  # Emby 服务器 → GlobalEmby（替换为你的真实 Emby 域名）
+  - DOMAIN-SUFFIX,your-magpie-emby.xyz,GlobalEmby
+  - DOMAIN,cfcdn.your-emby.com,GlobalEmby
+  - DOMAIN,cfstream.your-emby.top,GlobalEmby
+
+  # Emby 服务器 → DirectEmby（HK/JP 专线 CDN 直连）
+  - DOMAIN,hkcdn.your-emby.com,DirectEmby
+  - DOMAIN,pkstream-hk.your-emby.top,DirectEmby
+  - DOMAIN,jpcdn.your-emby.com,DirectEmby
+  - DOMAIN,pkstream-jp.your-emby.top,DirectEmby
+
+  # Emby 服务器 → RFCEmby
+  - DOMAIN,rfc.your-rfcuhd.com,RFCEmby

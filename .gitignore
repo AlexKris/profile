@@ -24,3 +24,9 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Mihomo 个人/私有内容（kirsime, Emby, 订阅域名 DNS 分流等）
+# 通过 Sparkle 的"覆写"功能在客户端本地注入；详见 mihomo/personal/README.md
+mihomo/personal/*
+!mihomo/personal/README.md
+!mihomo/personal/sparkle-override.example.yaml
