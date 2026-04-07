@@ -32,6 +32,8 @@ readonly SSH_CONFIG="/etc/ssh/sshd_config"
 readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
 # 固定日志文件路径
 readonly LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
+readonly APT_FALLBACK_TMP_DIR="/tmp/setup-apt-fallback-official"
+readonly APT_FALLBACK_LEGACY_SOURCE="/etc/apt/sources.list.d/00-setup-fallback-official.list"
 
 # 脚本参数变量
 DISABLE_SSH_PASSWD="false"
@@ -65,6 +67,9 @@ cleanup() {
         # 使用引号保护变量，防止空格和特殊字符问题
         rm -f "$TMP_FILES" >/dev/null 2>&1
     fi
+    # 兜底清理可能残留的apt官方源fallback临时文件
+    sudo rm -rf "$APT_FALLBACK_TMP_DIR" 2>/dev/null || true
+    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
     log_message "INFO" "脚本执行完成，清理临时文件"
 }
 
@@ -519,6 +524,75 @@ apt_install_with_retry() {
 }
 
 
+
+# 通过隔离的Debian官方源安装chrony，避免主镜像CDN边缘节点pool同步延迟导致404
+try_install_chrony_via_official_mirror() {
+    local tmp_dir="$APT_FALLBACK_TMP_DIR"
+    local tmp_list="$tmp_dir/official.list"
+    local tmp_source_parts="$tmp_dir/sourceparts"
+    local tmp_lists="$tmp_dir/lists"
+    local codename=""
+    local rc=1
+
+    log_message "INFO" "通过 deb.debian.org 临时源安装 chrony..."
+
+    if command -v lsb_release &>/dev/null; then
+        codename=$(lsb_release -cs 2>/dev/null || true)
+    fi
+    if [ -z "$codename" ] && [ -f /etc/os-release ]; then
+        codename=$(awk -F= '/^VERSION_CODENAME=/{gsub(/"/,"",$2); print $2}' /etc/os-release)
+    fi
+    if [ -z "$codename" ]; then
+        log_message "WARNING" "无法检测Debian codename，跳过官方源fallback"
+        return 1
+    fi
+
+    case "$codename" in
+        bullseye|bookworm|trixie)
+            ;;
+        *)
+            log_message "WARNING" "不支持的Debian codename: $codename，跳过官方源fallback"
+            return 1
+            ;;
+    esac
+
+    sudo rm -rf "$tmp_dir" 2>/dev/null || true
+    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
+    if ! sudo mkdir -p "$tmp_source_parts" "$tmp_lists/partial"; then
+        log_message "WARNING" "创建官方源fallback临时目录失败"
+        return 1
+    fi
+
+    sudo tee "$tmp_list" > /dev/null << EOF
+# Temporary fallback source added by setup.sh
+# Removed automatically after chrony installation completes
+deb https://deb.debian.org/debian $codename main
+deb https://deb.debian.org/debian-security ${codename}-security main
+deb https://deb.debian.org/debian ${codename}-updates main
+EOF
+
+    local apt_opts=(
+        -o "Dir::Etc::SourceList=$tmp_list"
+        -o "Dir::Etc::SourceParts=$tmp_source_parts"
+        -o "Dir::State::Lists=$tmp_lists"
+    )
+
+    if sudo apt-get "${apt_opts[@]}" update -y; then
+        if sudo apt-get "${apt_opts[@]}" install -y chrony; then
+            log_message "INFO" "通过官方源成功安装 chrony"
+            rc=0
+        else
+            log_message "WARNING" "通过官方源安装 chrony 仍失败"
+        fi
+    else
+        log_message "WARNING" "官方源索引刷新失败"
+    fi
+
+    sudo rm -rf "$tmp_dir" 2>/dev/null || true
+    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
+
+    return $rc
+}
 
 # 等待apt锁并处理特殊情况（合并版本）
 wait_for_apt_locks() {
@@ -1425,16 +1499,28 @@ configure_timezone_ntp() {
     
     # 配置NTP服务
     if [ "$OS_TYPE" = "debian" ]; then
+        local use_chrony="false"
         if [ "$NTP_SERVICE" = "chrony" ] || ([ "$NTP_SERVICE" = "auto" ] && command -v chronyd &> /dev/null); then
-            # 使用chrony
+            use_chrony="true"
+        fi
+
+        if [ "$use_chrony" = "true" ]; then
+            local need_official_fallback="false"
             if ! wait_for_apt_locks; then
-                log_message "ERROR" "等待apt锁失败，跳过chrony安装"
-                return 1
+                log_message "WARNING" "等待apt锁失败，尝试官方源fallback"
+                need_official_fallback="true"
+            elif ! apt_install_with_retry "chrony" 2 5; then
+                log_message "WARNING" "主镜像chrony安装失败（CDN边缘节点pool可能未同步），尝试官方源fallback"
+                need_official_fallback="true"
             fi
-            if ! apt_install_with_retry "chrony"; then
-                log_message "ERROR" "chrony安装失败"
-                return 1
+
+            if [ "$need_official_fallback" = "true" ] && ! try_install_chrony_via_official_mirror; then
+                log_message "WARNING" "官方源fallback也失败，回退到systemd-timesyncd"
+                use_chrony="false"
             fi
+        fi
+
+        if [ "$use_chrony" = "true" ]; then
             sudo systemctl stop systemd-timesyncd 2>/dev/null || true
             sudo systemctl disable systemd-timesyncd 2>/dev/null || true
 
@@ -1454,18 +1540,20 @@ EOF
             sudo systemctl unmask chrony 2>/dev/null || true
             sudo systemctl enable chrony || log_message "WARNING" "chrony enable失败，可能仍处于masked状态"
             sudo systemctl restart chrony || log_message "ERROR" "chrony启动失败"
-        else
+        fi
+
+        if [ "$use_chrony" != "true" ]; then
             # 使用systemd-timesyncd
-                sudo systemctl stop chrony 2>/dev/null || true
-                sudo systemctl disable chrony 2>/dev/null || true
+            sudo systemctl stop chrony 2>/dev/null || true
+            sudo systemctl disable chrony 2>/dev/null || true
             
             sudo tee /etc/systemd/timesyncd.conf > /dev/null << EOF
 [Time]
 NTP=$ntp_server
 FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org
 EOF
-            sudo systemctl restart systemd-timesyncd
-            sudo systemctl enable systemd-timesyncd
+            sudo systemctl restart systemd-timesyncd || log_message "WARNING" "systemd-timesyncd启动失败"
+            sudo systemctl enable systemd-timesyncd 2>/dev/null || true
         fi
     else
         # RHEL/CentOS使用chrony
