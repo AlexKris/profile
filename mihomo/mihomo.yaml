@@ -465,8 +465,8 @@ rules:
   # > Crypto
   - RULE-SET,crypto_rule,Crypto
 
-  # > Instagram（666OS Facebook.mrs 包含 Instagram/Meta 全系）
-  - RULE-SET,666os_instagram,Instagram
+  # > Instagram / Meta 生态
+  - RULE-SET,meta_meta,Instagram
 
   # > Twitter
   - RULE-SET,twitter_rule,Twitter
@@ -485,8 +485,8 @@ rules:
 
   # > Gaming（国内直连）
   - RULE-SET,games_cn,DIRECT
-  # > Gaming（海外代理）
-  - RULE-SET,666os_games,Gaming
+  # > Gaming（海外代理，MetaCubeX category-games）
+  - RULE-SET,meta_games,Gaming
 
   # > Bahamut
   - RULE-SET,bahamut_rule,TW
@@ -524,11 +524,11 @@ rules:
   - RULE-SET,skk_apple_cn,AppleCN
 
   # > Apple/Microsoft 服务
-  - RULE-SET,skk_apple_services,Proxy
-  - RULE-SET,skk_microsoft,Proxy
+  - RULE-SET,skk_apple_services,Apple
+  - RULE-SET,skk_microsoft,Microsoft
 
-  # > Google 服务（666OS Google 域名规则集）
-  - RULE-SET,666os_google,Google
+  # > Google 服务（MetaCubeX google 域名规则集）
+  - RULE-SET,meta_google,Google
 
   # > 常见海外域名（Google 流量也会匹配此规则走 Proxy，Google 组仅用于面板手动选择）
   - RULE-SET,skk_global,Proxy
@@ -558,7 +558,7 @@ rules:
   # > 中国大陆 IP
   - RULE-SET,skk_domestic_ip,DIRECT
   - RULE-SET,skk_china_ip,DIRECT
-  - RULE-SET,loyalsoldier_cncidr,DIRECT
+  - RULE-SET,meta_cn_ip,DIRECT
 
   # > LAN IP
   - RULE-SET,skk_lan_ip,DIRECT
@@ -640,21 +640,19 @@ rule-providers:
     <<: *BehaviorIP
     url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
 
-  # ===== Loyalsoldier 规则集 =====
-  loyalsoldier_cncidr:
-    <<: *BehaviorIPyaml
-    url: 'https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/cncidr.txt'
-
-  # ===== 666OS 规则集 =====
-  666os_games:
+  # ===== MetaCubeX 补充规则集 =====
+  meta_cn_ip:
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs'
+  meta_games:
     <<: *BehaviorMrsDN
-    url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Games.mrs'
-  666os_instagram:
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games.mrs'
+  meta_meta:
     <<: *BehaviorMrsDN
-    url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Facebook.mrs'
-  666os_google:
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs'
+  meta_google:
     <<: *BehaviorMrsDN
-    url: 'https://github.com/666OS/rules/raw/release/mihomo/domain/Google.mrs'
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs'
 
   # ===== MetaCubeX 域名规则集（MRS） =====
   netflix_rule:

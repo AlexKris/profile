@@ -29,8 +29,7 @@ mihomo/
 | 来源 | 用途 | 格式 |
 |---|---|---|
 | [skk.moe](https://ruleset.skk.moe) | CDN / Global / Domestic / AI / Telegram / 流媒体 / Apple / Microsoft / Download / Speedtest | text (domain/classical) |
-| [MetaCubeX](https://github.com/MetaCubeX/meta-rules-dat) | Netflix / YouTube / Bilibili / Bahamut / iQiyi / Tencent Video / PayPal / Twitter / 国内游戏 / 国内域名兜底 | mrs (domain) |
-| [666OS/rules](https://github.com/666OS/rules) | Games / Google / Instagram(Facebook) | mrs (domain) |
+| [MetaCubeX](https://github.com/MetaCubeX/meta-rules-dat) | Netflix / YouTube / Bilibili / Bahamut / iQiyi / Tencent Video / PayPal / Twitter / Google / Meta / 国内游戏 / 海外游戏 / 国内域名兜底 | mrs (domain) |
 | 自定义 (`mihomo/rule/`) | Crypto / AgentIDE / Process | text (classical) |
 | [skk.moe NSP](https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/) | DNS 分流（阿里/腾讯/百度/字节等） | text (classical) |
 
@@ -48,7 +47,7 @@ Proxy (手动选择)
 ├── Download / CDN（← Edge / Core）
 ├── Instagram / Twitter / Crypto / PayPal
 ├── AppleCDN / AppleCN / MicrosoftCDN
-└── Gaming    ← 国内直连(games_cn) + 海外代理(666os_games)
+└── Gaming    ← 国内直连(games_cn) + 海外代理(meta_games)
 
 Final (兜底) → Proxy / DIRECT
 ```
