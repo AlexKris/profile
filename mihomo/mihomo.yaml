@@ -97,7 +97,7 @@ port: 7890
 socks-port: 7891
 redir-port: 7892
 tproxy-port: 7895
-ipv6: false
+ipv6: true
 allow-lan: true
 unified-delay: true
 tcp-concurrent: true
@@ -152,10 +152,11 @@ dns:
   use-hosts: true               # 读 mihomo 自身 hosts 块
   use-system-hosts: true        # 读 /etc/hosts（镜像 SurgePro read-etc-hosts）
   respect-rules: true
-  ipv6: false
+  ipv6: true
   cache-algorithm: arc
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
+  fake-ip-range6: fdfe:dcba:9876::1/64
   fake-ip-filter-mode: blacklist
   fake-ip-filter:
     # skk.moe 维护的 fake-ip-filter（系统/LAN/NTP/游戏手柄等）
