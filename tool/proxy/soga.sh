@@ -231,7 +231,9 @@ validate_install_params() {
     fi
 
     local dns_env_count=0
-    dns_env_count=${#DNS_ENVS[@]-0}
+    if [[ ${DNS_ENVS+x} ]]; then
+        dns_env_count=${#DNS_ENVS[@]}
+    fi
 
     local has_cert_param="no"
     if [[ -n "$CERT_MODE" || -n "$CERT_FILE" || -n "$KEY_FILE" || -n "$CERT_DOMAIN" \
@@ -374,7 +376,7 @@ EOF
                     if [[ -n "$CERT_KEY_LENGTH" ]]; then
                         printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
                     fi
-                    if [[ ${#DNS_ENVS[@]-0} -gt 0 ]]; then
+                    if [[ ${DNS_ENVS+x} && ${#DNS_ENVS[@]} -gt 0 ]]; then
                         local item k v
                         for item in "${DNS_ENVS[@]}"; do
                             k="${item%%=*}"
