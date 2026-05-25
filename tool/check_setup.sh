@@ -760,7 +760,47 @@ else
     info "Soga: Docker 未安装"
 fi
 
-# ===== 14. 安全审计（可选） =====
+# ===== 14. Heki =====
+section "Heki"
+
+if command -v docker &>/dev/null; then
+    heki_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -i heki | head -1)
+    if [ -n "$heki_container" ]; then
+        ok "Heki 容器: $heki_container 运行中"
+        heki_image=$(docker inspect "$heki_container" --format '{{.Config.Image}}' 2>/dev/null)
+        info "镜像: $heki_image"
+        heki_uptime=$(docker inspect "$heki_container" --format '{{.State.StartedAt}}' 2>/dev/null | cut -dT -f1)
+        info "启动时间: $heki_uptime"
+
+        # docker-compose 配置（按容器名隔离的目录）
+        heki_compose="/root/heki/${heki_container}/docker-compose.yml"
+        if [ -f "$heki_compose" ]; then
+            ok "docker-compose 配置: $heki_compose 存在"
+            # 检查 network_mode
+            if grep -q 'network_mode.*host' "$heki_compose" 2>/dev/null; then
+                info "网络模式: host"
+            fi
+            # 提取 node_id
+            heki_node_id=$(grep -i 'node_id' "$heki_compose" 2>/dev/null | head -1 | awk -F: '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}' || true)
+            [ -n "$heki_node_id" ] && info "Node ID: $heki_node_id"
+        fi
+
+        # 最近日志
+        info "最近日志:"
+        docker logs --tail 3 "$heki_container" 2>&1 | while IFS= read -r line; do
+            detail "$line"
+        done
+    elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi heki; then
+        heki_stopped=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -i heki | head -1)
+        bad "Heki 容器: $heki_stopped 已停止"
+    else
+        info "Heki: 未部署"
+    fi
+else
+    info "Heki: Docker 未安装"
+fi
+
+# ===== 15. 安全审计（可选） =====
 section "安全审计（可选）"
 
 if command -v auditctl &>/dev/null; then
@@ -780,7 +820,7 @@ else
     info "etckeeper: 未安装（可选功能）"
 fi
 
-# ===== 15. 其他 =====
+# ===== 16. 其他 =====
 section "其他"
 
 hostname_str=$(hostname)

@@ -3,9 +3,9 @@
 # 启用错误处理
 set -euo pipefail
 
-SOGA_ROOT="/root/soga"
-CONFIG_ROOT="/etc/soga"
-DOCKER_IMAGE="vaxilu/soga"
+HEKI_ROOT="/root/heki"
+CONFIG_ROOT="/etc/heki"
+DOCKER_IMAGE="hekicore/heki"
 IMAGE_TAG="latest"
 DOCKER_COMPOSE_CMD="docker compose"
 
@@ -18,11 +18,12 @@ CONTAINER_NAME=""
 PANEL_URL=""
 PANEL_KEY=""
 NODE_ID=""
+HEKI_KEY=""
 LOG_LEVEL="info"
 ACTION=""
 
 PANEL_TYPE="xboard"
-SERVER_TYPE="ss"
+SERVER_TYPE=""
 CERT_MODE=""
 CERT_FILE=""
 KEY_FILE=""
@@ -31,9 +32,9 @@ CERT_KEY_LENGTH=""
 DNS_PROVIDER=""
 DNS_ENVS=()
 
-ALLOWED_SERVER_TYPES="ss trojan hysteria anytls"
-ALLOWED_PANEL_TYPES="sspanel-uim xboard v2board xiaov2board whmcs proxypanel ppanel v2raysocks soga-v1"
-ALLOWED_CERT_MODES="file http dns"
+ALLOWED_SERVER_TYPES="v2ray vmess vless ss ssr trojan hysteria tuic anytls naive mieru"
+ALLOWED_PANEL_TYPES="sspanel-uim metron xboard v2board xiaov2board ppanel heki-v1"
+ALLOWED_CERT_MODES="file http dns self"
 
 # Function for logging
 log() {
@@ -136,60 +137,6 @@ parse_compose_container_name() {
     grep -E '^[[:space:]]*container_name:' "$compose_file" 2>/dev/null | head -n1 | awk '{print $2}' | tr -d '"'"'"
 }
 
-# 旧布局迁移：/root/soga/docker-compose.yml -> /root/soga/<name>/docker-compose.yml
-migrate_legacy_layout() {
-    local legacy_compose="${SOGA_ROOT}/docker-compose.yml"
-    if [[ ! -f "$legacy_compose" ]]; then
-        return 0
-    fi
-
-    log "info" "检测到旧布局 ${legacy_compose}，开始迁移..."
-
-    local old_name
-    old_name=$(parse_compose_container_name "$legacy_compose")
-    if [[ -z "$old_name" ]]; then
-        log "error" "无法从旧 compose 解析 container_name，请手工处理后重试"
-        exit 1
-    fi
-    if [[ ! "$old_name" =~ ^[A-Za-z0-9_-]+$ ]]; then
-        log "error" "旧 container_name 包含非法字符: $old_name"
-        exit 1
-    fi
-
-    local new_base="${SOGA_ROOT}/${old_name}"
-    local new_config="${CONFIG_ROOT}/${old_name}"
-
-    if [[ -e "$new_base" ]] && [[ -n "$(ls -A "$new_base" 2>/dev/null || true)" ]]; then
-        log "error" "迁移目标已存在且非空: ${new_base}，请手工处理"
-        exit 1
-    fi
-    if [[ -e "$new_config" ]] && [[ -n "$(ls -A "$new_config" 2>/dev/null || true)" ]]; then
-        log "error" "迁移目标已存在且非空: ${new_config}，请手工处理"
-        exit 1
-    fi
-
-    log "info" "停止旧实例 ${old_name}..."
-    (cd "$SOGA_ROOT" && $DOCKER_COMPOSE_CMD down) || log "warn" "旧实例 down 失败，继续迁移"
-
-    mkdir -p "$new_base" "$new_config"
-
-    log "info" "移动 compose 文件 -> ${new_base}/"
-    mv "$legacy_compose" "${new_base}/docker-compose.yml"
-
-    log "info" "移动 ${CONFIG_ROOT} 下的文件到 ${new_config}/"
-    if [[ -d "$CONFIG_ROOT" ]]; then
-        find "$CONFIG_ROOT" -maxdepth 1 -mindepth 1 ! -type d -exec mv {} "$new_config/" \;
-    fi
-
-    log "info" "修正 compose 中的 volume 路径"
-    sed -i "s|- ${CONFIG_ROOT}:/etc/soga|- ${new_config}:/etc/soga|g" "${new_base}/docker-compose.yml"
-
-    log "info" "启动迁移后的旧实例 ${old_name}..."
-    (cd "$new_base" && $DOCKER_COMPOSE_CMD up -d)
-
-    log "info" "旧布局迁移完成: ${old_name} -> ${new_base}"
-}
-
 # 参数枚举与证书校验
 validate_install_params() {
     # 基础必填
@@ -210,14 +157,14 @@ validate_install_params() {
         exit 1
     fi
 
-    # NODE_ID 数字
-    if ! [[ "$NODE_ID" =~ ^[0-9]+$ ]]; then
-        log "error" "--node-id 必须为数字"
+    # NODE_ID 数字，多个以逗号分隔
+    if ! [[ "$NODE_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        log "error" "--node-id 必须为数字，多个以逗号分隔 (如 1 或 1,2,3)"
         exit 1
     fi
 
-    # 枚举
-    if ! in_set "$SERVER_TYPE" "$ALLOWED_SERVER_TYPES"; then
+    # 枚举（server_type 可选：协议由面板按节点下发，仅在显式指定时校验）
+    if [[ -n "$SERVER_TYPE" ]] && ! in_set "$SERVER_TYPE" "$ALLOWED_SERVER_TYPES"; then
         log "error" "--server-type 非法: ${SERVER_TYPE}，允许: $ALLOWED_SERVER_TYPES"
         exit 1
     fi
@@ -235,27 +182,7 @@ validate_install_params() {
         dns_env_count=${#DNS_ENVS[@]}
     fi
 
-    local has_cert_param="no"
-    if [[ -n "$CERT_MODE" || -n "$CERT_FILE" || -n "$KEY_FILE" || -n "$CERT_DOMAIN" \
-          || -n "$CERT_KEY_LENGTH" || -n "$DNS_PROVIDER" || $dns_env_count -gt 0 ]]; then
-        has_cert_param="yes"
-    fi
-
-    case "$SERVER_TYPE" in
-        ss)
-            if [[ "$has_cert_param" == "yes" ]]; then
-                log "error" "ss 协议不接受任何证书相关参数"
-                exit 1
-            fi
-            ;;
-        trojan|hysteria|anytls)
-            if [[ -z "$CERT_MODE" ]]; then
-                log "error" "$SERVER_TYPE 必须提供 --cert-mode (file|http|dns)"
-                exit 1
-            fi
-            ;;
-    esac
-
+    # 证书为实例级、可选：需 TLS/QUIC 的节点才传 --cert-mode（协议由面板下发）
     if [[ -n "$CERT_MODE" ]]; then
         case "$CERT_MODE" in
             file)
@@ -267,6 +194,12 @@ validate_install_params() {
             http)
                 if [[ -z "$CERT_DOMAIN" ]]; then
                     log "error" "--cert-mode http 要求 --cert-domain"
+                    exit 1
+                fi
+                ;;
+            self)
+                if [[ -z "$CERT_DOMAIN" ]]; then
+                    log "error" "--cert-mode self 要求 --cert-domain"
                     exit 1
                 fi
                 ;;
@@ -327,12 +260,11 @@ write_compose_file() {
     mkdir -p "$BASE_DIR"
     mkdir -p "$CONFIG_DIR"
 
-    local esc_panel_url esc_panel_key esc_log_level esc_panel_type esc_server_type
+    local esc_panel_url esc_panel_key esc_log_level esc_panel_type
     esc_panel_url=$(yaml_escape "$PANEL_URL")
     esc_panel_key=$(yaml_escape "$PANEL_KEY")
     esc_log_level=$(yaml_escape "$LOG_LEVEL")
     esc_panel_type=$(yaml_escape "$PANEL_TYPE")
-    esc_server_type=$(yaml_escape "$SERVER_TYPE")
 
     {
         cat <<EOF
@@ -345,16 +277,21 @@ services:
     environment:
       TZ: Asia/Hong_Kong
       type: '${esc_panel_type}'
-      server_type: '${esc_server_type}'
-      node_id: ${NODE_ID}
-      api: webapi
-      webapi_url: '${esc_panel_url}'
-      webapi_key: '${esc_panel_key}'
-      forbidden_bit_torrent: 'true'
-      geo_update_enable: 'true'
+      node_id: '${NODE_ID}'
+      panel_url: '${esc_panel_url}'
+      panel_key: '${esc_panel_key}'
       log_level: '${esc_log_level}'
-      log_file_dir: /etc/soga/
+      log_file_dir: /etc/heki/
 EOF
+
+        # server_type 可选：仅在显式指定时写入（否则由面板按节点下发）
+        if [[ -n "$SERVER_TYPE" ]]; then
+            printf "      server_type: '%s'\n" "$(yaml_escape "$SERVER_TYPE")"
+        fi
+
+        if [[ -n "$HEKI_KEY" ]]; then
+            printf "      heki_key: '%s'\n" "$(yaml_escape "$HEKI_KEY")"
+        fi
 
         if [[ -n "$CERT_MODE" ]]; then
             case "$CERT_MODE" in
@@ -368,6 +305,10 @@ EOF
                     if [[ -n "$CERT_KEY_LENGTH" ]]; then
                         printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
                     fi
+                    ;;
+                self)
+                    echo "      cert_mode: self"
+                    printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
                     ;;
                 dns)
                     echo "      cert_mode: dns"
@@ -390,7 +331,7 @@ EOF
 
         cat <<EOF
     volumes:
-      - ${CONFIG_DIR}:/etc/soga
+      - ${CONFIG_DIR}:/etc/heki
 EOF
     } > "${BASE_DIR}/docker-compose.yml"
 }
@@ -398,44 +339,44 @@ EOF
 # 安装摘要输出
 print_install_summary() {
     local mode_display="${CERT_MODE:-none}"
+    local key_display="免费版(无 key)"
+    [[ -n "$HEKI_KEY" ]] && key_display="已配置授权码"
     log "info" "配置摘要:"
     log "info" "  container-name : ${CONTAINER_NAME}"
     log "info" "  panel-type     : ${PANEL_TYPE}"
-    log "info" "  server-type    : ${SERVER_TYPE}"
+    log "info" "  server-type    : ${SERVER_TYPE:-面板下发}"
     log "info" "  node-id        : ${NODE_ID}"
     log "info" "  cert-mode      : ${mode_display}"
+    log "info" "  heki-key       : ${key_display}"
     log "info" "  base-dir       : ${BASE_DIR}"
     log "info" "  config-dir     : ${CONFIG_DIR}"
 }
 
 # 配置并启动
-config_run_soga_compose() {
-    log "info" "开始配置 soga..."
+config_run_heki_compose() {
+    log "info" "开始配置 heki..."
     log "info" "使用镜像标签: $IMAGE_TAG"
 
     write_compose_file
 
-    log "info" "正在启动 soga ..."
+    log "info" "正在启动 heki ..."
     (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD up -d)
 
-    log "info" "soga 已经成功安装并启动"
+    log "info" "heki 已经成功安装并启动"
     log "info" "容器名称: $CONTAINER_NAME"
     log "info" "镜像版本: $DOCKER_IMAGE:$IMAGE_TAG"
     log "info" "节点ID: $NODE_ID"
-    log "info" "协议: $SERVER_TYPE ($PANEL_TYPE)"
+    log "info" "协议: ${SERVER_TYPE:-面板下发} ($PANEL_TYPE)"
 }
 
-# 安装 soga
-install_soga() {
+# 安装 heki
+install_heki() {
     check_privileges
     install_docker
     validate_install_params
 
-    BASE_DIR="${SOGA_ROOT}/${CONTAINER_NAME}"
+    BASE_DIR="${HEKI_ROOT}/${CONTAINER_NAME}"
     CONFIG_DIR="${CONFIG_ROOT}/${CONTAINER_NAME}"
-
-    # 旧布局迁移（若触发）
-    migrate_legacy_layout
 
     # 同名重装校验
     if [[ -f "${BASE_DIR}/docker-compose.yml" ]]; then
@@ -457,7 +398,7 @@ install_soga() {
 
     print_install_summary
     check_remove_container
-    config_run_soga_compose
+    config_run_heki_compose
 }
 
 # 设置实例路径（用于 restart/stop）
@@ -470,7 +411,7 @@ set_instance_paths() {
         log "error" "--container-name 只允许字母数字、下划线与连字符"
         exit 1
     fi
-    BASE_DIR="${SOGA_ROOT}/${CONTAINER_NAME}"
+    BASE_DIR="${HEKI_ROOT}/${CONTAINER_NAME}"
     CONFIG_DIR="${CONFIG_ROOT}/${CONTAINER_NAME}"
     if [[ ! -f "${BASE_DIR}/docker-compose.yml" ]]; then
         log "error" "实例 ${CONTAINER_NAME} 不存在: ${BASE_DIR}/docker-compose.yml"
@@ -478,26 +419,26 @@ set_instance_paths() {
     fi
 }
 
-# 重启 soga
-restart_soga() {
+# 重启 heki
+restart_heki() {
     set_instance_paths
-    log "info" "正在重启 soga (${CONTAINER_NAME})..."
+    log "info" "正在重启 heki (${CONTAINER_NAME})..."
     if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD restart); then
-        log "error" "重启 soga 失败"
+        log "error" "重启 heki 失败"
         exit 1
     fi
-    log "info" "soga 已经重启成功"
+    log "info" "heki 已经重启成功"
 }
 
-# 停止 soga
-stop_soga() {
+# 停止 heki
+stop_heki() {
     set_instance_paths
-    log "info" "正在停止 soga (${CONTAINER_NAME})..."
+    log "info" "正在停止 heki (${CONTAINER_NAME})..."
     if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down); then
-        log "error" "停止 soga 失败"
+        log "error" "停止 heki 失败"
         exit 1
     fi
-    log "info" "soga 已经停止成功"
+    log "info" "heki 已经停止成功"
 }
 
 # 显示使用帮助
@@ -507,7 +448,7 @@ show_help() {
 
 操作:
   --update              更新系统
-  --install             安装/覆盖更新 soga 实例
+  --install             安装/覆盖更新 heki 实例
   --restart             重启指定实例 (必须 --container-name)
   --stop                停止指定实例 (必须 --container-name)
   --help                显示此帮助信息
@@ -518,48 +459,53 @@ show_help() {
 安装选项:
   --panel-url URL            面板 URL (必需)
   --panel-key KEY            面板 API 密钥 (必需)
-  --node-id ID               节点 ID (必需，数字)
+  --node-id ID               节点 ID (必需，数字，多个用逗号分隔 如 1,2,3)
+  --heki-key KEY             授权码 (可选，留空即免费版)
   --image-tag TAG            镜像标签 (默认: latest)
   --log-level LEVEL          debug/info/warn/error (默认: info)
-  --server-type TYPE         ss|trojan|hysteria|anytls (默认: ss)
-  --panel-type TYPE          sspanel-uim|xboard|v2board|xiaov2board|whmcs|
-                             proxypanel|ppanel|v2raysocks|soga-v1 (默认: xboard)
-  --cert-mode MODE           file|http|dns
+  --server-type TYPE         可选; 协议默认由面板按节点自动下发, 单实例可混跑
+                             多协议。仅在需本地强制指定时填: v2ray|vmess|vless|
+                             ss|ssr|trojan|hysteria|tuic|anytls|naive|mieru
+  --panel-type TYPE          sspanel-uim|metron|xboard|v2board|xiaov2board|
+                             ppanel|heki-v1 (默认: xboard)
+  --cert-mode MODE           file|http|dns|self
   --cert-file PATH           证书文件路径 (cert-mode=file)
   --key-file PATH            密钥文件路径 (cert-mode=file)
-  --cert-domain DOMAIN       域名 (cert-mode=http/dns)
+  --cert-domain DOMAIN       域名 (cert-mode=http/dns/self)
   --cert-key-length VALUE    证书长度: 留空=RSA, ec-256/ec-384 (可选)
   --dns-provider NAME        DNS 服务商, 如 dns_cf (cert-mode=dns)
   --dns-env KEY=VALUE        DNS 验证凭据, 可重复多次 (cert-mode=dns)
 
-协议证书要求:
-  ss                  无证书参数
-  trojan/hysteria/anytls  必须 --cert-mode
+证书说明:
+  协议由面板下发, 证书为实例级、可选。需要 TLS/QUIC 的节点
+  (trojan/hysteria/tuic/anytls/naive) 才需 --cert-mode; 用通配证书
+  (*.example.com) 时一份证书即可供该实例所有节点共用。
+  file 模式的 --cert-file/--key-file 填容器内路径: 把证书放进
+  /root/heki/<name>/ (映射为容器内 /etc/heki/), 再引用 /etc/heki/xxx.pem。
 
 示例:
-  $0 --install --container-name sogass --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 1
+  # 单实例多协议混跑 (协议由面板下发, 不要证书的协议无需 cert 参数)
+  $0 --install --container-name heki1 --panel-url https://panel.example.com \\
+     --panel-key KEY --node-id 1,2,3
 
-  $0 --install --container-name sogatrojan --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 2 --server-type trojan \\
-     --cert-mode file --cert-file /etc/ssl/cert.pem --key-file /etc/ssl/key.pem
+  # 多节点共用一张通配证书 (手动上传到 /root/heki/heki1/)
+  $0 --install --container-name heki1 --panel-url https://panel.example.com \\
+     --panel-key KEY --node-id 1,2,3 \\
+     --cert-mode file --cert-file /etc/heki/fullchain.pem --key-file /etc/heki/privkey.pem
 
-  $0 --install --container-name sogahy --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 4 --server-type hysteria \\
-     --cert-mode dns --cert-domain node.example.com --dns-provider dns_cf \\
+  # 通配证书 DNS 自动签发 (通配只能走 dns 验证)
+  $0 --install --container-name heki1 --panel-url https://panel.example.com \\
+     --panel-key KEY --node-id 1,2,3 \\
+     --cert-mode dns --cert-domain '*.example.com' --dns-provider dns_cf \\
      --dns-env DNS_CF_Email=me@example.com --dns-env DNS_CF_Key=xxxxx
 
-  $0 --install --container-name sogaanytls --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 3 --server-type anytls --panel-type xboard \\
-     --cert-mode http --cert-domain node.example.com
-
-  $0 --restart --container-name sogass
-  $0 --stop    --container-name sogass
+  $0 --restart --container-name heki1
+  $0 --stop    --container-name heki1
 
 注意:
-  --restart 与 --stop 现在必须显式指定 --container-name。
-  首次运行 --install 时若检测到旧布局 /root/soga/docker-compose.yml, 会自动
-  迁移到按容器名隔离的新目录 /root/soga/<name>/ 与 /etc/soga/<name>/。
+  --restart 与 --stop 必须显式指定 --container-name。
+  实例按容器名隔离: /root/heki/<name>/ 与 /etc/heki/<name>/。
+  免费版无需 --heki-key (88 用户、全协议、无需联网验证)。
 EOF
 }
 
@@ -596,6 +542,8 @@ parse_arguments() {
                 PANEL_KEY=$(require_value "$1" "${2:-}"); shift 2 ;;
             --node-id)
                 NODE_ID=$(require_value "$1" "${2:-}"); shift 2 ;;
+            --heki-key)
+                HEKI_KEY=$(require_value "$1" "${2:-}"); shift 2 ;;
             --image-tag)
                 IMAGE_TAG=$(require_value "$1" "${2:-}"); shift 2 ;;
             --log-level)
@@ -647,15 +595,15 @@ main() {
             update_system
             ;;
         install)
-            install_soga
+            install_heki
             ;;
         restart)
             check_privileges
-            restart_soga
+            restart_heki
             ;;
         stop)
             check_privileges
-            stop_soga
+            stop_heki
             ;;
     esac
 }
