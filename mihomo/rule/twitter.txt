@@ -1,5 +1,0 @@
-# Twitter/X
-DOMAIN-SUFFIX,twitter.com
-DOMAIN-SUFFIX,x.com
-DOMAIN-SUFFIX,t.co
-DOMAIN-SUFFIX,twimg.com
