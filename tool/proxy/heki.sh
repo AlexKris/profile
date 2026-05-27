@@ -21,6 +21,9 @@ NODE_ID=""
 HEKI_KEY=""
 LOG_LEVEL="info"
 ACTION=""
+ACME_SERVER="letsencrypt"
+STOP_SOGA="false"
+EXTRA_ENVS=()
 
 PANEL_TYPE="xboard"
 SERVER_TYPE=""
@@ -34,7 +37,7 @@ DNS_ENVS=()
 
 ALLOWED_SERVER_TYPES="v2ray vmess vless ss ssr trojan hysteria tuic anytls naive mieru"
 ALLOWED_PANEL_TYPES="sspanel-uim metron xboard v2board xiaov2board ppanel heki-v1"
-ALLOWED_CERT_MODES="file http dns self"
+ALLOWED_CERT_MODES="file http dns"
 
 # Function for logging
 log() {
@@ -72,6 +75,29 @@ in_set() {
         [[ "$item" == "$needle" ]] && return 0
     done
     return 1
+}
+
+# 校验 ACME CA: 内置 letsencrypt/zerossl，或自定义 HTTPS directory URL
+validate_acme_server() {
+    local server="$1"
+    case "$server" in
+        letsencrypt|zerossl|https://*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 防止 --env 覆盖脚本显式管理的配置，避免 compose 里出现重复 key
+is_managed_env_key() {
+    local key="$1"
+    case "$key" in
+        TZ|type|server_type|node_id|panel_url|panel_key|heki_key|log_level|log_file_dir|\
+        cert_file|key_file|cert_mode|cert_domain|cert_key_length|acme_server|dns_provider)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 # 给 YAML 单引号字符串里的值做转义
@@ -140,8 +166,8 @@ parse_compose_container_name() {
 # 参数枚举与证书校验
 validate_install_params() {
     # 基础必填
-    if [[ -z "$CONTAINER_NAME" || -z "$PANEL_URL" || -z "$PANEL_KEY" || -z "$NODE_ID" ]]; then
-        log "error" "安装操作需要: --container-name, --panel-url, --panel-key, --node-id"
+    if [[ -z "$CONTAINER_NAME" || -z "$PANEL_URL" || -z "$PANEL_KEY" || -z "$NODE_ID" || -z "$SERVER_TYPE" ]]; then
+        log "error" "安装操作需要: --container-name, --panel-url, --panel-key, --node-id, --server-type"
         exit 1
     fi
 
@@ -163,8 +189,8 @@ validate_install_params() {
         exit 1
     fi
 
-    # 枚举（server_type 可选：协议由面板按节点下发，仅在显式指定时校验）
-    if [[ -n "$SERVER_TYPE" ]] && ! in_set "$SERVER_TYPE" "$ALLOWED_SERVER_TYPES"; then
+    # 枚举
+    if ! in_set "$SERVER_TYPE" "$ALLOWED_SERVER_TYPES"; then
         log "error" "--server-type 非法: ${SERVER_TYPE}，允许: $ALLOWED_SERVER_TYPES"
         exit 1
     fi
@@ -182,7 +208,17 @@ validate_install_params() {
         dns_env_count=${#DNS_ENVS[@]}
     fi
 
-    # 证书为实例级、可选：需 TLS/QUIC 的节点才传 --cert-mode（协议由面板下发）
+    local extra_env_count=0
+    if [[ ${EXTRA_ENVS+x} ]]; then
+        extra_env_count=${#EXTRA_ENVS[@]}
+    fi
+
+    if ! validate_acme_server "$ACME_SERVER"; then
+        log "error" "--acme-server 非法: ${ACME_SERVER}，允许 letsencrypt、zerossl 或 https:// 开头的 ACME directory URL"
+        exit 1
+    fi
+
+    # 证书为实例级、可选：需要真实证书时使用 file/http/dns
     if [[ -n "$CERT_MODE" ]]; then
         case "$CERT_MODE" in
             file)
@@ -196,10 +232,8 @@ validate_install_params() {
                     log "error" "--cert-mode http 要求 --cert-domain"
                     exit 1
                 fi
-                ;;
-            self)
-                if [[ -z "$CERT_DOMAIN" ]]; then
-                    log "error" "--cert-mode self 要求 --cert-domain"
+                if [[ "$CERT_DOMAIN" == \*.* ]]; then
+                    log "error" "通配符证书不能使用 http 验证，请改用 --cert-mode dns"
                     exit 1
                 fi
                 ;;
@@ -230,6 +264,31 @@ validate_install_params() {
             fi
         done
     fi
+
+    # --env 格式与重复 key 检查
+    if [[ $extra_env_count -gt 0 ]]; then
+        local extra_item extra_key dns_item dns_key
+        for extra_item in "${EXTRA_ENVS[@]}"; do
+            if [[ ! "$extra_item" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+ ]]; then
+                log "error" "--env 格式错误: $extra_item (需 KEY=VALUE)"
+                exit 1
+            fi
+            extra_key="${extra_item%%=*}"
+            if is_managed_env_key "$extra_key"; then
+                log "error" "--env ${extra_key}=... 会覆盖脚本内置参数，请使用对应显式选项"
+                exit 1
+            fi
+            if [[ $dns_env_count -gt 0 ]]; then
+                for dns_item in "${DNS_ENVS[@]}"; do
+                    dns_key="${dns_item%%=*}"
+                    if [[ "$dns_key" == "$extra_key" ]]; then
+                        log "error" "--env 与 --dns-env 重复配置: ${extra_key}"
+                        exit 1
+                    fi
+                done
+            fi
+        done
+    fi
 }
 
 # 检查并清理同名容器（仅当前实例）
@@ -255,16 +314,49 @@ check_remove_container() {
     fi
 }
 
+# 替代 soga 时提醒端口冲突；仅在显式 --stop-soga 时停止旧 soga 容器
+check_soga_conflicts() {
+    local docker_names soga_names soga_name
+
+    docker_names=$(docker ps --format '{{.Names}}' 2>/dev/null || true)
+    soga_names=$(printf '%s\n' "$docker_names" | grep -i 'soga' || true)
+
+    if [[ -z "$soga_names" ]]; then
+        return 0
+    fi
+
+    if [[ "$STOP_SOGA" == "true" ]]; then
+        log "warn" "检测到运行中的 soga 容器，按 --stop-soga 停止以避免端口冲突"
+        while IFS= read -r soga_name; do
+            [[ -n "$soga_name" ]] || continue
+            if docker stop "$soga_name" >/dev/null 2>&1; then
+                log "info" "已停止 soga 容器: ${soga_name}"
+            else
+                log "warn" "停止 soga 容器失败: ${soga_name}"
+            fi
+        done <<< "$soga_names"
+        return 0
+    fi
+
+    log "warn" "检测到运行中的 soga 容器，Heki 可能因端口已占用启动失败:"
+    while IFS= read -r soga_name; do
+        [[ -n "$soga_name" ]] || continue
+        log "warn" "  - ${soga_name}"
+    done <<< "$soga_names"
+    log "warn" "如需本脚本停止旧 soga 容器，请重新执行并添加 --stop-soga"
+}
+
 # 生成 docker-compose.yml
 write_compose_file() {
     mkdir -p "$BASE_DIR"
     mkdir -p "$CONFIG_DIR"
 
-    local esc_panel_url esc_panel_key esc_log_level esc_panel_type
+    local esc_panel_url esc_panel_key esc_log_level esc_panel_type esc_server_type
     esc_panel_url=$(yaml_escape "$PANEL_URL")
     esc_panel_key=$(yaml_escape "$PANEL_KEY")
     esc_log_level=$(yaml_escape "$LOG_LEVEL")
     esc_panel_type=$(yaml_escape "$PANEL_TYPE")
+    esc_server_type=$(yaml_escape "$SERVER_TYPE")
 
     {
         cat <<EOF
@@ -277,17 +369,13 @@ services:
     environment:
       TZ: Asia/Hong_Kong
       type: '${esc_panel_type}'
+      server_type: '${esc_server_type}'
       node_id: '${NODE_ID}'
       panel_url: '${esc_panel_url}'
       panel_key: '${esc_panel_key}'
       log_level: '${esc_log_level}'
       log_file_dir: /etc/heki/
 EOF
-
-        # server_type 可选：仅在显式指定时写入（否则由面板按节点下发）
-        if [[ -n "$SERVER_TYPE" ]]; then
-            printf "      server_type: '%s'\n" "$(yaml_escape "$SERVER_TYPE")"
-        fi
 
         if [[ -n "$HEKI_KEY" ]]; then
             printf "      heki_key: '%s'\n" "$(yaml_escape "$HEKI_KEY")"
@@ -302,17 +390,15 @@ EOF
                 http)
                     echo "      cert_mode: http"
                     printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
+                    printf "      acme_server: '%s'\n" "$(yaml_escape "$ACME_SERVER")"
                     if [[ -n "$CERT_KEY_LENGTH" ]]; then
                         printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
                     fi
                     ;;
-                self)
-                    echo "      cert_mode: self"
-                    printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
-                    ;;
                 dns)
                     echo "      cert_mode: dns"
                     printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
+                    printf "      acme_server: '%s'\n" "$(yaml_escape "$ACME_SERVER")"
                     printf "      dns_provider: '%s'\n" "$(yaml_escape "$DNS_PROVIDER")"
                     if [[ -n "$CERT_KEY_LENGTH" ]]; then
                         printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
@@ -327,6 +413,15 @@ EOF
                     fi
                     ;;
             esac
+        fi
+
+        if [[ ${EXTRA_ENVS+x} && ${#EXTRA_ENVS[@]} -gt 0 ]]; then
+            local extra_item extra_key extra_value
+            for extra_item in "${EXTRA_ENVS[@]}"; do
+                extra_key="${extra_item%%=*}"
+                extra_value="${extra_item#*=}"
+                printf "      %s: '%s'\n" "$extra_key" "$(yaml_escape "$extra_value")"
+            done
         fi
 
         cat <<EOF
@@ -344,9 +439,15 @@ print_install_summary() {
     log "info" "配置摘要:"
     log "info" "  container-name : ${CONTAINER_NAME}"
     log "info" "  panel-type     : ${PANEL_TYPE}"
-    log "info" "  server-type    : ${SERVER_TYPE:-面板下发}"
+    log "info" "  server-type    : ${SERVER_TYPE}"
     log "info" "  node-id        : ${NODE_ID}"
     log "info" "  cert-mode      : ${mode_display}"
+    if [[ "$CERT_MODE" == "http" || "$CERT_MODE" == "dns" ]]; then
+        log "info" "  acme-server    : ${ACME_SERVER}"
+    fi
+    if [[ ${EXTRA_ENVS+x} && ${#EXTRA_ENVS[@]} -gt 0 ]]; then
+        log "info" "  extra-env      : ${#EXTRA_ENVS[@]} 项"
+    fi
     log "info" "  heki-key       : ${key_display}"
     log "info" "  base-dir       : ${BASE_DIR}"
     log "info" "  config-dir     : ${CONFIG_DIR}"
@@ -366,14 +467,14 @@ config_run_heki_compose() {
     log "info" "容器名称: $CONTAINER_NAME"
     log "info" "镜像版本: $DOCKER_IMAGE:$IMAGE_TAG"
     log "info" "节点ID: $NODE_ID"
-    log "info" "协议: ${SERVER_TYPE:-面板下发} ($PANEL_TYPE)"
+    log "info" "协议: $SERVER_TYPE ($PANEL_TYPE，实际协议以面板下发为准)"
 }
 
 # 安装 heki
 install_heki() {
+    validate_install_params
     check_privileges
     install_docker
-    validate_install_params
 
     BASE_DIR="${HEKI_ROOT}/${CONTAINER_NAME}"
     CONFIG_DIR="${CONFIG_ROOT}/${CONTAINER_NAME}"
@@ -397,6 +498,7 @@ install_heki() {
     fi
 
     print_install_summary
+    check_soga_conflicts
     check_remove_container
     config_run_heki_compose
 }
@@ -454,7 +556,7 @@ show_help() {
   --help                显示此帮助信息
 
 通用选项:
-  --container-name NAME 容器名称 (所有操作必需)
+  --container-name NAME 容器名称 (--install/--restart/--stop 必需)
 
 安装选项:
   --panel-url URL            面板 URL (必需)
@@ -463,49 +565,61 @@ show_help() {
   --heki-key KEY             授权码 (可选，留空即免费版)
   --image-tag TAG            镜像标签 (默认: latest)
   --log-level LEVEL          debug/info/warn/error (默认: info)
-  --server-type TYPE         可选; 协议默认由面板按节点自动下发, 单实例可混跑
-                             多协议。仅在需本地强制指定时填: v2ray|vmess|vless|
+  --server-type TYPE         必需; 默认协议/启动探测提示, 单实例可混跑
+                             多协议。实际协议以面板下发为准: v2ray|vmess|vless|
                              ss|ssr|trojan|hysteria|tuic|anytls|naive|mieru
   --panel-type TYPE          sspanel-uim|metron|xboard|v2board|xiaov2board|
                              ppanel|heki-v1 (默认: xboard)
-  --cert-mode MODE           file|http|dns|self
+  --cert-mode MODE           file|http|dns
   --cert-file PATH           证书文件路径 (cert-mode=file)
   --key-file PATH            密钥文件路径 (cert-mode=file)
-  --cert-domain DOMAIN       域名 (cert-mode=http/dns/self)
+  --cert-domain DOMAIN       域名 (cert-mode=http/dns)
   --cert-key-length VALUE    证书长度: 留空=RSA, ec-256/ec-384 (可选)
+  --acme-server VALUE        ACME CA: letsencrypt|zerossl|https://... (默认: letsencrypt)
   --dns-provider NAME        DNS 服务商, 如 dns_cf (cert-mode=dns)
   --dns-env KEY=VALUE        DNS 验证凭据, 可重复多次 (cert-mode=dns)
+  --env KEY=VALUE            透传 Heki 环境变量, 可重复 (如 xboard_api_version=1)
+  --stop-soga                安装前停止运行中的 soga 容器, 避免端口冲突
 
 证书说明:
-  协议由面板下发, 证书为实例级、可选。需要 TLS/QUIC 的节点
-  (trojan/hysteria/tuic/anytls/naive) 才需 --cert-mode; 用通配证书
-  (*.example.com) 时一份证书即可供该实例所有节点共用。
+  --cert-mode 只支持真实证书: file/http/dns。不使用自签证书。
+  普通单域名可用 http 或 dns 自动申请; 通配符证书 (*.example.com)
+  只能使用 dns 验证。默认 ACME CA 为 Let's Encrypt。
   file 模式的 --cert-file/--key-file 填容器内路径: 把证书放进
-  /root/heki/<name>/ (映射为容器内 /etc/heki/), 再引用 /etc/heki/xxx.pem。
+  宿主机 /etc/heki/<name>/ (映射为容器内 /etc/heki/), 再引用
+  /etc/heki/xxx.pem。手动证书必须覆盖节点实际使用的 SNI/域名。
 
 示例:
   # 单实例多协议混跑 (协议由面板下发, 不要证书的协议无需 cert 参数)
   $0 --install --container-name heki1 --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 1,2,3
+     --panel-key KEY --node-id 1,2,3 --server-type vless
 
-  # 多节点共用一张通配证书 (手动上传到 /root/heki/heki1/)
+  # 多节点共用一张通配证书 (手动上传到宿主机 /etc/heki/heki1/)
   $0 --install --container-name heki1 --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 1,2,3 \\
+     --panel-key KEY --node-id 1,2,3 --server-type vless \\
      --cert-mode file --cert-file /etc/heki/fullchain.pem --key-file /etc/heki/privkey.pem
 
-  # 通配证书 DNS 自动签发 (通配只能走 dns 验证)
+  # 通配证书 DNS 自动签发 (Let's Encrypt; 通配只能走 dns 验证)
   $0 --install --container-name heki1 --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 1,2,3 \\
+     --panel-key KEY --node-id 1,2,3 --server-type vless \\
      --cert-mode dns --cert-domain '*.example.com' --dns-provider dns_cf \\
-     --dns-env DNS_CF_Email=me@example.com --dns-env DNS_CF_Key=xxxxx
+     --dns-env DNS_CF_Email=me@example.com --dns-env DNS_CF_Key=xxxxx \\
+     --acme-server letsencrypt
+
+  # 旧 XBoard API 或中转真实 IP 等 Heki 参数可用 --env 透传
+  $0 --install --container-name heki1 --panel-url https://panel.example.com \\
+     --panel-key KEY --node-id 1 --server-type vless \\
+     --env xboard_api_version=1 --env proxy_protocol=true
 
   $0 --restart --container-name heki1
   $0 --stop    --container-name heki1
 
-注意:
+  注意:
   --restart 与 --stop 必须显式指定 --container-name。
   实例按容器名隔离: /root/heki/<name>/ 与 /etc/heki/<name>/。
   免费版无需 --heki-key (88 用户、全协议、无需联网验证)。
+  替代 soga 时脚本只会提示运行中的 soga 容器; 需要停止旧容器时显式
+  添加 --stop-soga。
 EOF
 }
 
@@ -533,6 +647,7 @@ parse_arguments() {
             --install) ACTION="install"; shift ;;
             --restart) ACTION="restart"; shift ;;
             --stop)    ACTION="stop"; shift ;;
+            --stop-soga) STOP_SOGA="true"; shift ;;
             --help|-h) show_help; exit 0 ;;
             --container-name)
                 CONTAINER_NAME=$(require_value "$1" "${2:-}"); shift 2 ;;
@@ -567,10 +682,14 @@ parse_arguments() {
                 CERT_DOMAIN=$(require_value "$1" "${2:-}"); shift 2 ;;
             --cert-key-length)
                 CERT_KEY_LENGTH=$(require_value "$1" "${2:-}"); shift 2 ;;
+            --acme-server)
+                ACME_SERVER=$(require_value "$1" "${2:-}"); shift 2 ;;
             --dns-provider)
                 DNS_PROVIDER=$(require_value "$1" "${2:-}"); shift 2 ;;
             --dns-env)
                 DNS_ENVS+=("$(require_value "$1" "${2:-}")"); shift 2 ;;
+            --env)
+                EXTRA_ENVS+=("$(require_value "$1" "${2:-}")"); shift 2 ;;
             *)
                 log "error" "未知参数: $1"
                 show_help
