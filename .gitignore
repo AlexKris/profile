@@ -30,3 +30,14 @@ Temporary Items
 mihomo/personal/*
 !mihomo/personal/README.md
 !mihomo/personal/sparkle-override.example.yaml
+
+# Local proxy profiles (private device configs, do not publish)
+/surge/*.conf
+/mihomo/*.yaml
+/stash/*.yaml
+/loon/*.conf
+/loon/*.lcf
+/shadowrocket/*.conf
+/singbox/*.json
+/singbox/*.sh
+/singbox/protocols_data/
