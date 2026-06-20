@@ -12,8 +12,7 @@ BaseProvider: &BaseProvider
     timeout: 5000
     lazy: true
 
-BaseSelect: &BaseSelect
-  type: select
+BaseSelect: &BaseSelect {type: select}
 
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
 FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
@@ -22,35 +21,19 @@ FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
 FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
-FilterOpt: &FilterOpt '^(?!.*(?:thru|@))(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR))'
+FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
 FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))'
 
-BehaviorCL: &BehaviorCL
-  type: http
-  behavior: classical
-  format: text
-  interval: 86400
+BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
 
-BehaviorIP: &BehaviorIP
-  type: http
-  behavior: classical
-  format: text
-  interval: 86400
+BehaviorIP: &BehaviorIP {type: http, behavior: classical, format: text, interval: 86400}
 
-BehaviorMrsDN: &BehaviorMrsDN
-  type: http
-  behavior: domain
-  format: mrs
-  interval: 86400
+BehaviorMrsDN: &BehaviorMrsDN {type: http, behavior: domain, format: mrs, interval: 86400}
 
-BehaviorMrsIP: &BehaviorMrsIP
-  type: http
-  behavior: ipcidr
-  format: mrs
-  interval: 86400
+BehaviorMrsIP: &BehaviorMrsIP {type: http, behavior: ipcidr, format: mrs, interval: 86400}
 
 # ==================== 代理提供者 ====================
 proxy-providers:
@@ -61,12 +44,12 @@ proxy-providers:
 
 # ==================== 核心配置 ====================
 mode: rule
-mixed-port: 7893
 port: 7890
 socks-port: 7891
 redir-port: 7892
+mixed-port: 7893
 tproxy-port: 7895
-ipv6: true
+ipv6: false
 allow-lan: true
 unified-delay: true
 tcp-concurrent: true
@@ -81,9 +64,7 @@ external-ui: ui
 external-controller: 127.0.0.1:9090
 secret: ''
 
-profile:
-  store-selected: true
-  store-fake-ip: true
+profile: {store-selected: true, store-fake-ip: true}
 
 # ==================== 流量嗅探 ====================
 sniffer:
@@ -92,38 +73,26 @@ sniffer:
   parse-pure-ip: true
   override-destination: true
   sniff:
-    HTTP:
-      ports: [80, 8080-8880]
-    TLS:
-      ports: [443, 8443]
-    QUIC:
-      ports: [443, 8443]
-  skip-domain:
-    - "Mijia Cloud"
-    - "+.push.apple.com"
+    HTTP: {ports: [80, 8080-8880]}
+    TLS: {ports: [443, 8443]}
+    QUIC: {ports: [443, 8443]}
+  skip-domain: ["Mijia Cloud", "+.push.apple.com"]
 
 # ==================== TUN 模式 ====================
 tun:
   enable: true
   stack: mixed
-  dns-hijack:
-    - "any:53"
-    - "tcp://any:53"
+  dns-hijack: ["any:53", "tcp://any:53"]
   auto-route: true
   auto-detect-interface: true
 
 # ==================== DNS 配置（精简：fake-ip + 基础 nameserver）====================
 dns:
   enable: true
-  prefer-h3: false
-  use-hosts: true
   use-system-hosts: true
-  respect-rules: false
   ipv6: false
-  cache-algorithm: arc
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
-  fake-ip-range6: ""
   fake-ip-filter-mode: blacklist
   fake-ip-filter:
     - "+.lan"
@@ -136,32 +105,8 @@ dns:
     - "stun.*"
     - "+.msftconnecttest.com"
     - "+.msftncsi.com"
-  default-nameserver:
-    - 223.5.5.5
-
-  nameserver:
-    - "https://8.8.8.8/dns-query#Proxy&disable-ipv6=true&ecs=114.114.114.114/24&ecs-override=true"
-
-  fallback:
-    - "https://1.1.1.1/dns-query#Proxy&disable-ipv6=true"
-
-  fallback-filter:
-    geoip: true
-    geoip-code: CN
-
-  proxy-server-nameserver:
-    - 223.5.5.5
-
-  direct-nameserver:
-    - 223.5.5.5
-  direct-nameserver-follow-policy: false
-
-  nameserver-policy:
-    dns.google: 223.5.5.5
-    "*.lan": system
-    "*.local": system
-    "*.localdomain": system
-    "*.internal": system
+  default-nameserver: [119.29.29.29, 223.5.5.5]
+  nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
 
 # ==================== 代理策略组 ====================
 proxy-groups:

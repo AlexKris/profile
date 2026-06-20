@@ -13,9 +13,7 @@ BaseProvider: &BaseProvider
     timeout: 5000
     lazy: true
 
-BaseSelect: &BaseSelect
-  type: select
-  use: [Sub1]
+BaseSelect: &BaseSelect {type: select, use: [Sub1]}
 
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
 FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
@@ -24,8 +22,7 @@ FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
 FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
-FilterOptAll: &FilterOptAll '^(?!.*(?:thru|@))'
-FilterOpt: &FilterOpt '^(?!.*(?:thru|@))(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR))'
+FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
 
 FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
@@ -39,41 +36,18 @@ FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
 FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
 
 # 规则集模板（Stash 原生 *-text behavior，解析更高效）
-BehaviorDN: &BehaviorDN
-  type: http
-  behavior: domain-text
-  interval: 86400
+BehaviorDN: &BehaviorDN {type: http, behavior: domain-text, interval: 86400}
 
-BehaviorCL: &BehaviorCL
-  type: http
-  behavior: classical
-  format: text
-  interval: 86400
+BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
 
-BehaviorIP: &BehaviorIP
-  type: http
-  behavior: classical
-  format: text
-  interval: 86400
+BehaviorIP: &BehaviorIP {type: http, behavior: classical, format: text, interval: 86400}
 
-BehaviorIPCIDRText: &BehaviorIPCIDRText
-  type: http
-  behavior: ipcidr
-  format: text
-  interval: 86400
+BehaviorIPCIDRText: &BehaviorIPCIDRText {type: http, behavior: ipcidr, format: text, interval: 86400}
 
 # Stash 3.1.1+ 支持 mrs 格式（仅 domain / ipcidr）
-BehaviorMrsDN: &BehaviorMrsDN
-  type: http
-  behavior: domain
-  format: mrs
-  interval: 86400
+BehaviorMrsDN: &BehaviorMrsDN {type: http, behavior: domain, format: mrs, interval: 86400}
 
-BehaviorMrsIP: &BehaviorMrsIP
-  type: http
-  behavior: ipcidr
-  format: mrs
-  interval: 86400
+BehaviorMrsIP: &BehaviorMrsIP {type: http, behavior: ipcidr, format: mrs, interval: 86400}
 
 # ==================== 代理提供者 ====================
 proxy-providers:
@@ -84,9 +58,9 @@ proxy-providers:
 
 # ==================== 核心配置 ====================
 mode: rule
-mixed-port: 7893
 port: 7890
 socks-port: 7891
+mixed-port: 7893
 ipv6: false
 allow-lan: true
 log-level: warning
@@ -95,21 +69,14 @@ log-level: warning
 sniffer:
   enable: true
   sniff:
-    HTTP:
-      ports: [80, 8080-8880]
-      override-destination: true
-    TLS:
-      ports: [443, 8443]
-      override-destination: true
-  skip-domain:
-    - "Mijia Cloud"
-    - "+.push.apple.com"
+    HTTP: {ports: [80, 8080-8880], override-destination: true}
+    TLS: {ports: [443, 8443], override-destination: true}
+  skip-domain: ["Mijia Cloud", "+.push.apple.com"]
 
 # ==================== DNS 配置 ====================
 dns:
   enable: true
   skip-cert-verify: true
-  use-hosts: true
   use-system-hosts: true
   ipv6: false
   enhanced-mode: fake-ip
@@ -173,35 +140,8 @@ dns:
     - "+.msftncsi.com"
     - "+.miwifi.com"
     - "+.market.xiaomi.com"
-  default-nameserver:
-    - 223.5.5.5
-
-  nameserver:
-    - "https://8.8.8.8/dns-query#Proxy&disable-ipv6=true&ecs=114.114.114.114/24&ecs-override=true"
-
-  fallback:
-    - "https://1.1.1.1/dns-query#Proxy&disable-ipv6=true"
-
-  fallback-filter:
-    geoip: true
-    geoip-code: CN
-
-  proxy-server-nameserver:
-    - 223.5.5.5
-
-  # Stash nameserver-policy 不支持 rule-set: 引用，仅保留精确/通配符域名
-  nameserver-policy:
-    dns.google: 223.5.5.5
-    dns.alidns.com: quic://223.5.5.5:853
-    dot.pub: 119.29.29.29
-    doh.pub: 119.29.29.29
-    dns.pub: 119.29.29.29
-    doh.360.cn: 101.198.198.198
-    "*.m2m": system
-    injections.adguard.org: system
-    local.adguard.org: system
-    "*.bogon": system
-    "geosite:cn": 223.5.5.5
+  default-nameserver: [119.29.29.29, 223.5.5.5]
+  nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
 
 # ==================== 代理策略组 ====================
 proxy-groups:
@@ -216,11 +156,6 @@ proxy-groups:
     <<: *BaseSelect
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Available.png
     filter: *FilterOpt
-
-  - name: OptAll
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Auto.png
-    filter: *FilterOptAll
 
   - name: Core
     type: select
@@ -493,9 +428,6 @@ rules:
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
 
-  # > Telegram 进程隐私保护（macOS 生效，iOS 忽略）
-  - PROCESS-NAME,Telegram,REJECT-DROP
-
   # > 中国大陆 IP
   - RULE-SET,domestic_ip,DIRECT
   - RULE-SET,china_ip,DIRECT
@@ -588,7 +520,6 @@ rule-providers:
   domestic_ip:
     <<: *BehaviorIP
     url: 'https://ruleset.skk.moe/Clash/ip/domestic.txt'
-  # 纯 CIDR 格式（无 IP-CIDR, 前缀），需用 ipcidr-text 而非 classical
   china_ip:
     <<: *BehaviorIPCIDRText
     url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'

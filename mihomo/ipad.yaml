@@ -10,8 +10,7 @@ BaseProvider: &BaseProvider
     timeout: 5000
     lazy: true
 
-BaseSelect: &BaseSelect
-  type: select
+BaseSelect: &BaseSelect {type: select}
 
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
 FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
@@ -22,8 +21,7 @@ FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
 FilterJP_All: &FilterJP_All '(?=.*(?:🇯🇵|JP|Japan))'
 
-FilterOptAll: &FilterOptAll '^(?!.*(?:thru|@))'
-FilterOpt: &FilterOpt '^(?!.*(?:thru|@))(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR))'
+FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
 
 FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
@@ -36,41 +34,17 @@ FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW
 FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
 FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
 
-BehaviorDN: &BehaviorDN
-  type: http
-  behavior: domain
-  format: text
-  interval: 86400
+BehaviorDN: &BehaviorDN {type: http, behavior: domain, format: text, interval: 86400}
 
-BehaviorCL: &BehaviorCL
-  type: http
-  behavior: classical
-  format: text
-  interval: 86400
+BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
 
-BehaviorIP: &BehaviorIP
-  type: http
-  behavior: classical
-  format: text
-  interval: 86400
+BehaviorIP: &BehaviorIP {type: http, behavior: classical, format: text, interval: 86400}
 
-BehaviorIPCIDRText: &BehaviorIPCIDRText
-  type: http
-  behavior: ipcidr
-  format: text
-  interval: 86400
+BehaviorIPCIDRText: &BehaviorIPCIDRText {type: http, behavior: ipcidr, format: text, interval: 86400}
 
-BehaviorMrsDN: &BehaviorMrsDN
-  type: http
-  behavior: domain
-  format: mrs
-  interval: 86400
+BehaviorMrsDN: &BehaviorMrsDN {type: http, behavior: domain, format: mrs, interval: 86400}
 
-BehaviorMrsIP: &BehaviorMrsIP
-  type: http
-  behavior: ipcidr
-  format: mrs
-  interval: 86400
+BehaviorMrsIP: &BehaviorMrsIP {type: http, behavior: ipcidr, format: mrs, interval: 86400}
 
 # ==================== 代理提供者 ====================
 proxy-providers:
@@ -81,12 +55,12 @@ proxy-providers:
 
 # ==================== 核心配置 ====================
 mode: rule
-mixed-port: 7893
 port: 7890
 socks-port: 7891
 redir-port: 7892
+mixed-port: 7893
 tproxy-port: 7895
-ipv6: true
+ipv6: false
 allow-lan: true
 unified-delay: true
 tcp-concurrent: true
@@ -101,9 +75,7 @@ external-ui: ui
 external-controller: 127.0.0.1:9090
 secret: ''
 
-profile:
-  store-selected: true
-  store-fake-ip: true
+profile: {store-selected: true, store-fake-ip: true}
 
 # ==================== 流量嗅探 ====================
 sniffer:
@@ -112,23 +84,16 @@ sniffer:
   parse-pure-ip: true
   override-destination: true
   sniff:
-    HTTP:
-      ports: [80, 8080-8880]
-    TLS:
-      ports: [443, 8443]
-    QUIC:
-      ports: [443, 8443]
-  skip-domain:
-    - "Mijia Cloud"
-    - "+.push.apple.com"
+    HTTP: {ports: [80, 8080-8880]}
+    TLS: {ports: [443, 8443]}
+    QUIC: {ports: [443, 8443]}
+  skip-domain: ["Mijia Cloud", "+.push.apple.com"]
 
 # ==================== TUN 模式 ====================
 tun:
   enable: true
   stack: mixed
-  dns-hijack:
-    - "any:53"
-    - "tcp://any:53"
+  dns-hijack: ["any:53", "tcp://any:53"]
   auto-route: true
   # auto-redirect: true  # 仅 Linux 支持，macOS 无效
   auto-detect-interface: true
@@ -136,15 +101,10 @@ tun:
 # ==================== DNS 配置 ====================
 dns:
   enable: true
-  prefer-h3: false
-  use-hosts: true
   use-system-hosts: true
-  respect-rules: false
   ipv6: false
-  cache-algorithm: arc
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
-  fake-ip-range6: ""
   fake-ip-filter-mode: blacklist
   fake-ip-filter:
     - "+.m2m"
@@ -205,43 +165,8 @@ dns:
     - "+.msftncsi.com"
     - "+.miwifi.com"
     - "+.market.xiaomi.com"
-  default-nameserver:
-    - 223.5.5.5
-
-  nameserver:
-    - "https://8.8.8.8/dns-query#Proxy&disable-ipv6=true&ecs=114.114.114.114/24&ecs-override=true"
-
-  fallback:
-    - "https://1.1.1.1/dns-query#Proxy&disable-ipv6=true"
-
-  fallback-filter:
-    geoip: true
-    geoip-code: CN
-
-  proxy-server-nameserver:
-    - 223.5.5.5
-
-  direct-nameserver:
-    - 223.5.5.5
-  direct-nameserver-follow-policy: false
-
-  nameserver-policy:
-    dns.google: 223.5.5.5
-    dns.alidns.com: quic://223.5.5.5:853
-    rule-set:nsp_alibaba: quic://dns.alidns.com:853
-    rule-set:nsp_tencent: https://doh.pub/dns-query
-    rule-set:nsp_bilibili: https://doh.pub/dns-query
-    rule-set:nsp_xiaomi: https://doh.pub/dns-query
-    rule-set:nsp_bytedance: 180.184.2.2
-    rule-set:nsp_baidu: 180.76.76.76
-    rule-set:nsp_qihoo360: https://doh.360.cn/dns-query
-    rule-set:nsp_hotspot: system
-    "*.m2m": system
-    injections.adguard.org: system
-    local.adguard.org: system
-    "*.bogon": system
-    rule-set:nsp_lan: system
-    rule-set:nsp_lan_realip: system
+  default-nameserver: [119.29.29.29, 223.5.5.5]
+  nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
 
 # ==================== 代理策略组 ====================
 proxy-groups:
@@ -255,11 +180,6 @@ proxy-groups:
     <<: *BaseSelect
     use: [Sub1]
     filter: *FilterOpt
-
-  - name: OptAll
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterOptAll
 
   - name: Core
     <<: *BaseSelect
@@ -571,7 +491,6 @@ rule-providers:
   domestic_ip:
     <<: *BehaviorIP
     url: 'https://ruleset.skk.moe/Clash/ip/domestic.txt'
-  # 纯 CIDR 格式（无 IP-CIDR, 前缀），需用 ipcidr+text 而非 classical
   china_ip:
     <<: *BehaviorIPCIDRText
     url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'
@@ -607,35 +526,4 @@ rule-providers:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs'
 
-  # ===== Nameserver Policy 规则集 =====
-  nsp_alibaba:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/alibaba.txt'
-  nsp_tencent:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/tencent.txt'
-  nsp_bilibili:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/bilibili.txt'
-  nsp_xiaomi:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/xiaomi.txt'
-  nsp_bytedance:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/bytedance.txt'
-  nsp_baidu:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/baidu.txt'
-  nsp_qihoo360:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/qihoo360.txt'
-  nsp_hotspot:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/hotspot_captive_portal.txt'
-  nsp_lan:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/lan_without_real_ip.txt'
-  nsp_lan_realip:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Internal/mihomo_nameserver_policy/lan_with_realip.txt'
 # ==================== EOF ====================
