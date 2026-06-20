@@ -1,0 +1,316 @@
+# Mihomo Configuration — Mini（精简版，全 select 策略组）
+
+# ==================== 锚点配置 ====================
+BaseProvider: &BaseProvider
+  type: http
+  interval: 86400
+  proxy: Proxy
+  health-check:
+    enable: true
+    url: 'http://1.1.1.1/generate_204'
+    interval: 300
+    timeout: 5000
+    lazy: true
+
+BaseSelect: &BaseSelect
+  type: select
+
+FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
+FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
+FilterJP: &FilterJP '(?=.*(?:🇯🇵|JP|Japan))'
+FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
+FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
+FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
+
+FilterOpt: &FilterOpt '^(?!.*(?:thru|@))(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR))'
+FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
+FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))'
+
+BehaviorCL: &BehaviorCL
+  type: http
+  behavior: classical
+  format: text
+  interval: 86400
+
+BehaviorIP: &BehaviorIP
+  type: http
+  behavior: classical
+  format: text
+  interval: 86400
+
+BehaviorMrsDN: &BehaviorMrsDN
+  type: http
+  behavior: domain
+  format: mrs
+  interval: 86400
+
+BehaviorMrsIP: &BehaviorMrsIP
+  type: http
+  behavior: ipcidr
+  format: mrs
+  interval: 86400
+
+# ==================== 代理提供者 ====================
+proxy-providers:
+  Sub1:
+    <<: *BaseProvider
+    url: '订阅地址'
+    path: ./proxy_providers/sub1.yaml
+
+# ==================== 核心配置 ====================
+mode: rule
+mixed-port: 7893
+port: 7890
+socks-port: 7891
+redir-port: 7892
+tproxy-port: 7895
+ipv6: true
+allow-lan: true
+unified-delay: true
+tcp-concurrent: true
+log-level: warning
+find-process-mode: always
+keep-alive-interval: 15
+keep-alive-idle: 600
+
+external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+external-ui-name: zashboard
+external-ui: ui
+external-controller: 127.0.0.1:9090
+secret: ''
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+# ==================== 流量嗅探 ====================
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "Mijia Cloud"
+    - "+.push.apple.com"
+
+# ==================== TUN 模式 ====================
+tun:
+  enable: true
+  stack: mixed
+  dns-hijack:
+    - "any:53"
+    - "tcp://any:53"
+  auto-route: true
+  auto-detect-interface: true
+
+# ==================== DNS 配置（精简：fake-ip + 基础 nameserver）====================
+dns:
+  enable: true
+  prefer-h3: false
+  use-hosts: true
+  use-system-hosts: true
+  respect-rules: true
+  ipv6: true
+  cache-algorithm: arc
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-range6: fdfe:dcba:9876::1/64
+  fake-ip-filter-mode: blacklist
+  fake-ip-filter:
+    - "+.lan"
+    - "+.local"
+    - "+.localdomain"
+    - "+.internal"
+    - "*.srv.nintendo.net"
+    - "*.stun.playstation.net"
+    - xbox.*.microsoft.com
+    - "stun.*"
+    - "+.msftconnecttest.com"
+    - "+.msftncsi.com"
+
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+
+  nameserver-policy:
+    dns.alidns.com: quic://223.5.5.5:853
+    doh.pub: 119.29.29.29
+    dns.pub: 119.29.29.29
+
+# ==================== 代理策略组 ====================
+proxy-groups:
+  - name: Proxy
+    <<: *BaseSelect
+    proxies: [Opt, Core, CDN]
+
+  - name: Opt
+    <<: *BaseSelect
+    use: [Sub1]
+    filter: *FilterOpt
+
+  - name: Core
+    <<: *BaseSelect
+    proxies: [HK, TW, JP]
+
+  - name: CDN
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterCDN
+
+  # ===== 地区策略 =====
+  - name: HK
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterHK
+
+  - name: TW
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterTW
+
+  - name: JP
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterJP
+
+  - name: SG
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterSG
+
+  - name: US
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterUS
+
+  - name: DE
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterDE
+
+  # ===== 专用策略 =====
+  - name: AIGC
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterAIGC
+
+  - name: Telegram
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterTelegram
+
+  - name: GlobalMedia
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterGlobalMedia
+
+  - name: Final
+    <<: *BaseSelect
+    proxies: [Proxy, DIRECT]
+
+# ==================== 规则路由 ====================
+rules:
+  # ===== 域名规则 =====
+  - RULE-SET,openai,AIGC
+  - RULE-SET,ai,AIGC
+  - RULE-SET,telegram,Telegram
+
+  # > 自定义直连补充
+  - RULE-SET,direct_extra,DIRECT
+
+  - RULE-SET,youtube_rule,GlobalMedia
+  - RULE-SET,stream,GlobalMedia
+
+  # > 国内常见域名
+  - RULE-SET,domestic,DIRECT
+
+  # > 常见直连规则（PT 站/学术网/下载器进程等）
+  - RULE-SET,direct,DIRECT
+
+  # > 国内域名兜底
+  - RULE-SET,cn_domain,DIRECT
+
+  # > 常见海外域名
+  - RULE-SET,global,Proxy
+
+  # > 内网域名
+  - RULE-SET,lan_nonip,DIRECT
+
+  # > 非中国大陆域名兜底
+  - RULE-SET,geolocation_not_cn,Proxy
+
+  # ===== IP 规则 =====
+  - RULE-SET,telegram_ip,Telegram,no-resolve
+  - RULE-SET,cn_ip,DIRECT
+  - RULE-SET,lan_ip,DIRECT
+
+  # > CN IP 解析兜底
+  - GEOIP,CN,DIRECT
+
+  - MATCH,Final
+
+# ==================== 规则集提供者 ====================
+rule-providers:
+  openai:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
+  ai:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/ai.txt'
+  telegram:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/telegram.txt'
+  stream:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream.txt'
+  direct:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/direct.txt'
+  global:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/global.txt'
+  domestic:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/domestic.txt'
+  lan_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/lan.txt'
+  telegram_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/telegram.txt'
+  lan_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
+  direct_extra:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct-extra.mrs'
+  youtube_rule:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs'
+  cn_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
+  geolocation_not_cn:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs'
+  cn_ip:
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs'
+# ==================== EOF ====================

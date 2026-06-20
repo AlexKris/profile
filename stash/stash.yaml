@@ -1,0 +1,649 @@
+# Stash Configuration（Stash iOS/macOS 专用版）
+# 基于 mihomo/mihomo.yaml 改造，移除 mihomo 专属字段
+
+# ==================== 锚点配置 ====================
+# 代理提供者模板
+BaseProvider: &BaseProvider
+  type: http
+  interval: 86400
+  proxy: Proxy
+  health-check:
+    enable: true
+    url: 'http://1.1.1.1/generate_204'
+    interval: 300
+    timeout: 5000
+    lazy: true
+
+# 策略组类型模板
+BaseSelect: &BaseSelect
+  type: select
+  use: [Sub1]
+
+# 节点筛选正则
+# ISP 级筛选
+FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
+FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
+FilterJP: &FilterJP '(?=.*(?:🇯🇵|JP|Japan))'
+FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
+FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
+FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
+
+# Opt 直连筛选
+FilterOptAll: &FilterOptAll '^(?!.*(?:thru|@))'
+FilterOpt: &FilterOpt '^(?!.*(?:thru|@))(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR))'
+
+# 组合筛选
+FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterSocial: &FilterSocial '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
+FilterYouTube: &FilterYouTube '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
+FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))'
+FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))(?=.*(?:RFC|Jinx))'
+FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))'
+FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
+FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
+
+# 规则集模板（Stash 原生 *-text behavior，解析更高效）
+BehaviorDN: &BehaviorDN
+  type: http
+  behavior: domain-text
+  interval: 86400
+
+BehaviorCL: &BehaviorCL
+  type: http
+  behavior: classical
+  format: text
+  interval: 86400
+
+BehaviorIP: &BehaviorIP
+  type: http
+  behavior: classical
+  format: text
+  interval: 86400
+
+BehaviorIPCIDRText: &BehaviorIPCIDRText
+  type: http
+  behavior: ipcidr
+  format: text
+  interval: 86400
+
+# Stash 3.1.1+ 支持 mrs 格式（仅 domain / ipcidr）
+BehaviorMrsDN: &BehaviorMrsDN
+  type: http
+  behavior: domain
+  format: mrs
+  interval: 86400
+
+BehaviorMrsIP: &BehaviorMrsIP
+  type: http
+  behavior: ipcidr
+  format: mrs
+  interval: 86400
+
+# ==================== 代理提供者 ====================
+proxy-providers:
+  Sub1:
+    <<: *BaseProvider
+    url: '订阅地址'
+    path: ./proxy_providers/sub1.yaml
+
+# ==================== 核心配置 ====================
+mode: rule
+mixed-port: 7893
+port: 7890
+socks-port: 7891
+ipv6: false
+allow-lan: true
+log-level: warning
+
+# ==================== 流量嗅探 ====================
+sniffer:
+  enable: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+      override-destination: true
+  skip-domain:
+    - "Mijia Cloud"
+    - "+.push.apple.com"
+
+# ==================== DNS 配置 ====================
+dns:
+  enable: true
+  skip-cert-verify: true
+  use-hosts: true
+  use-system-hosts: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "+.m2m"
+    - injections.adguard.org
+    - local.adguard.org
+    - "+.bogon"
+    - "+.local"
+    - "+.lan"
+    - "+.internal"
+    - "+.localdomain"
+    - home.arpa
+    - 127.0.0.1.sslip.io
+    - 127.atlas.skk.moe
+    - dns.msftncsi.com
+    - "*.srv.nintendo.net"
+    - "*.stun.playstation.net"
+    - xbox.*.microsoft.com
+    - "*.turn.twilio.com"
+    - "*.stun.twilio.com"
+    - stun.syncthing.net
+    - "stun.*"
+    - lancache.steamcontent.com
+    - "+.ea.com"
+    - "+.eaassets-a.akamaihd.net"
+    - "+.battle.net"
+    - "+.battlenet.com"
+    - "+.battlenet.com.cn"
+    - "+.blizzard.com"
+    - "+.blzstatic.cn"
+    - "+.steamserver.net"
+    - "+.steampowered.com"
+    - "+.steamcontent.com"
+    - "+.xboxlive.com"
+    - stun.l.google.com
+    - "+.mihoyo.com"
+    - "+.yuanshen.com"
+    - "+.bh3.com"
+    - "+.bhsr.com"
+    - "+.juequling.com"
+    - "+.miyoushe.com"
+    - "+.mhyurl.cn"
+    - "+.hoyoverse.com"
+    - "+.hoyolab.com"
+    - "+.genshinimpact.com"
+    - "+.honkaistarrail.com"
+    - "+.honkaiimpact3.com"
+    - "+.zenlesszonezero.com"
+    - "+.kurogame.com"
+    - "+.kurogames.com"
+    - "+.kurobbs.com"
+    - "+.aki-game.com"
+    - "+.aki-game2.com"
+    - "+.kurogames-global.com"
+    - "+.kurogame.xyz"
+    - "+.wegame.com.cn"
+    - game.163.com
+    - "+.msftconnecttest.com"
+    - "+.msftncsi.com"
+    - "+.miwifi.com"
+    - "+.market.xiaomi.com"
+
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+
+  # Stash nameserver-policy 不支持 rule-set: 引用，仅保留精确/通配符域名
+  nameserver-policy:
+    dns.alidns.com: quic://223.5.5.5:853
+    dot.pub: 119.29.29.29
+    doh.pub: 119.29.29.29
+    dns.pub: 119.29.29.29
+    doh.360.cn: 101.198.198.198
+    "*.m2m": system
+    injections.adguard.org: system
+    local.adguard.org: system
+    "*.bogon": system
+    dl.google.com: https://doh.pub/dns-query
+    dl.l.google.com: https://doh.pub/dns-query
+    update.googleapis.com: https://doh.pub/dns-query
+    "+.dl.playstation.net": https://doh.pub/dns-query
+    "geosite:cn": 223.5.5.5
+
+# ==================== 代理策略组 ====================
+proxy-groups:
+  # ===== 顶层策略 =====
+  - name: Proxy
+    type: select
+    proxies: [Opt, Core, CDN]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Proxy.png
+
+  # ===== 二级策略 =====
+  - name: Opt
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Available.png
+    filter: *FilterOpt
+
+  - name: OptAll
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Auto.png
+    filter: *FilterOptAll
+
+  - name: Core
+    type: select
+    proxies: [HK, TW, JP]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Static.png
+
+  - name: CDN
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Bypass.png
+    filter: *FilterCDN
+
+  # ===== 地区策略 =====
+  - name: HK
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Hong_Kong.png
+    filter: *FilterHK
+
+  - name: TW
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Taiwan.png
+    filter: *FilterTW
+
+  - name: JP
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Japan.png
+    filter: *FilterJP
+
+  - name: SG
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Singapore.png
+    filter: *FilterSG
+
+  - name: US
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/United_States.png
+    filter: *FilterUS
+
+  - name: DE
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Germany.png
+    filter: *FilterDE
+
+  # ===== 专用策略 =====
+  - name: Telegram
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Telegram.png
+    filter: *FilterTelegram
+
+  - name: SocialMedia
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Twitter.png
+    filter: *FilterSocial
+
+  - name: GlobalMedia
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Streaming.png
+    filter: *FilterGlobalMedia
+
+  - name: YouTube
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/YouTube.png
+    filter: *FilterYouTube
+
+  - name: GlobalEmby
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Emby.png
+    filter: *FilterGlobalEmby
+
+  - name: RFCEmby
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/VIP.png
+    filter: *FilterRFCEmby
+
+  - name: AIGC
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/ChatGPT.png
+    filter: *FilterAIGC
+
+  - name: Google
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Google_Search.png
+    filter: *FilterGoogle
+
+  - name: Speedtest
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Speedtest.png
+    filter: *FilterSpeedtest
+
+  - name: Download
+    type: select
+    proxies: [CDN, Core]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Download.png
+
+  - name: Crypto
+    type: select
+    proxies: [TW, Proxy, DIRECT]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Cryptocurrency.png
+
+  - name: PayPal
+    type: select
+    proxies: [US, HK, DIRECT]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/PayPal.png
+
+  - name: Gaming
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Game.png
+    filter: *FilterCDN
+
+  - name: AppleCDN
+    type: select
+    proxies: [DIRECT, Proxy]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Apple_1.png
+
+  - name: AppleSvc
+    type: select
+    proxies: [DIRECT, Proxy]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Apple.png
+
+  - name: MSCDN
+    type: select
+    proxies: [DIRECT, Proxy]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Microsoft.png
+
+  - name: MSSvc
+    type: select
+    proxies: [Proxy, DIRECT]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/OneDrive.png
+
+  # ===== 顶层策略 =====
+  # Sub1 订阅全节点（无过滤）
+  - name: Sub1
+    <<: *BaseSelect
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Available_1.png
+
+  - name: Final
+    type: select
+    proxies: [Proxy, DIRECT]
+    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Final.png
+
+# ==================== 规则路由 ====================
+rules:
+  # > 进程规则（macOS Stash 生效，iOS/tvOS 忽略）
+  # Proxy processes
+  - PROCESS-NAME,Stash,DIRECT
+  - PROCESS-NAME,v2ray,DIRECT
+  - PROCESS-NAME,ss-local,DIRECT
+  - PROCESS-NAME,UUBooster,DIRECT
+  # Download processes
+  - PROCESS-NAME,aria2c,DIRECT
+  - PROCESS-NAME,fdm,DIRECT
+  - PROCESS-NAME,Folx,DIRECT
+  - PROCESS-NAME,NetTransport,DIRECT
+  - PROCESS-NAME,Thunder,DIRECT
+  - PROCESS-NAME,Transmission,DIRECT
+  - PROCESS-NAME,uTorrent,DIRECT
+  - PROCESS-NAME,WebTorrent,DIRECT
+  - PROCESS-NAME,WebTorrent Helper,DIRECT
+  # Windows download processes
+  - PROCESS-NAME,aria2c.exe,DIRECT
+  - PROCESS-NAME,fdm.exe,DIRECT
+  - PROCESS-NAME,NetTransport.exe,DIRECT
+  - PROCESS-NAME,Thunder.exe,DIRECT
+  - PROCESS-NAME,Transmission.exe,DIRECT
+  - PROCESS-NAME,uTorrent.exe,DIRECT
+  - PROCESS-NAME,qbittorrent.exe,DIRECT
+  - PROCESS-NAME,BitComet.exe,DIRECT
+  # Nutstore
+  - PROCESS-NAME,Nutstore,DIRECT
+  - PROCESS-NAME,Nutstore.exe,DIRECT
+  # iPerf
+  - PROCESS-NAME,iperf3-darwin,DIRECT
+
+  # ===== 域名规则 start =====
+  # > Other
+  - DOMAIN-KEYWORD,hanime,CDN
+
+  # > 国内游戏直连
+  - DOMAIN-SUFFIX,kurogame.com,DIRECT
+  - DOMAIN-SUFFIX,kurogames.com,DIRECT
+  - DOMAIN-SUFFIX,kurobbs.com,DIRECT
+  - DOMAIN-SUFFIX,aki-game.com,DIRECT
+  - DOMAIN-SUFFIX,aki-game2.com,DIRECT
+  - DOMAIN-SUFFIX,kurogames-global.com,DIRECT
+  - DOMAIN-SUFFIX,kurogame.xyz,DIRECT
+
+  # > 自定义直连补充
+  - RULE-SET,direct_extra,DIRECT
+
+  # > 测速网站
+  - RULE-SET,speedtest_domain,Speedtest
+
+  # > 静态 CDN 域名
+  - RULE-SET,cdn_domain,CDN
+  - RULE-SET,cdn_nonip,CDN
+
+  # > AIGC
+  - RULE-SET,openai,AIGC
+  - RULE-SET,ai,AIGC
+
+  # > PayPal
+  - RULE-SET,paypal_rule,PayPal
+
+  # > Crypto
+  - RULE-SET,crypto_rule,Crypto
+
+
+
+
+  # > YouTube
+  - RULE-SET,youtube_rule,YouTube
+
+  # > 流媒体（JP）
+  - RULE-SET,stream_jp,JP
+
+  # > 流媒体（TW）
+  - RULE-SET,stream_tw,TW
+
+  # > 流媒体（通用）
+  - RULE-SET,stream,GlobalMedia
+
+  # > Telegram 域名
+  - RULE-SET,telegram,Telegram
+
+  # > 社交媒体（X / Instagram）
+  - RULE-SET,social_twitter,SocialMedia
+  - RULE-SET,social_instagram,SocialMedia
+
+  # > Apple CDN（默认直连，下载慢时可在面板把 AppleCDN 切到 Proxy）
+  - RULE-SET,apple_cdn_domain,AppleCDN
+  - RULE-SET,apple_cdn_nonip,AppleCDN
+
+  # > Microsoft CDN（同上，VSCode/Office 直连慢时切 MSCDN → Proxy）
+  - RULE-SET,microsoft_cdn,MSCDN
+
+  # > Download
+  - RULE-SET,download_domain,Download
+  - RULE-SET,download_nonip,Download
+
+  # > Apple CN
+  - RULE-SET,apple_cn,DIRECT
+
+  # > Apple 服务默认直连；Microsoft 服务默认代理，可手动切换
+  - RULE-SET,apple_services,AppleSvc
+  - RULE-SET,microsoft,MSSvc
+
+  # > Google 服务
+  - RULE-SET,google,Google
+
+  # > 国内常见域名
+  - RULE-SET,domestic,DIRECT
+
+  # > 常见直连规则（PT 站/学术网/下载器进程等）
+  - RULE-SET,direct,DIRECT
+
+  # > 国内域名兜底
+  - RULE-SET,cn_domain,DIRECT
+
+  # > 国内游戏直连补充
+  - DOMAIN,end-api.shallow.ink,DIRECT
+  - DOMAIN,end.shallow.ink,DIRECT
+  - DOMAIN-SUFFIX,tgpro.top,DIRECT
+  - DOMAIN-SUFFIX,vrzwk.top,DIRECT
+
+  # > 海外游戏
+  - RULE-SET,games,Gaming
+
+  # > 常见海外域名
+  - RULE-SET,global,Proxy
+
+  # > 内网域名
+  - RULE-SET,lan_nonip,DIRECT
+
+  # > 非中国大陆域名兜底
+  - RULE-SET,geolocation_not_cn,Proxy
+
+  # ===== 域名规则 end =====
+
+  # ===== IP 规则 start =====
+  # > Telegram IP
+  - RULE-SET,telegram_ip,Telegram,no-resolve
+
+  # > Telegram 进程隐私保护（macOS 生效，iOS 忽略）
+  - PROCESS-NAME,Telegram,REJECT-DROP
+
+  # > 中国大陆 IP
+  - RULE-SET,domestic_ip,DIRECT
+  - RULE-SET,china_ip,DIRECT
+  - RULE-SET,cn_ip,DIRECT
+
+  # > LAN IP
+  - RULE-SET,lan_ip,DIRECT
+
+  # ===== IP 规则 end =====
+
+  # > CN IP 解析兜底
+  - GEOIP,CN,DIRECT
+
+  # > Final
+  - MATCH,Final
+
+# ==================== 规则集提供者 ====================
+rule-providers:
+  # ===== 域名规则集 =====
+  speedtest_domain:
+    <<: *BehaviorDN
+    url: 'https://ruleset.skk.moe/Clash/domainset/speedtest.txt'
+  cdn_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/cdn.mrs'
+  cdn_nonip:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/cdn.mrs'
+  openai:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
+  ai:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/ai.txt'
+  stream:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream.txt'
+  stream_jp:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream_jp.txt'
+  stream_tw:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt'
+  telegram:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/telegram.txt'
+  apple_cdn_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/apple-cdn.mrs'
+  apple_cdn_nonip:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple-cdn.mrs'
+  apple_cn:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple-cn.mrs'
+  apple_services:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple-services.mrs'
+  direct_extra:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct-extra.mrs'
+  microsoft_cdn:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/microsoft_cdn.txt'
+  microsoft:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/microsoft.txt'
+  download_domain:
+    <<: *BehaviorDN
+    url: 'https://ruleset.skk.moe/Clash/domainset/download.txt'
+  download_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/download.txt'
+  direct:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/direct.txt'
+  global:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/global.txt'
+  domestic:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/domestic.txt'
+  lan_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/lan.txt'
+
+  # ===== IP 规则集 =====
+  telegram_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/telegram.txt'
+  domestic_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/domestic.txt'
+  # 纯 CIDR 格式（无 IP-CIDR, 前缀），需用 ipcidr-text 而非 classical
+  china_ip:
+    <<: *BehaviorIPCIDRText
+    url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'
+  lan_ip:
+    <<: *BehaviorIP
+    url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
+
+  # ===== MRS 规则集（Stash 3.1.1+ 支持 domain / ipcidr） =====
+  cn_ip:
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs'
+  games:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games.mrs'
+  google:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs'
+  youtube_rule:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs'
+  # 社交媒体（X / Instagram）
+  social_twitter:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs'
+  social_instagram:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/instagram.mrs'
+  paypal_rule:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/paypal.mrs'
+  cn_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
+  geolocation_not_cn:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs'
+
+  # ===== 自定义规则集 =====
+  crypto_rule:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-cryptocurrency.mrs'
+# ==================== EOF ====================
