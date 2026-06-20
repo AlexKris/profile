@@ -1,5 +1,4 @@
 # ==================== 锚点配置 ====================
-# 代理提供者模板
 BaseProvider: &BaseProvider
   type: http
   interval: 86400
@@ -11,13 +10,10 @@ BaseProvider: &BaseProvider
     timeout: 5000
     lazy: true
 
-# 策略组类型模板
 BaseSelect: &BaseSelect
   type: select
   use: [Sub1]
 
-# 节点筛选正则
-# ISP 级筛选
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
 FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
 FilterJP: &FilterJP '(?=.*(?:🇯🇵|JP|Japan))'
@@ -25,11 +21,9 @@ FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
 FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
-# Opt 直连筛选
 FilterOptAll: &FilterOptAll '^(?!.*(?:thru|@))'
 FilterOpt: &FilterOpt '^(?!.*(?:thru|@))(?=.*(?:🇭🇰|🇯🇵|🇰🇷|HK|JP|KR))'
 
-# 组合筛选
 FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
@@ -175,21 +169,25 @@ dns:
     - "+.msftncsi.com"
     - "+.miwifi.com"
     - "+.market.xiaomi.com"
-
   default-nameserver:
     - 223.5.5.5
-    - 119.29.29.29
 
   nameserver:
-    - https://dns.alidns.com/dns-query
-    - https://doh.pub/dns-query
+    - "https://8.8.8.8/dns-query#Proxy&disable-ipv6=true&ecs=114.114.114.114/24&ecs-override=true"
+
+  fallback:
+    - "https://1.1.1.1/dns-query#Proxy&disable-ipv6=true"
+
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
 
   proxy-server-nameserver:
-    - https://doh.pub/dns-query
-    - https://dns.alidns.com/dns-query
+    - 223.5.5.5
 
   # Stash nameserver-policy 不支持 rule-set: 引用，仅保留精确/通配符域名
   nameserver-policy:
+    dns.google: 223.5.5.5
     dns.alidns.com: quic://223.5.5.5:853
     dot.pub: 119.29.29.29
     doh.pub: 119.29.29.29
@@ -199,10 +197,6 @@ dns:
     injections.adguard.org: system
     local.adguard.org: system
     "*.bogon": system
-    dl.google.com: https://doh.pub/dns-query
-    dl.l.google.com: https://doh.pub/dns-query
-    update.googleapis.com: https://doh.pub/dns-query
-    "+.dl.playstation.net": https://doh.pub/dns-query
     "geosite:cn": 223.5.5.5
 
 # ==================== 代理策略组 ====================
@@ -302,7 +296,6 @@ proxy-groups:
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Apple.png
 
   # ===== 顶层策略 =====
-  # Sub1 订阅全节点（无过滤）
   - name: Sub1
     <<: *BaseSelect
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Available_1.png
@@ -346,14 +339,14 @@ rules:
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
 
-  # > Apple CDN（默认直连，下载慢时可在面板把 AppleCDN 切到 Proxy）
+  # > Apple CDN
   - RULE-SET,apple_cdn_domain,AppleCDN
   - RULE-SET,apple_cdn_nonip,AppleCDN
 
   # > Apple CN
   - RULE-SET,apple_cn,DIRECT
 
-  # > Apple 服务（默认直连，必要时可切代理兜底）
+  # > Apple
   - RULE-SET,apple_services,AppleSvc
 
   # > Google 服务
@@ -362,7 +355,7 @@ rules:
   # > 国内常见域名
   - RULE-SET,domestic,DIRECT
 
-  # > 常见直连规则（PT 站/学术网/下载器进程等）
+  # > 常见直连规则
   - RULE-SET,direct,DIRECT
 
   # > 国内域名兜底
@@ -390,7 +383,6 @@ rules:
 
   # ===== IP 规则 end =====
 
-  # > CN IP 解析兜底
   - GEOIP,CN,DIRECT
 
   # > Final

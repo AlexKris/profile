@@ -103,24 +103,29 @@ dns:
     - "stun.*"
     - "+.msftconnecttest.com"
     - "+.msftncsi.com"
-
   default-nameserver:
     - 223.5.5.5
-    - 119.29.29.29
 
   nameserver:
-    - https://dns.alidns.com/dns-query
-    - https://doh.pub/dns-query
+    - "https://8.8.8.8/dns-query#Proxy&disable-ipv6=true&ecs=114.114.114.114/24&ecs-override=true"
+
+  fallback:
+    - "https://1.1.1.1/dns-query#Proxy&disable-ipv6=true"
+
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
 
   proxy-server-nameserver:
-    - https://doh.pub/dns-query
-    - https://dns.alidns.com/dns-query
+    - 223.5.5.5
 
   nameserver-policy:
-    dns.alidns.com: quic://223.5.5.5:853
-    doh.pub: 119.29.29.29
-    dns.pub: 119.29.29.29
+    dns.google: 223.5.5.5
     "geosite:cn": 223.5.5.5
+    "*.lan": system
+    "*.local": system
+    "*.localdomain": system
+    "*.internal": system
 
 # ==================== 代理策略组 ====================
 proxy-groups:
@@ -212,7 +217,7 @@ rules:
   # > 国内常见域名
   - RULE-SET,domestic,DIRECT
 
-  # > 常见直连规则（PT 站/学术网/下载器进程等）
+  # > 常见直连规则
   - RULE-SET,direct,DIRECT
 
   # > 国内域名兜底
@@ -232,7 +237,6 @@ rules:
   - RULE-SET,cn_ip,DIRECT
   - RULE-SET,lan_ip,DIRECT
 
-  # > CN IP 解析兜底
   - GEOIP,CN,DIRECT
 
   - MATCH,Final
