@@ -263,7 +263,8 @@ proxy-groups:
 
   - name: Download
     <<: *BaseSelect
-    proxies: [CDN, Core]
+    include-all-providers: true
+    filter: *FilterCDN
 
   - name: Crypto
     <<: *BaseSelect
