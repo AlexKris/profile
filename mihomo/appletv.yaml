@@ -246,6 +246,11 @@ proxy-groups:
     include-all-providers: true
     filter: *FilterGoogle
 
+  - name: Download
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterCDN
+
   - name: AppleCDN
     <<: *BaseSelect
     proxies: [DIRECT, Proxy]
@@ -277,6 +282,9 @@ rules:
   # > 静态 CDN 域名
   - RULE-SET,cdn_domain,CDN
   - RULE-SET,cdn_nonip,CDN
+  # > Download
+  - RULE-SET,download_domain,Download
+  - RULE-SET,download_nonip,Download
   # > YouTube
   - RULE-SET,youtube_rule,YouTube
   # > 流媒体（JP）
@@ -327,6 +335,12 @@ rule-providers:
   cdn_nonip:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/cdn.mrs'
+  download_domain:
+    <<: *BehaviorDN
+    url: 'https://ruleset.skk.moe/Clash/domainset/download.txt'
+  download_nonip:
+    <<: *BehaviorCL
+    url: 'https://ruleset.skk.moe/Clash/non_ip/download.txt'
   stream:
     <<: *BehaviorCL
     url: 'https://ruleset.skk.moe/Clash/non_ip/stream.txt'
