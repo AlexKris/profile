@@ -437,6 +437,14 @@
       },
       {
         "rule_set": [
+          "cdn-domainset",
+          "cdn"
+        ],
+        "action": "route",
+        "outbound": "CDN"
+      },
+      {
+        "rule_set": [
           "ai"
         ],
         "action": "route",
@@ -541,14 +549,6 @@
         ],
         "action": "route",
         "outbound": "Proxy"
-      },
-      {
-        "rule_set": [
-          "cdn-domainset",
-          "cdn"
-        ],
-        "action": "route",
-        "outbound": "CDN"
       },
       {
         "rule_set": [
