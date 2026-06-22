@@ -245,7 +245,6 @@ rules:
   # ===== 域名规则 start =====
   # > Other
   - DOMAIN-KEYWORD,hanime,CDN
-
   # > 国内游戏直连
   - DOMAIN-SUFFIX,kurogame.com,DIRECT
   - DOMAIN-SUFFIX,kurogames.com,DIRECT
@@ -254,72 +253,49 @@ rules:
   - DOMAIN-SUFFIX,aki-game2.com,DIRECT
   - DOMAIN-SUFFIX,kurogames-global.com,DIRECT
   - DOMAIN-SUFFIX,kurogame.xyz,DIRECT
-
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
-
   # > 静态 CDN 域名
   - RULE-SET,cdn_domain,CDN
   - RULE-SET,cdn_nonip,CDN
-
   # > YouTube
   - RULE-SET,youtube_rule,YouTube
-
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
-
   # > 流媒体（TW）
   - RULE-SET,stream_tw,TW
-
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
-
   # > Apple CDN
   - RULE-SET,apple_cdn_domain,AppleCDN
   - RULE-SET,apple_cdn_nonip,AppleCDN
-
   # > Apple CN
   - RULE-SET,apple_cn,DIRECT
-
   # > Apple
   - RULE-SET,apple_services,AppleSvc
-
   # > Google 服务
   - RULE-SET,google,Google
-
   # > 国内常见域名
   - RULE-SET,domestic,DIRECT
-
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
-
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
-
   # > 常见海外域名
   - RULE-SET,global,Proxy
-
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
-
   # > 非中国大陆域名兜底
   - RULE-SET,geolocation_not_cn,Proxy
-
   # ===== 域名规则 end =====
-
   # ===== IP 规则 start =====
   # > 中国大陆 IP
-  - RULE-SET,domestic_ip,DIRECT
   - RULE-SET,china_ip,DIRECT
   - RULE-SET,cn_ip,DIRECT
-
   # > LAN IP
   - RULE-SET,lan_ip,DIRECT
-
   # ===== IP 规则 end =====
-
   - GEOIP,CN,DIRECT
-
   # > Final
   - MATCH,Final
 
@@ -370,9 +346,6 @@ rule-providers:
     url: 'https://ruleset.skk.moe/Clash/non_ip/lan.txt'
 
   # ===== IP 规则集 =====
-  domestic_ip:
-    <<: *BehaviorIP
-    url: 'https://ruleset.skk.moe/Clash/ip/domestic.txt'
   china_ip:
     <<: *BehaviorIPCIDRText
     url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'

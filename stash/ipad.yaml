@@ -23,7 +23,6 @@ FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
 
 FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
-FilterSocial: &FilterSocial '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
 FilterYouTube: &FilterYouTube '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
 FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))'
@@ -201,11 +200,6 @@ proxy-groups:
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Telegram.png
     filter: *FilterTelegram
 
-  - name: SocialMedia
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Twitter.png
-    filter: *FilterSocial
-
   - name: GlobalMedia
     <<: *BaseSelect
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Streaming.png
@@ -246,11 +240,6 @@ proxy-groups:
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Download.png
     filter: *FilterCDN
 
-  - name: Gaming
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Game.png
-    filter: *FilterCDN
-
   - name: AppleCDN
     type: select
     proxies: [DIRECT, Proxy]
@@ -286,7 +275,6 @@ rules:
   # ===== 域名规则 start =====
   # > Other
   - DOMAIN-KEYWORD,hanime,CDN
-
   # > 国内游戏直连
   - DOMAIN-SUFFIX,kurogame.com,DIRECT
   - DOMAIN-SUFFIX,kurogames.com,DIRECT
@@ -295,106 +283,69 @@ rules:
   - DOMAIN-SUFFIX,aki-game2.com,DIRECT
   - DOMAIN-SUFFIX,kurogames-global.com,DIRECT
   - DOMAIN-SUFFIX,kurogame.xyz,DIRECT
-
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
-
   # > 测速网站
   - RULE-SET,speedtest_domain,Speedtest
-
   # > 静态 CDN 域名
   - RULE-SET,cdn_domain,CDN
   - RULE-SET,cdn_nonip,CDN
-
   # > AIGC
   - RULE-SET,openai,AIGC
   - RULE-SET,ai,AIGC
-
   # > YouTube
   - RULE-SET,youtube_rule,YouTube
-
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
-
   # > 流媒体（TW）
   - RULE-SET,stream_tw,TW
-
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
-
   # > Telegram 域名
   - RULE-SET,telegram,Telegram
-
-  # > 社交媒体（X / Instagram）
-  - RULE-SET,social_twitter,SocialMedia
-  - RULE-SET,social_instagram,SocialMedia
-
   # > Apple CDN
   - RULE-SET,apple_cdn_domain,AppleCDN
   - RULE-SET,apple_cdn_nonip,AppleCDN
-
   # > Microsoft CDN
   - RULE-SET,microsoft_cdn,MSCDN
-
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
-
   # > Apple CN
   - RULE-SET,apple_cn,DIRECT
-
   # > Apple / Microsoft
   - RULE-SET,apple_services,AppleSvc
   - RULE-SET,microsoft,MSSvc
-
   # > Google 服务
   - RULE-SET,google,Google
-
   # > 国内常见域名
   - RULE-SET,domestic,DIRECT
-
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
-
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
-
   # > 国内游戏直连补充
   - DOMAIN,end-api.shallow.ink,DIRECT
   - DOMAIN,end.shallow.ink,DIRECT
   - DOMAIN-SUFFIX,tgpro.top,DIRECT
   - DOMAIN-SUFFIX,vrzwk.top,DIRECT
-
-  # > 海外游戏
-  - RULE-SET,games,Gaming
-
   # > 常见海外域名
   - RULE-SET,global,Proxy
-
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
-
   # > 非中国大陆域名兜底
   - RULE-SET,geolocation_not_cn,Proxy
-
   # ===== 域名规则 end =====
-
   # ===== IP 规则 start =====
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
-
   # > 中国大陆 IP
-  - RULE-SET,domestic_ip,DIRECT
   - RULE-SET,china_ip,DIRECT
   - RULE-SET,cn_ip,DIRECT
-
   # > LAN IP
   - RULE-SET,lan_ip,DIRECT
-
   # ===== IP 规则 end =====
-
   - GEOIP,CN,DIRECT
-
   # > Final
   - MATCH,Final
 
@@ -472,9 +423,6 @@ rule-providers:
   telegram_ip:
     <<: *BehaviorIP
     url: 'https://ruleset.skk.moe/Clash/ip/telegram.txt'
-  domestic_ip:
-    <<: *BehaviorIP
-    url: 'https://ruleset.skk.moe/Clash/ip/domestic.txt'
   china_ip:
     <<: *BehaviorIPCIDRText
     url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'
@@ -486,21 +434,12 @@ rule-providers:
   cn_ip:
     <<: *BehaviorMrsIP
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs'
-  games:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games.mrs'
   google:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs'
   youtube_rule:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs'
-  social_twitter:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs'
-  social_instagram:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/instagram.mrs'
   cn_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'

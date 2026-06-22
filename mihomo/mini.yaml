@@ -185,38 +185,27 @@ rules:
   - RULE-SET,openai,AIGC
   - RULE-SET,ai,AIGC
   - RULE-SET,telegram,Telegram
-
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
-
   - RULE-SET,youtube_rule,GlobalMedia
   - RULE-SET,stream,GlobalMedia
-
   # > 国内常见域名
   - RULE-SET,domestic,DIRECT
-
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
-
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
-
   # > 常见海外域名
   - RULE-SET,global,Proxy
-
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
-
   # > 非中国大陆域名兜底
   - RULE-SET,geolocation_not_cn,Proxy
-
   # ===== IP 规则 =====
   - RULE-SET,telegram_ip,Telegram,no-resolve
   - RULE-SET,cn_ip,DIRECT
   - RULE-SET,lan_ip,DIRECT
-
   - GEOIP,CN,DIRECT
-
   - MATCH,Final
 
 # ==================== 规则集提供者 ====================

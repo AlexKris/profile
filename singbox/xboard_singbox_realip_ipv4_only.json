@@ -34,8 +34,7 @@
             },
             {
                 "rule_set": [
-                    "geosite-cn",
-                    "geosite-geolocation-cn"
+                    "geosite-cn"
                 ],
                 "action": "route",
                 "server": "dns_direct"
@@ -65,13 +64,6 @@
                 ],
                 "action": "route",
                 "server": "dns_local"
-            },
-            {
-                "rule_set": [
-                    "geosite-category-games-cn"
-                ],
-                "action": "route",
-                "server": "dns_direct"
             },
             {
                 "domain": [
@@ -224,12 +216,6 @@
             "include": "🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG"
         },
         {
-            "tag": "SocialMedia",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
-        },
-        {
             "tag": "GlobalEmby",
             "type": "selector",
             "outbounds": [],
@@ -254,6 +240,18 @@
             "include": "(?=.*(?:🇺🇸|US))"
         },
         {
+            "tag": "Speedtest",
+            "type": "selector",
+            "outbounds": [],
+            "include": "(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))"
+        },
+        {
+            "tag": "Download",
+            "type": "selector",
+            "outbounds": [],
+            "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
+        },
+        {
             "tag": "PayPal",
             "type": "selector",
             "default": "US",
@@ -274,24 +272,6 @@
                 "Direct"
             ],
             "_filter": "none"
-        },
-        {
-            "tag": "Gaming",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
-        },
-        {
-            "tag": "Speedtest",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))"
-        },
-        {
-            "tag": "Download",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
         },
         {
             "tag": "AppleCDN",
@@ -441,20 +421,6 @@
             },
             {
                 "rule_set": [
-                    "geosite-category-games-cn"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "rule_set": [
-                    "geosite-category-games"
-                ],
-                "action": "route",
-                "outbound": "Gaming"
-            },
-            {
-                "rule_set": [
                     "geosite-youtube"
                 ],
                 "action": "route",
@@ -487,20 +453,6 @@
                 ],
                 "action": "route",
                 "outbound": "GlobalMedia"
-            },
-            {
-                "rule_set": [
-                    "geosite-instagram"
-                ],
-                "action": "route",
-                "outbound": "SocialMedia"
-            },
-            {
-                "rule_set": [
-                    "geosite-twitter"
-                ],
-                "action": "route",
-                "outbound": "SocialMedia"
             },
             {
                 "rule_set": [
@@ -554,8 +506,7 @@
             },
             {
                 "rule_set": [
-                    "geosite-cn",
-                    "geosite-geolocation-cn"
+                    "geosite-cn"
                 ],
                 "action": "route",
                 "outbound": "Direct"
@@ -701,13 +652,6 @@
                 "download_detour": "Proxy"
             },
             {
-                "tag": "geosite-geolocation-cn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
-                "download_detour": "Proxy"
-            },
-            {
                 "tag": "geosite-geolocation-noncn",
                 "type": "remote",
                 "format": "binary",
@@ -722,20 +666,6 @@
                 "download_detour": "Proxy"
             },
             {
-                "tag": "geosite-category-games-cn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-games-cn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-category-games",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-games.srs",
-                "download_detour": "Proxy"
-            },
-            {
                 "tag": "geosite-youtube",
                 "type": "remote",
                 "format": "binary",
@@ -747,20 +677,6 @@
                 "type": "remote",
                 "format": "binary",
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-instagram",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-instagram.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-twitter",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-twitter.srs",
                 "download_detour": "Proxy"
             },
             {
