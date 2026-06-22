@@ -1,772 +1,772 @@
 {
-    "log": {
-        "disabled": false,
-        "level": "info",
-        "timestamp": true
-    },
-    "dns": {
-        "servers": [
-            {
-                "tag": "dns_proxy",
-                "type": "https",
-                "server": "1.1.1.1",
-                "path": "/dns-query",
-                "detour": "Proxy"
-            },
-            {
-                "tag": "dns_direct",
-                "type": "https",
-                "server": "223.5.5.5",
-                "path": "/dns-query"
-            },
-            {
-                "tag": "dns_local",
-                "type": "local"
-            },
-            {
-                "tag": "dns_fakeip",
-                "type": "fakeip",
-                "inet4_range": "198.18.0.0/15"
-            }
-        ],
-        "rules": [
-            {
-                "domain_suffix": [
-                    "cloudflare-ech.com"
-                ],
-                "action": "route",
-                "server": "dns_direct"
-            },
-            {
-                "rule_set": [
-                    "geosite-cn"
-                ],
-                "action": "route",
-                "server": "dns_direct"
-            },
-            {
-                "query_type": [
-                    "PTR"
-                ],
-                "domain_suffix": [
-                    "in-addr.arpa",
-                    "ip6.arpa"
-                ],
-                "action": "reject"
-            },
-            {
-                "query_type": [
-                    "SOA"
-                ],
-                "domain": [
-                    "local"
-                ],
-                "action": "reject"
-            },
-            {
-                "rule_set": [
-                    "geosite-private"
-                ],
-                "action": "route",
-                "server": "dns_local"
-            },
-            {
-                "domain": [
-                    "dns.msftncsi.com",
-                    "stun.l.google.com",
-                    "stun.syncthing.net",
-                    "lancache.steamcontent.com"
-                ],
-                "domain_suffix": [
-                    "msftconnecttest.com",
-                    "msftncsi.com",
-                    "srv.nintendo.net",
-                    "stun.playstation.net",
-                    "turn.twilio.com",
-                    "stun.twilio.com",
-                    "xboxlive.com",
-                    "mihoyo.com",
-                    "yuanshen.com",
-                    "bh3.com",
-                    "bhsr.com",
-                    "juequling.com",
-                    "miyoushe.com",
-                    "mhyurl.cn",
-                    "kurogame.com",
-                    "kurogames.com",
-                    "kurobbs.com",
-                    "aki-game.com",
-                    "aki-game2.com",
-                    "kurogames-global.com",
-                    "kurogame.xyz",
-                    "wegame.com.cn",
-                    "game.163.com",
-                    "miwifi.com",
-                    "market.xiaomi.com"
-                ],
-                "domain_regex": [
-                    "^stun\\."
-                ],
-                "action": "route",
-                "server": "dns_direct"
-            },
-            {
-                "domain": [
-                    "captive.apple.com",
-                    "seed-sequoia.siri.apple.com",
-                    "sequoia.apple.com",
-                    "www.baidu.com"
-                ],
-                "action": "route",
-                "server": "dns_direct"
-            },
-            {
-                "clash_mode": "Direct",
-                "action": "route",
-                "server": "dns_direct"
-            },
-            {
-                "clash_mode": "Global",
-                "action": "route",
-                "server": "dns_fakeip"
-            },
-            {
-                "query_type": [
-                    "HTTPS",
-                    "SVCB"
-                ],
-                "action": "reject"
-            },
-            {
-                "query_type": [
-                    "A",
-                    "AAAA"
-                ],
-                "action": "route",
-                "server": "dns_fakeip"
-            }
-        ],
-        "final": "dns_proxy",
-        "strategy": "ipv4_only"
-    },
-    "experimental": {
-        "cache_file": {
-            "enabled": true,
-            "path": "cache.db",
-            "store_fakeip": true
-        },
-        "clash_api": {
-            "external_controller": "127.0.0.1:9090",
-            "external_ui": "ui",
-            "external_ui_download_detour": "Proxy",
-            "external_ui_download_url": "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
-        }
-    },
-    "inbounds": [
-        {
-            "type": "tun",
-            "tag": "tun-in",
-            "address": [
-                "172.19.0.1/30"
-            ],
-            "mtu": 1400,
-            "auto_route": true,
-            "strict_route": true,
-            "endpoint_independent_nat": true,
-            "stack": "mixed",
-            "platform": {
-                "http_proxy": {
-                    "enabled": true,
-                    "server": "127.0.0.1",
-                    "server_port": 2334
-                }
-            }
-        },
-        {
-            "type": "socks",
-            "tag": "socks-in",
-            "listen": "127.0.0.1",
-            "listen_port": 2333
-        },
-        {
-            "type": "mixed",
-            "tag": "mixed-in",
-            "listen": "127.0.0.1",
-            "listen_port": 2334
-        }
+  "log": {
+    "disabled": false,
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "dns_proxy",
+        "type": "https",
+        "server": "1.1.1.1",
+        "path": "/dns-query",
+        "detour": "Proxy"
+      },
+      {
+        "tag": "dns_direct",
+        "type": "https",
+        "server": "223.5.5.5",
+        "path": "/dns-query"
+      },
+      {
+        "tag": "dns_local",
+        "type": "local"
+      },
+      {
+        "tag": "dns_fakeip",
+        "type": "fakeip",
+        "inet4_range": "198.18.0.0/15"
+      }
     ],
-    "outbounds": [
-        {
-            "tag": "Proxy",
-            "type": "selector",
-            "outbounds": [],
-            "include": "🇭🇰|🇨🇳|🇯🇵|🇰🇷|HK|TW|JP|KR"
-        },
-        {
-            "tag": "Opt",
-            "type": "selector",
-            "outbounds": [],
-            "exclude": "thru|@"
-        },
-        {
-            "tag": "CDN",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
-        },
-        {
-            "tag": "HK",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|HK))"
-        },
-        {
-            "tag": "TW",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇨🇳|TW))"
-        },
-        {
-            "tag": "JP",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇯🇵|JP))"
-        },
-        {
-            "tag": "US",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇺🇸|US))"
-        },
-        {
-            "tag": "DE",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇩🇪|DE))"
-        },
-        {
-            "tag": "SG",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇸🇬|SG))"
-        },
-        {
-            "tag": "Telegram",
-            "type": "selector",
-            "outbounds": [],
-            "include": "🇭🇰|🇯🇵|HK|JP"
-        },
-        {
-            "tag": "GlobalMedia",
-            "type": "selector",
-            "outbounds": [],
-            "include": "🇭🇰|🇨🇳|🇸🇬|HK|TW|SG"
-        },
-        {
-            "tag": "YouTube",
-            "type": "selector",
-            "outbounds": [],
-            "include": "🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG"
-        },
-        {
-            "tag": "GlobalEmby",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))"
-        },
-        {
-            "tag": "RFCEmby",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))(?=.*(?:RFC|Jinx))"
-        },
-        {
-            "tag": "AIGC",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))"
-        },
-        {
-            "tag": "Google",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇺🇸|US))"
-        },
-        {
-            "tag": "Speedtest",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))"
-        },
-        {
-            "tag": "Download",
-            "type": "selector",
-            "outbounds": [],
-            "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
-        },
-        {
-            "tag": "PayPal",
-            "type": "selector",
-            "default": "US",
-            "outbounds": [
-                "US",
-                "HK",
-                "Direct"
-            ],
-            "_filter": "none"
-        },
-        {
-            "tag": "Crypto",
-            "type": "selector",
-            "default": "TW",
-            "outbounds": [
-                "TW",
-                "Proxy",
-                "Direct"
-            ],
-            "_filter": "none"
-        },
-        {
-            "tag": "AppleCDN",
-            "type": "selector",
-            "default": "Direct",
-            "outbounds": [
-                "Direct",
-                "Proxy"
-            ],
-            "_filter": "none"
-        },
-        {
-            "tag": "MSCDN",
-            "type": "selector",
-            "default": "Direct",
-            "outbounds": [
-                "Direct",
-                "Proxy"
-            ],
-            "_filter": "none"
-        },
-        {
-            "tag": "Final",
-            "type": "selector",
-            "default": "Proxy",
-            "outbounds": [
-                "Proxy",
-                "Direct"
-            ],
-            "_filter": "none"
-        },
-        {
-            "tag": "Direct",
-            "type": "direct"
-        }
-    ],
-    "route": {
-        "auto_detect_interface": true,
-        "default_domain_resolver": {
-            "server": "dns_direct",
-            "strategy": "ipv4_only"
-        },
-        "final": "Final",
-        "rules": [
-            {
-                "action": "sniff"
-            },
-            {
-                "protocol": "dns",
-                "action": "hijack-dns"
-            },
-            {
-                "rule_set": [
-                    "geosite-private"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "ip_is_private": true,
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "clash_mode": "Direct",
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "clash_mode": "Global",
-                "action": "route",
-                "outbound": "Proxy"
-            },
-            {
-                "domain": [
-                    "captive.apple.com",
-                    "seed-sequoia.siri.apple.com",
-                    "sequoia.apple.com",
-                    "www.baidu.com"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "domain_suffix": [
-                    "kurogame.com",
-                    "kurogames.com",
-                    "kurobbs.com",
-                    "aki-game.com",
-                    "aki-game2.com",
-                    "kurogames-global.com",
-                    "kurogame.xyz"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "rule_set": [
-                    "direct-extra"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "rule_set": [
-                    "speedtest-domainset"
-                ],
-                "action": "route",
-                "outbound": "Speedtest"
-            },
-            {
-                "rule_set": [
-                    "ai"
-                ],
-                "action": "route",
-                "outbound": "AIGC"
-            },
-            {
-                "rule_set": [
-                    "apple-cdn-domainset",
-                    "apple-cdn"
-                ],
-                "action": "route",
-                "outbound": "AppleCDN"
-            },
-            {
-                "rule_set": [
-                    "apple-cn"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "rule_set": [
-                    "microsoft-cdn"
-                ],
-                "action": "route",
-                "outbound": "MSCDN"
-            },
-            {
-                "rule_set": [
-                    "geosite-telegram",
-                    "telegram-ip"
-                ],
-                "action": "route",
-                "outbound": "Telegram"
-            },
-            {
-                "rule_set": [
-                    "geosite-youtube"
-                ],
-                "action": "route",
-                "outbound": "YouTube"
-            },
-            {
-                "rule_set": [
-                    "geosite-netflix"
-                ],
-                "action": "route",
-                "outbound": "GlobalMedia"
-            },
-            {
-                "rule_set": [
-                    "stream-jp"
-                ],
-                "action": "route",
-                "outbound": "JP"
-            },
-            {
-                "rule_set": [
-                    "stream-tw"
-                ],
-                "action": "route",
-                "outbound": "TW"
-            },
-            {
-                "rule_set": [
-                    "stream"
-                ],
-                "action": "route",
-                "outbound": "GlobalMedia"
-            },
-            {
-                "rule_set": [
-                    "geosite-paypal"
-                ],
-                "action": "route",
-                "outbound": "PayPal"
-            },
-            {
-                "rule_set": [
-                    "geosite-cryptocurrency"
-                ],
-                "action": "route",
-                "outbound": "Crypto"
-            },
-            {
-                "rule_set": [
-                    "geosite-google"
-                ],
-                "action": "route",
-                "outbound": "Google"
-            },
-            {
-                "rule_set": [
-                    "apple-services"
-                ],
-                "action": "route",
-                "outbound": "Proxy"
-            },
-            {
-                "rule_set": [
-                    "microsoft"
-                ],
-                "action": "route",
-                "outbound": "Proxy"
-            },
-            {
-                "rule_set": [
-                    "cdn-domainset",
-                    "cdn"
-                ],
-                "action": "route",
-                "outbound": "CDN"
-            },
-            {
-                "rule_set": [
-                    "download-domainset"
-                ],
-                "action": "route",
-                "outbound": "Download"
-            },
-            {
-                "rule_set": [
-                    "geosite-cn"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            },
-            {
-                "rule_set": [
-                    "geosite-geolocation-noncn"
-                ],
-                "action": "route",
-                "outbound": "Proxy"
-            },
-            {
-                "action": "resolve",
-                "server": "dns_direct",
-                "strategy": "ipv4_only"
-            },
-            {
-                "rule_set": [
-                    "geoip-cn"
-                ],
-                "action": "route",
-                "outbound": "Direct"
-            }
+    "rules": [
+      {
+        "domain_suffix": [
+          "cloudflare-ech.com"
         ],
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
         "rule_set": [
-            {
-                "tag": "ai",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/non_ip/ai.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "apple-cdn-domainset",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/apple-cdn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "apple-cdn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-cdn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "apple-cn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-cn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "apple-services",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-services.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "direct-extra",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/direct-extra.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "microsoft-cdn",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/non_ip/microsoft_cdn.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "microsoft",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/non_ip/microsoft.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "cdn-domainset",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/cdn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "cdn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/cdn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "stream",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/non_ip/stream.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "stream-jp",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/non_ip/stream_jp.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "stream-tw",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/non_ip/stream_tw.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "download-domainset",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/domainset/download.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-private",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "speedtest-domainset",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/domainset/speedtest.json",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-cn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-geolocation-noncn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-telegram",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-youtube",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-netflix",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-paypal",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-paypal.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-cryptocurrency",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-cryptocurrency.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geosite-google",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "geoip-cn",
-                "type": "remote",
-                "format": "binary",
-                "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-                "download_detour": "Proxy"
-            },
-            {
-                "tag": "telegram-ip",
-                "type": "remote",
-                "format": "source",
-                "url": "https://ruleset.skk.moe/sing-box/ip/telegram.json",
-                "download_detour": "Proxy"
-            }
-        ]
+          "geosite-cn"
+        ],
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
+        "query_type": [
+          "PTR"
+        ],
+        "domain_suffix": [
+          "in-addr.arpa",
+          "ip6.arpa"
+        ],
+        "action": "reject"
+      },
+      {
+        "query_type": [
+          "SOA"
+        ],
+        "domain": [
+          "local"
+        ],
+        "action": "reject"
+      },
+      {
+        "rule_set": [
+          "geosite-private"
+        ],
+        "action": "route",
+        "server": "dns_local"
+      },
+      {
+        "domain": [
+          "dns.msftncsi.com",
+          "stun.l.google.com",
+          "stun.syncthing.net",
+          "lancache.steamcontent.com"
+        ],
+        "domain_suffix": [
+          "msftconnecttest.com",
+          "msftncsi.com",
+          "srv.nintendo.net",
+          "stun.playstation.net",
+          "turn.twilio.com",
+          "stun.twilio.com",
+          "xboxlive.com",
+          "mihoyo.com",
+          "yuanshen.com",
+          "bh3.com",
+          "bhsr.com",
+          "juequling.com",
+          "miyoushe.com",
+          "mhyurl.cn",
+          "kurogame.com",
+          "kurogames.com",
+          "kurobbs.com",
+          "aki-game.com",
+          "aki-game2.com",
+          "kurogames-global.com",
+          "kurogame.xyz",
+          "wegame.com.cn",
+          "game.163.com",
+          "miwifi.com",
+          "market.xiaomi.com"
+        ],
+        "domain_regex": [
+          "^stun\\."
+        ],
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
+        "domain": [
+          "captive.apple.com",
+          "seed-sequoia.siri.apple.com",
+          "sequoia.apple.com",
+          "www.baidu.com"
+        ],
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
+        "clash_mode": "Global",
+        "action": "route",
+        "server": "dns_fakeip"
+      },
+      {
+        "query_type": [
+          "HTTPS",
+          "SVCB"
+        ],
+        "action": "reject"
+      },
+      {
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
+        "action": "route",
+        "server": "dns_fakeip"
+      }
+    ],
+    "final": "dns_proxy",
+    "strategy": "ipv4_only"
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "cache.db",
+      "store_fakeip": true
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "external_ui": "ui",
+      "external_ui_download_detour": "Proxy",
+      "external_ui_download_url": "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
     }
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30"
+      ],
+      "mtu": 1400,
+      "auto_route": true,
+      "strict_route": true,
+      "endpoint_independent_nat": true,
+      "stack": "mixed",
+      "platform": {
+        "http_proxy": {
+          "enabled": true,
+          "server": "127.0.0.1",
+          "server_port": 2334
+        }
+      }
+    },
+    {
+      "type": "socks",
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2333
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2334
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "Proxy",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇨🇳|🇯🇵|🇰🇷|HK|TW|JP|KR"
+    },
+    {
+      "tag": "Opt",
+      "type": "selector",
+      "outbounds": [],
+      "exclude": "thru|@"
+    },
+    {
+      "tag": "CDN",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
+    },
+    {
+      "tag": "HK",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇭🇰|HK))"
+    },
+    {
+      "tag": "TW",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇨🇳|TW))"
+    },
+    {
+      "tag": "JP",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇯🇵|JP))"
+    },
+    {
+      "tag": "US",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇺🇸|US))"
+    },
+    {
+      "tag": "DE",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇩🇪|DE))"
+    },
+    {
+      "tag": "SG",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇸🇬|SG))"
+    },
+    {
+      "tag": "Telegram",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇯🇵|HK|JP"
+    },
+    {
+      "tag": "GlobalMedia",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇨🇳|🇸🇬|HK|TW|SG"
+    },
+    {
+      "tag": "YouTube",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG"
+    },
+    {
+      "tag": "GlobalEmby",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))"
+    },
+    {
+      "tag": "RFCEmby",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))(?=.*(?:RFC|Jinx))"
+    },
+    {
+      "tag": "AIGC",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))"
+    },
+    {
+      "tag": "Google",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇺🇸|US))"
+    },
+    {
+      "tag": "Speedtest",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))"
+    },
+    {
+      "tag": "Download",
+      "type": "selector",
+      "outbounds": [],
+      "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
+    },
+    {
+      "tag": "PayPal",
+      "type": "selector",
+      "default": "US",
+      "outbounds": [
+        "US",
+        "HK",
+        "Direct"
+      ],
+      "_filter": "none"
+    },
+    {
+      "tag": "Crypto",
+      "type": "selector",
+      "default": "TW",
+      "outbounds": [
+        "TW",
+        "Proxy",
+        "Direct"
+      ],
+      "_filter": "none"
+    },
+    {
+      "tag": "AppleCDN",
+      "type": "selector",
+      "default": "Direct",
+      "outbounds": [
+        "Direct",
+        "Proxy"
+      ],
+      "_filter": "none"
+    },
+    {
+      "tag": "MSCDN",
+      "type": "selector",
+      "default": "Direct",
+      "outbounds": [
+        "Direct",
+        "Proxy"
+      ],
+      "_filter": "none"
+    },
+    {
+      "tag": "Final",
+      "type": "selector",
+      "default": "Proxy",
+      "outbounds": [
+        "Proxy",
+        "Direct"
+      ],
+      "_filter": "none"
+    },
+    {
+      "tag": "Direct",
+      "type": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "dns_direct",
+      "strategy": "ipv4_only"
+    },
+    "final": "Final",
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "rule_set": [
+          "geosite-private"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "ip_is_private": true,
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "clash_mode": "Global",
+        "action": "route",
+        "outbound": "Proxy"
+      },
+      {
+        "domain": [
+          "captive.apple.com",
+          "seed-sequoia.siri.apple.com",
+          "sequoia.apple.com",
+          "www.baidu.com"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "domain_suffix": [
+          "kurogame.com",
+          "kurogames.com",
+          "kurobbs.com",
+          "aki-game.com",
+          "aki-game2.com",
+          "kurogames-global.com",
+          "kurogame.xyz"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "rule_set": [
+          "direct-extra"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "rule_set": [
+          "speedtest-domainset"
+        ],
+        "action": "route",
+        "outbound": "Speedtest"
+      },
+      {
+        "rule_set": [
+          "ai"
+        ],
+        "action": "route",
+        "outbound": "AIGC"
+      },
+      {
+        "rule_set": [
+          "apple-cdn-domainset",
+          "apple-cdn"
+        ],
+        "action": "route",
+        "outbound": "AppleCDN"
+      },
+      {
+        "rule_set": [
+          "apple-cn"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "rule_set": [
+          "microsoft-cdn"
+        ],
+        "action": "route",
+        "outbound": "MSCDN"
+      },
+      {
+        "rule_set": [
+          "geosite-telegram",
+          "telegram-ip"
+        ],
+        "action": "route",
+        "outbound": "Telegram"
+      },
+      {
+        "rule_set": [
+          "geosite-youtube"
+        ],
+        "action": "route",
+        "outbound": "YouTube"
+      },
+      {
+        "rule_set": [
+          "geosite-netflix"
+        ],
+        "action": "route",
+        "outbound": "GlobalMedia"
+      },
+      {
+        "rule_set": [
+          "stream-jp"
+        ],
+        "action": "route",
+        "outbound": "JP"
+      },
+      {
+        "rule_set": [
+          "stream-tw"
+        ],
+        "action": "route",
+        "outbound": "TW"
+      },
+      {
+        "rule_set": [
+          "stream"
+        ],
+        "action": "route",
+        "outbound": "GlobalMedia"
+      },
+      {
+        "rule_set": [
+          "geosite-paypal"
+        ],
+        "action": "route",
+        "outbound": "PayPal"
+      },
+      {
+        "rule_set": [
+          "geosite-cryptocurrency"
+        ],
+        "action": "route",
+        "outbound": "Crypto"
+      },
+      {
+        "rule_set": [
+          "geosite-google"
+        ],
+        "action": "route",
+        "outbound": "Google"
+      },
+      {
+        "rule_set": [
+          "apple-services"
+        ],
+        "action": "route",
+        "outbound": "Proxy"
+      },
+      {
+        "rule_set": [
+          "microsoft"
+        ],
+        "action": "route",
+        "outbound": "Proxy"
+      },
+      {
+        "rule_set": [
+          "cdn-domainset",
+          "cdn"
+        ],
+        "action": "route",
+        "outbound": "CDN"
+      },
+      {
+        "rule_set": [
+          "download-domainset"
+        ],
+        "action": "route",
+        "outbound": "Download"
+      },
+      {
+        "rule_set": [
+          "geosite-cn"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "rule_set": [
+          "geosite-geolocation-noncn"
+        ],
+        "action": "route",
+        "outbound": "Proxy"
+      },
+      {
+        "action": "resolve",
+        "server": "dns_direct",
+        "strategy": "ipv4_only"
+      },
+      {
+        "rule_set": [
+          "geoip-cn"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      }
+    ],
+    "rule_set": [
+      {
+        "tag": "ai",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/non_ip/ai.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "apple-cdn-domainset",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/apple-cdn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "apple-cdn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-cdn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "apple-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-cn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "apple-services",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-services.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "direct-extra",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/direct-extra.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "microsoft-cdn",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/non_ip/microsoft_cdn.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "microsoft",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/non_ip/microsoft.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "cdn-domainset",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/cdn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "cdn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/cdn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "stream",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/non_ip/stream.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "stream-jp",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/non_ip/stream_jp.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "stream-tw",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/non_ip/stream_tw.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "download-domainset",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/domainset/download.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-private",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "speedtest-domainset",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/domainset/speedtest.json",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-geolocation-noncn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-telegram",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-youtube",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-netflix",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-paypal",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-paypal.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-cryptocurrency",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-cryptocurrency.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geosite-google",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "geoip-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "telegram-ip",
+        "type": "remote",
+        "format": "source",
+        "url": "https://ruleset.skk.moe/sing-box/ip/telegram.json",
+        "download_detour": "Proxy"
+      }
+    ]
+  }
 }
