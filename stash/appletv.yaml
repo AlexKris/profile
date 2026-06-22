@@ -263,9 +263,6 @@ rules:
   # > 静态 CDN 域名
   - RULE-SET,cdn_domain,CDN
   - RULE-SET,cdn_nonip,CDN
-  # > Download
-  - RULE-SET,download_domain,Download
-  - RULE-SET,download_nonip,Download
   # > YouTube
   - RULE-SET,youtube_rule,YouTube
   # > 流媒体（JP）
@@ -277,6 +274,9 @@ rules:
   # > Apple CDN
   - RULE-SET,apple_cdn_domain,AppleCDN
   - RULE-SET,apple_cdn_nonip,AppleCDN
+  # > Download
+  - RULE-SET,download_domain,Download
+  - RULE-SET,download_nonip,Download
   # > Apple CN
   - RULE-SET,apple_cn,DIRECT
   # > Apple
