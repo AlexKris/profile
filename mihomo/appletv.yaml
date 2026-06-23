@@ -261,7 +261,6 @@ proxy-groups:
 # ==================== 规则路由 ====================
 rules:
   # ===== 域名规则 start =====
-  # > Other
   # > 国内游戏直连
   - DOMAIN-SUFFIX,kurogame.com,DIRECT
   - DOMAIN-SUFFIX,kurogames.com,DIRECT

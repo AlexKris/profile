@@ -317,7 +317,6 @@ rules:
   - PROCESS-NAME,Nutstore.exe,DIRECT
   - PROCESS-NAME,iperf3-darwin,DIRECT
   # ===== 域名规则 start =====
-  # > Other
   # > 国内游戏直连
   - DOMAIN-SUFFIX,kurogame.com,DIRECT
   - DOMAIN-SUFFIX,kurogames.com,DIRECT
