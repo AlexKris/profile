@@ -21,8 +21,6 @@ FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
 FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
-FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
-FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))'
@@ -84,24 +82,9 @@ dns:
 # ==================== 代理策略组 ====================
 proxy-groups:
   - name: Proxy
-    type: select
-    proxies: [Opt, Core, CDN]
+    <<: *BaseSelect
+    proxies: [DIRECT]
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Proxy.png
-
-  - name: Opt
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Available.png
-    filter: *FilterOpt
-
-  - name: Core
-    type: select
-    proxies: [HK, TW, JP]
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Static.png
-
-  - name: CDN
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Bypass.png
-    filter: *FilterCDN
 
   # ===== 地区策略 =====
   - name: HK
@@ -171,6 +154,7 @@ rules:
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
   # > 常见海外域名
+  - RULE-SET,proxy_domain,Proxy
   - RULE-SET,global,Proxy
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
@@ -200,6 +184,9 @@ rule-providers:
   direct:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct.mrs'
+  proxy_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/proxy.mrs'
   global:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'

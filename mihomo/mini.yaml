@@ -21,8 +21,6 @@ FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
 FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
-FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
-FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))'
@@ -112,21 +110,8 @@ dns:
 proxy-groups:
   - name: Proxy
     <<: *BaseSelect
-    proxies: [Opt, Core, CDN]
-
-  - name: Opt
-    <<: *BaseSelect
-    use: [Sub1]
-    filter: *FilterOpt
-
-  - name: Core
-    <<: *BaseSelect
-    proxies: [HK, TW, JP]
-
-  - name: CDN
-    <<: *BaseSelect
+    proxies: [DIRECT]
     include-all-providers: true
-    filter: *FilterCDN
 
   # ===== 地区策略 =====
   - name: HK
@@ -195,6 +180,7 @@ rules:
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
   # > 常见海外域名
+  - RULE-SET,proxy_domain,Proxy
   - RULE-SET,global,Proxy
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
@@ -224,6 +210,9 @@ rule-providers:
   direct:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct.mrs'
+  proxy_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/proxy.mrs'
   global:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'

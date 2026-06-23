@@ -147,19 +147,7 @@
       "tag": "Proxy",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇨🇳|🇯🇵|🇰🇷|HK|TW|JP|KR"
-    },
-    {
-      "tag": "Opt",
-      "type": "selector",
-      "outbounds": [],
-      "exclude": "thru|@"
-    },
-    {
-      "tag": "CDN",
-      "type": "selector",
-      "outbounds": [],
-      "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
+      "include": ".*"
     },
     {
       "tag": "HK",
@@ -268,16 +256,6 @@
       "_filter": "none"
     },
     {
-      "tag": "AppleCDN",
-      "type": "selector",
-      "default": "Direct",
-      "outbounds": [
-        "Direct",
-        "Proxy"
-      ],
-      "_filter": "none"
-    },
-    {
       "tag": "MSCDN",
       "type": "selector",
       "default": "Direct",
@@ -378,14 +356,6 @@
       },
       {
         "rule_set": [
-          "cdn-domainset",
-          "cdn"
-        ],
-        "action": "route",
-        "outbound": "CDN"
-      },
-      {
-        "rule_set": [
           "ai"
         ],
         "action": "route",
@@ -393,15 +363,8 @@
       },
       {
         "rule_set": [
-          "apple-cdn-domainset",
-          "apple-cdn"
-        ],
-        "action": "route",
-        "outbound": "AppleCDN"
-      },
-      {
-        "rule_set": [
-          "apple-cn"
+          "apple-domainset",
+          "apple"
         ],
         "action": "route",
         "outbound": "Direct"
@@ -465,13 +428,6 @@
       },
       {
         "rule_set": [
-          "apple-services"
-        ],
-        "action": "route",
-        "outbound": "Proxy"
-      },
-      {
-        "rule_set": [
           "microsoft"
         ],
         "action": "route",
@@ -490,6 +446,14 @@
         ],
         "action": "route",
         "outbound": "Direct"
+      },
+      {
+        "rule_set": [
+          "proxy-domainset",
+          "proxy"
+        ],
+        "action": "route",
+        "outbound": "Proxy"
       },
       {
         "rule_set": [
@@ -520,31 +484,17 @@
         "download_detour": "Proxy"
       },
       {
-        "tag": "apple-cdn-domainset",
+        "tag": "apple-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/apple-cdn.srs",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/apple.srs",
         "download_detour": "Proxy"
       },
       {
-        "tag": "apple-cdn",
+        "tag": "apple",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-cdn.srs",
-        "download_detour": "Proxy"
-      },
-      {
-        "tag": "apple-cn",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-cn.srs",
-        "download_detour": "Proxy"
-      },
-      {
-        "tag": "apple-services",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple-services.srs",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple.srs",
         "download_detour": "Proxy"
       },
       {
@@ -566,20 +516,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/microsoft.srs",
-        "download_detour": "Proxy"
-      },
-      {
-        "tag": "cdn-domainset",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/cdn.srs",
-        "download_detour": "Proxy"
-      },
-      {
-        "tag": "cdn",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/cdn.srs",
         "download_detour": "Proxy"
       },
       {
@@ -629,6 +565,20 @@
         "type": "remote",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "proxy-domainset",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/proxy.srs",
+        "download_detour": "Proxy"
+      },
+      {
+        "tag": "proxy",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/proxy.srs",
         "download_detour": "Proxy"
       },
       {

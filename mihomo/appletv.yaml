@@ -21,9 +21,7 @@ FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
 FilterJP_All: &FilterJP_All '(?=.*(?:🇯🇵|JP|Japan))'
 
-FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
-
-FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
+FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
 FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))'
@@ -171,22 +169,8 @@ proxy-groups:
   # ===== 顶层策略 =====
   - name: Proxy
     <<: *BaseSelect
-    proxies: [Opt, Core, CDN]
-
-  # ===== 二级策略 =====
-  - name: Opt
-    <<: *BaseSelect
-    use: [Sub1]
-    filter: *FilterOpt
-
-  - name: Core
-    <<: *BaseSelect
-    proxies: [HK, TW, JP]
-
-  - name: CDN
-    <<: *BaseSelect
+    proxies: [DIRECT]
     include-all-providers: true
-    filter: *FilterCDN
 
   # ===== 地区策略=====
   - name: HK
@@ -243,15 +227,8 @@ proxy-groups:
   - name: Download
     <<: *BaseSelect
     include-all-providers: true
-    filter: *FilterCDN
+    filter: *FilterHKJPWide
 
-  - name: AppleCDN
-    <<: *BaseSelect
-    proxies: [DIRECT, Proxy]
-
-  - name: AppleSvc
-    <<: *BaseSelect
-    proxies: [DIRECT, Proxy]
 
   # ===== 顶层策略 =====
   - name: Final
@@ -271,25 +248,18 @@ rules:
   - DOMAIN-SUFFIX,kurogame.xyz,DIRECT
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
-  # > 静态 CDN 域名
-  - RULE-SET,cdn_domain,CDN
-  - RULE-SET,cdn_nonip,CDN
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
   # > 流媒体（TW）
   - RULE-SET,stream_tw,TW
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
-  # > Apple CDN
-  - RULE-SET,apple_cdn_domain,AppleCDN
-  - RULE-SET,apple_cdn_nonip,AppleCDN
+  # > Apple
+  - RULE-SET,apple_domain,DIRECT
+  - RULE-SET,apple,DIRECT
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
-  # > Apple CN
-  - RULE-SET,apple_cn,DIRECT
-  # > Apple
-  - RULE-SET,apple_services,AppleSvc
   # > Google 服务
   - RULE-SET,google,Google
   # > 国内常见域名
@@ -299,6 +269,7 @@ rules:
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
   # > 常见海外域名
+  - RULE-SET,proxy_domain,Proxy
   - RULE-SET,global,Proxy
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
@@ -319,12 +290,6 @@ rules:
 # ==================== 规则集提供者 ====================
 rule-providers:
   # ===== 域名规则集 =====
-  cdn_domain:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/cdn.mrs'
-  cdn_nonip:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/cdn.mrs'
   download_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/download.mrs'
@@ -340,24 +305,21 @@ rule-providers:
   stream_tw:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream-tw.mrs'
-  apple_cdn_domain:
+  apple_domain:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/apple-cdn.mrs'
-  apple_cdn_nonip:
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/apple.mrs'
+  apple:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple-cdn.mrs'
-  apple_cn:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple-cn.mrs'
-  apple_services:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple-services.mrs'
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple.mrs'
   direct_extra:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct-extra.mrs'
   direct:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct.mrs'
+  proxy_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/proxy.mrs'
   global:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'
