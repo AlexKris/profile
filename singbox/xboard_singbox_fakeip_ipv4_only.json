@@ -263,12 +263,6 @@
       "include": "🇭🇰|🇨🇳|🇸🇬|HK|TW|SG"
     },
     {
-      "tag": "YouTube",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG"
-    },
-    {
       "tag": "GlobalEmby",
       "type": "selector",
       "outbounds": [],
@@ -482,13 +476,6 @@
       },
       {
         "rule_set": [
-          "geosite-youtube"
-        ],
-        "action": "route",
-        "outbound": "YouTube"
-      },
-      {
-        "rule_set": [
           "geosite-netflix"
         ],
         "action": "route",
@@ -588,8 +575,8 @@
       {
         "tag": "ai",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/non_ip/ai.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/ai.srs",
         "download_detour": "Proxy"
       },
       {
@@ -630,15 +617,15 @@
       {
         "tag": "microsoft-cdn",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/non_ip/microsoft_cdn.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/microsoft-cdn.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "microsoft",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/non_ip/microsoft.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/microsoft.srs",
         "download_detour": "Proxy"
       },
       {
@@ -658,29 +645,29 @@
       {
         "tag": "stream",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/non_ip/stream.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/stream.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "stream-jp",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/non_ip/stream_jp.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/stream-jp.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "stream-tw",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/non_ip/stream_tw.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/stream-tw.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "download-domainset",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/domainset/download.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/download.srs",
         "download_detour": "Proxy"
       },
       {
@@ -693,8 +680,8 @@
       {
         "tag": "speedtest-domainset",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/domainset/speedtest.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/speedtest.srs",
         "download_detour": "Proxy"
       },
       {
@@ -716,13 +703,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
-        "download_detour": "Proxy"
-      },
-      {
-        "tag": "geosite-youtube",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
         "download_detour": "Proxy"
       },
       {
@@ -763,8 +743,8 @@
       {
         "tag": "telegram-ip",
         "type": "remote",
-        "format": "source",
-        "url": "https://ruleset.skk.moe/sing-box/ip/telegram.json",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/ip/telegram-ip.srs",
         "download_detour": "Proxy"
       }
     ]

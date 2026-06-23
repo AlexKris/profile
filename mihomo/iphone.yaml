@@ -26,7 +26,6 @@ FilterOpt: &FilterOpt '^(?!.*(?:thru|@))'
 FilterCDN: &FilterCDN '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
-FilterYouTube: &FilterYouTube '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
 FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))'
 FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))(?=.*(?:RFC|Jinx))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))'
@@ -231,11 +230,6 @@ proxy-groups:
     include-all-providers: true
     filter: *FilterGlobalMedia
 
-  - name: YouTube
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterYouTube
-
   - name: GlobalEmby
     <<: *BaseSelect
     include-all-providers: true
@@ -322,8 +316,6 @@ rules:
   - RULE-SET,paypal_rule,PayPal
   # > Crypto
   - RULE-SET,crypto_rule,Crypto
-  # > YouTube
-  - RULE-SET,youtube_rule,YouTube
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
   # > 流媒体（TW）
@@ -382,8 +374,8 @@ rules:
 rule-providers:
   # ===== 域名规则集 =====
   speedtest_domain:
-    <<: *BehaviorDN
-    url: 'https://ruleset.skk.moe/Clash/domainset/speedtest.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/speedtest.mrs'
   cdn_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/cdn.mrs'
@@ -394,20 +386,20 @@ rule-providers:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
   ai:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/ai.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/ai.mrs'
   stream:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/stream.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream.mrs'
   stream_jp:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/stream_jp.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream-jp.mrs'
   stream_tw:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream-tw.mrs'
   telegram:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/telegram.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/telegram.mrs'
   apple_cdn_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/apple-cdn.mrs'
@@ -424,40 +416,40 @@ rule-providers:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct-extra.mrs'
   microsoft_cdn:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/microsoft_cdn.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/microsoft-cdn.mrs'
   microsoft:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/microsoft.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/microsoft.mrs'
   download_domain:
-    <<: *BehaviorDN
-    url: 'https://ruleset.skk.moe/Clash/domainset/download.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/download.mrs'
   download_nonip:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/download.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/download.mrs'
   direct:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/direct.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct.mrs'
   global:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/global.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'
   domestic:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/domestic.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/domestic.mrs'
   lan_nonip:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/lan.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/lan.mrs'
 
   # ===== IP 规则集 =====
   telegram_ip:
-    <<: *BehaviorIP
-    url: 'https://ruleset.skk.moe/Clash/ip/telegram.txt'
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/telegram-ip.mrs'
   china_ip:
-    <<: *BehaviorIPCIDRText
-    url: 'https://ruleset.skk.moe/Clash/ip/china_ip.txt'
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/china-ip.mrs'
   lan_ip:
-    <<: *BehaviorIP
-    url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/lan-ip.mrs'
 
   # ===== 补充规则集 =====
   cn_ip:
@@ -468,9 +460,6 @@ rule-providers:
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs'
 
   # ===== 域名规则集（MRS） =====
-  youtube_rule:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs'
   paypal_rule:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/paypal.mrs'

@@ -187,7 +187,6 @@ rules:
   - RULE-SET,telegram,Telegram
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
-  - RULE-SET,youtube_rule,GlobalMedia
   - RULE-SET,stream,GlobalMedia
   # > 国内常见域名
   - RULE-SET,domestic,DIRECT
@@ -214,38 +213,35 @@ rule-providers:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
   ai:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/ai.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/ai.mrs'
   telegram:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/telegram.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/telegram.mrs'
   stream:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/stream.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream.mrs'
   direct:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/direct.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct.mrs'
   global:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/global.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'
   domestic:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/domestic.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/domestic.mrs'
   lan_nonip:
-    <<: *BehaviorCL
-    url: 'https://ruleset.skk.moe/Clash/non_ip/lan.txt'
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/lan.mrs'
   telegram_ip:
-    <<: *BehaviorIP
-    url: 'https://ruleset.skk.moe/Clash/ip/telegram.txt'
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/telegram-ip.mrs'
   lan_ip:
-    <<: *BehaviorIP
-    url: 'https://ruleset.skk.moe/Clash/ip/lan.txt'
+    <<: *BehaviorMrsIP
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/lan-ip.mrs'
   direct_extra:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct-extra.mrs'
-  youtube_rule:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs'
   cn_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
