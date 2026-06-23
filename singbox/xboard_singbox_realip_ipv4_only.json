@@ -423,13 +423,6 @@
       },
       {
         "rule_set": [
-          "geosite-netflix"
-        ],
-        "action": "route",
-        "outbound": "GlobalMedia"
-      },
-      {
-        "rule_set": [
           "stream-jp"
         ],
         "action": "route",
@@ -650,13 +643,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
-        "download_detour": "Proxy"
-      },
-      {
-        "tag": "geosite-netflix",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
         "download_detour": "Proxy"
       },
       {
