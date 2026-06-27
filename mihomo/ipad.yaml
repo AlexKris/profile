@@ -169,7 +169,6 @@ proxy-groups:
   # ===== 顶层策略 =====
   - name: Proxy
     <<: *BaseSelect
-    proxies: [DIRECT]
     include-all-providers: true
 
   # ===== 地区策略=====
@@ -243,7 +242,6 @@ proxy-groups:
     <<: *BaseSelect
     include-all-providers: true
     filter: *FilterHKJPWide
-
 
   - name: MSCDN
     <<: *BaseSelect

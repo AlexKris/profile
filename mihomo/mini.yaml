@@ -110,7 +110,6 @@ dns:
 proxy-groups:
   - name: Proxy
     <<: *BaseSelect
-    proxies: [DIRECT]
     include-all-providers: true
 
   # ===== 地区策略 =====
