@@ -231,6 +231,7 @@ rules:
   - RULE-SET,stream_tw,TW
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
+  - RULE-SET,stream_keyword,GlobalMedia
   # > Apple
   - RULE-SET,apple_domain,DIRECT
   - RULE-SET,apple,DIRECT
@@ -243,11 +244,13 @@ rules:
   - RULE-SET,domestic,DIRECT
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
+  - RULE-SET,direct_keyword,DIRECT
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
   # > 常见海外域名
   - RULE-SET,proxy_domain,Proxy
   - RULE-SET,global,Proxy
+  - RULE-SET,proxy_keyword,Proxy
   # > 内网域名
   - RULE-SET,lan_nonip,DIRECT
   # > 非中国大陆域名兜底
@@ -300,6 +303,15 @@ rule-providers:
   global:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'
+  proxy_keyword:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/classical/proxy.list'
+  stream_keyword:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/classical/stream.list'
+  direct_keyword:
+    <<: *BehaviorCL
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/classical/direct.list'
   domestic:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/domestic.mrs'
