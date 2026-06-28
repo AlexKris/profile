@@ -243,6 +243,10 @@ proxy-groups:
     include-all-providers: true
     filter: *FilterHKJPWide
 
+  - name: GameDownload
+    <<: *BaseSelect
+    proxies: [DIRECT, Download, Proxy]
+
   - name: PayPal
     <<: *BaseSelect
     proxies: [US, HK, DIRECT]
@@ -324,6 +328,8 @@ rules:
   - RULE-SET,apple,DIRECT
   # > Microsoft CDN
   - RULE-SET,microsoft_cdn,MSCDN
+  # > 游戏下载（Steam/Epic/Blizzard…）默认直连，可切 Download/Proxy
+  - RULE-SET,game_download,GameDownload
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
@@ -405,6 +411,9 @@ rule-providers:
   download_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/download.mrs'
+  game_download:
+    <<: *BehaviorMrsDN
+    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/game-download.mrs'
   download_nonip:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/download.mrs'
