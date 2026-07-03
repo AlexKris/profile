@@ -10,7 +10,7 @@ BaseProvider: &BaseProvider
     timeout: 5000
     lazy: true
 
-BaseSelect: &BaseSelect {type: select, use: [Sub1]}
+BaseSelect: &BaseSelect {type: select, use: [sub]}
 
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
 FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
@@ -44,10 +44,10 @@ BehaviorMrsIP: &BehaviorMrsIP {type: http, behavior: ipcidr, format: mrs, interv
 
 # ==================== 代理提供者 ====================
 proxy-providers:
-  Sub1:
+  sub:
     <<: *BaseProvider
     url: '订阅地址'
-    path: ./proxy_providers/sub1.yaml
+    path: ./proxy_providers/sub.yaml
 
 # ==================== 核心配置 ====================
 mode: rule
@@ -203,7 +203,7 @@ proxy-groups:
 
 
   # ===== 顶层策略 =====
-  - name: Sub1
+  - name: sub
     <<: *BaseSelect
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Available_1.png
 
