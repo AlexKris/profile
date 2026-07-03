@@ -35,10 +35,10 @@ BehaviorMrsIP: &BehaviorMrsIP {type: http, behavior: ipcidr, format: mrs, interv
 
 # ==================== 代理提供者 ====================
 proxy-providers:
-  Sub1:
+  sub:
     <<: *BaseProvider
     url: '订阅地址'
-    path: ./proxy_providers/sub1.yaml
+    path: ./proxy_providers/sub.yaml
 
 # ==================== 核心配置 ====================
 mode: rule
