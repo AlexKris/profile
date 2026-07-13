@@ -480,70 +480,70 @@
         "tag": "ai",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/ai.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/ai.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "apple-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/apple.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/apple.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "apple",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/apple.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/apple.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "direct-extra",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/direct-extra.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/direct-extra.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "microsoft-cdn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/microsoft-cdn.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft-cdn.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "microsoft",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/microsoft.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "stream",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/stream.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "stream-jp",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/stream-jp.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-jp.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "stream-tw",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/stream-tw.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-tw.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "download-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/download.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/download.srs",
         "download_detour": "Proxy"
       },
       {
@@ -557,7 +557,7 @@
         "tag": "speedtest-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/speedtest.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/speedtest.srs",
         "download_detour": "Proxy"
       },
       {
@@ -571,14 +571,14 @@
         "tag": "proxy-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/domainset/proxy.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/proxy.srs",
         "download_detour": "Proxy"
       },
       {
         "tag": "proxy",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/non-ip/proxy.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/proxy.srs",
         "download_detour": "Proxy"
       },
       {
@@ -627,7 +627,7 @@
         "tag": "telegram-ip",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/AlexKris/rules/main/sing-box/ip/telegram-ip.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/ip/telegram-ip.srs",
         "download_detour": "Proxy"
       }
     ]

@@ -357,81 +357,81 @@ rule-providers:
   # ===== 域名规则集 =====
   speedtest_domain:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/speedtest.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/speedtest.mrs'
   openai:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
   ai:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/ai.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/ai.mrs'
   stream:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream.mrs'
   stream_jp:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream-jp.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-jp.mrs'
   stream_tw:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/stream-tw.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-tw.mrs'
   telegram:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/telegram.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/telegram.mrs'
   apple_domain:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/apple.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/apple.mrs'
   apple:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/apple.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple.mrs'
   direct_extra:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct-extra.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct-extra.mrs'
   microsoft_cdn:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/microsoft-cdn.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft-cdn.mrs'
   microsoft:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/microsoft.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft.mrs'
   download_domain:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/download.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/download.mrs'
   download_nonip:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/download.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/download.mrs'
   direct:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/direct.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct.mrs'
   proxy_domain:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/domainset/proxy.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/proxy.mrs'
   global:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/proxy.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/proxy.mrs'
   proxy_keyword:
     <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/classical/proxy.list'
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/proxy.list'
   stream_keyword:
     <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/classical/stream.list'
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/stream.list'
   direct_keyword:
     <<: *BehaviorCL
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/classical/direct.list'
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/direct.list'
   domestic:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/domestic.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/domestic.mrs'
   lan_nonip:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/non-ip/lan.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/lan.mrs'
 
   # ===== IP 规则集 =====
   telegram_ip:
     <<: *BehaviorMrsIP
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/telegram-ip.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/ip/telegram-ip.mrs'
   china_ip:
     <<: *BehaviorMrsIP
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/china-ip.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/ip/china-ip.mrs'
   lan_ip:
     <<: *BehaviorMrsIP
-    url: 'https://raw.githubusercontent.com/AlexKris/rules/main/mihomo/ip/lan-ip.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/ip/lan-ip.mrs'
 
   # ===== MRS 规则集（Stash 3.1.1+ 支持 domain / ipcidr） =====
   cn_ip:
