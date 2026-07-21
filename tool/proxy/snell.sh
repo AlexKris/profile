@@ -207,6 +207,130 @@ EOF
 }
 
 # 配置 Snell 服务
+is_snell_v6_or_newer() {
+    local version="${SNELL_VERSION#v}"
+    local major_version="${version%%.*}"
+
+    [ "$major_version" -ge 6 ]
+}
+
+generate_random_psk() {
+    if [ ! -r /dev/urandom ] || ! command -v od >/dev/null 2>&1; then
+        log_error "无法读取系统随机源或缺少od命令，不能自动生成PSK"
+        return 1
+    fi
+
+    local generated_psk
+    generated_psk=$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')
+    if ! [[ "$generated_psk" =~ ^[0-9a-f]{64}$ ]]; then
+        log_error "自动生成PSK失败"
+        return 1
+    fi
+
+    printf '%s' "$generated_psk"
+}
+
+detect_snell_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64)
+            printf 'amd64'
+            ;;
+        aarch64|arm64)
+            printf 'aarch64'
+            ;;
+        *)
+            log_error "无法识别当前系统架构，请使用--arch指定amd64或aarch64"
+            return 1
+            ;;
+    esac
+}
+
+prepare_install_psk() {
+    case "$SNELL_PSK_MODE" in
+        auto)
+            if [ -n "$SNELL_PSK" ]; then
+                log_error "--psk-mode auto不能同时使用--psk"
+                return 1
+            fi
+            SNELL_PSK=$(generate_random_psk) || return 1
+            log_info "已为此服务器自动生成独立PSK"
+            ;;
+        manual)
+            if [ -z "$SNELL_PSK" ]; then
+                log_error "--psk-mode manual必须同时提供--psk"
+                return 1
+            fi
+            ;;
+        *)
+            log_error "PSK模式必须是auto或manual"
+            return 1
+            ;;
+    esac
+}
+
+parse_install_args() {
+    SNELL_VERSION=""
+    SNELL_ARCH=""
+    SNELL_PORT=""
+    SNELL_PSK_MODE=""
+    SNELL_PSK=""
+    SNELL_DNS_IP_PREFERENCE="ipv4-only"
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --version|--arch|--port|--psk-mode|--psk|--dns-ip-preference)
+                if [ "$#" -lt 2 ]; then
+                    log_error "参数$1缺少值"
+                    return 1
+                fi
+                case "$1" in
+                    --version) SNELL_VERSION="$2" ;;
+                    --arch) SNELL_ARCH="$2" ;;
+                    --port) SNELL_PORT="$2" ;;
+                    --psk-mode) SNELL_PSK_MODE="$2" ;;
+                    --psk) SNELL_PSK="$2" ;;
+                    --dns-ip-preference) SNELL_DNS_IP_PREFERENCE="$2" ;;
+                esac
+                shift 2
+                ;;
+            *)
+                log_error "未知安装参数: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    if [ -z "$SNELL_VERSION" ] || [ -z "$SNELL_PORT" ] || [ -z "$SNELL_PSK_MODE" ]; then
+        log_error "命名参数模式必须提供--version、--port和--psk-mode"
+        return 1
+    fi
+
+    if [ -z "$SNELL_ARCH" ]; then
+        SNELL_ARCH=$(detect_snell_arch) || return 1
+    fi
+
+    prepare_install_psk
+}
+
+generate_snell_config() {
+    if is_snell_v6_or_newer; then
+        cat <<EOF
+[snell-server]
+listen = 0.0.0.0:${SNELL_PORT}
+psk = ${SNELL_PSK}
+mode = default
+dns-ip-preference = ${SNELL_DNS_IP_PREFERENCE}
+EOF
+    else
+        cat <<EOF
+[snell-server]
+listen = 0.0.0.0:${SNELL_PORT}
+psk = ${SNELL_PSK}
+ipv6 = false
+EOF
+    fi
+}
+
 configure_snell() {
     check_root
     
@@ -219,17 +343,15 @@ configure_snell() {
     execute_cmd "创建配置目录" sudo mkdir -p /etc/snell
 
     # 创建配置文件
-    sudo tee /etc/snell/snell-server.conf > /dev/null <<EOF
-[snell-server]
-listen = 0.0.0.0:${SNELL_PORT}
-psk = ${SNELL_PSK}
-ipv6 = false
-EOF
+    generate_snell_config | sudo tee /etc/snell/snell-server.conf > /dev/null
     
     log_info "Snell 配置文件已生成。"
     log_info "请保存以下信息："
     log_info "端口: ${SNELL_PORT}"
     log_info "密钥: ${SNELL_PSK}"
+    if is_snell_v6_or_newer; then
+        log_info "DNS IP偏好: ${SNELL_DNS_IP_PREFERENCE}"
+    fi
     
     return 0
 }
@@ -237,8 +359,8 @@ EOF
 # 验证安装参数
 validate_install_params() {
     # 验证版本号格式
-    if ! [[ "$SNELL_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        log_error "版本号格式不正确，应为 vX.Y.Z 格式，如 v4.0.1"
+    if ! [[ "$SNELL_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(b[0-9]+)?$ ]]; then
+        log_error "版本号格式不正确，应为 vX.Y.Z 或 vX.Y.ZbN 格式，如 v5.0.1、v6.0.0b4"
         return 1
     fi
     
@@ -254,9 +376,25 @@ validate_install_params() {
         return 1
     fi
     
-    # 验证PSK长度和安全性
-    if [ ${#SNELL_PSK} -lt 8 ]; then
+    # Snell v6 服务端要求PSK长度为12-255字节
+    local psk_length
+    psk_length=$(printf '%s' "$SNELL_PSK" | LC_ALL=C wc -c | tr -d '[:space:]')
+    if is_snell_v6_or_newer && { [ "$psk_length" -lt 12 ] || [ "$psk_length" -gt 255 ]; }; then
+        log_error "Snell v6 的PSK长度必须为12-255字节"
+        return 1
+    elif [ "$psk_length" -lt 8 ]; then
         log_warn "PSK长度小于8个字符，建议使用更长的密钥以提高安全性"
+    fi
+
+    if is_snell_v6_or_newer; then
+        case "$SNELL_DNS_IP_PREFERENCE" in
+            default|prefer-ipv4|prefer-ipv6|ipv4-only|ipv6-only)
+                ;;
+            *)
+                log_error "Snell v6 的DNS IP偏好必须是 default、prefer-ipv4、prefer-ipv6、ipv4-only 或 ipv6-only"
+                return 1
+                ;;
+        esac
     fi
     
     # 检查是否包含常见弱密码特征
@@ -374,39 +512,44 @@ uninstall_snell() {
 # 显示使用帮助
 show_help() {
     cat <<EOF
-用法: $SCRIPT_NAME {update|install|restart|stop|status|uninstall}
+用法: $SCRIPT_NAME {install|restart|stop|status|uninstall}
 
 命令:
-  install <版本> <架构> <端口> <密钥>  安装Snell服务
+  install --version <版本> --port <端口> --psk-mode <模式> [选项]
   restart                  重启Snell服务
   stop                     停止Snell服务
   status                   查看Snell服务状态
   uninstall                卸载Snell服务
 
-参数说明:
-  <版本>                   Snell版本号，格式为vX.Y.Z，如v4.0.1
-  <架构>                   系统架构，可选值为amd64或aarch64
-  <端口>                   服务端口，1-65535之间的数字
-  <密钥>                   预共享密钥，建议长度不少于8个字符
+命名参数:
+  --version <版本>         必填；支持vX.Y.Z及beta格式vX.Y.ZbN
+  --port <端口>            必填；1-65535之间的数字
+  --psk-mode <模式>        必填；auto自动生成，manual使用--psk指定
+  --psk <密钥>             manual模式必填；v6要求12-255字节
+  --arch <架构>            可选；amd64或aarch64，默认自动识别
+  --dns-ip-preference <值> 可选；v6默认ipv4-only；支持default、prefer-ipv4、
+                           prefer-ipv6、ipv4-only或ipv6-only
 
-示例: 
-  $SCRIPT_NAME install v4.0.1 amd64 8388 YourPassword123
+示例:
+  $SCRIPT_NAME install --version v6.0.0b4 --port 8388 --psk-mode auto
+  $SCRIPT_NAME install --version v6.0.0b4 --port 8388 --psk-mode manual --psk 'ReplaceWithRandomPSK'
 EOF
 }
 
 # 根据命令行参数执行不同功能
 case "${1:-}" in
     install)
-        SNELL_VERSION="${2:-}"
-        SNELL_ARCH="${3:-}"
-        SNELL_PORT="${4:-}"
-        SNELL_PSK="${5:-}"
-        
-        if [ -z "${SNELL_VERSION:-}" ] || [ -z "${SNELL_ARCH:-}" ] || [ -z "${SNELL_PORT:-}" ] || [ -z "${SNELL_PSK:-}" ]; then
-            log_error "安装Snell需要提供所有参数: SNELL_VERSION, SNELL_ARCH, SNELL_PORT, SNELL_PSK"
+        shift
+        if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+            show_help
+            exit 0
+        fi
+
+        if ! parse_install_args "$@"; then
             show_help
             exit 1
         fi
+
         install_snell
         ;;
     restart)
