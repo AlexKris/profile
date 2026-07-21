@@ -1,0 +1,1 @@
+conda create -n profile python=3.12 -y
