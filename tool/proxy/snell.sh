@@ -359,8 +359,8 @@ configure_snell() {
 # 验证安装参数
 validate_install_params() {
     # 验证版本号格式
-    if ! [[ "$SNELL_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(b[0-9]+)?$ ]]; then
-        log_error "版本号格式不正确，应为 vX.Y.Z 或 vX.Y.ZbN 格式，如 v5.0.1、v6.0.0b4"
+    if ! [[ "$SNELL_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(b[0-9]+|rc)?$ ]]; then
+        log_error "版本号格式不正确，应为 vX.Y.Z、vX.Y.ZbN 或 vX.Y.Zrc 格式，如 v5.0.1、v6.0.0b4、v6.0.0rc"
         return 1
     fi
     
@@ -522,7 +522,7 @@ show_help() {
   uninstall                卸载Snell服务
 
 命名参数:
-  --version <版本>         必填；支持vX.Y.Z及beta格式vX.Y.ZbN
+  --version <版本>         必填；支持vX.Y.Z、beta格式vX.Y.ZbN及RC格式vX.Y.Zrc
   --port <端口>            必填；1-65535之间的数字
   --psk-mode <模式>        必填；auto自动生成，manual使用--psk指定
   --psk <密钥>             manual模式必填；v6要求12-255字节
@@ -531,8 +531,8 @@ show_help() {
                            prefer-ipv6、ipv4-only或ipv6-only
 
 示例:
-  $SCRIPT_NAME install --version v6.0.0b4 --port 8388 --psk-mode auto
-  $SCRIPT_NAME install --version v6.0.0b4 --port 8388 --psk-mode manual --psk 'ReplaceWithRandomPSK'
+  $SCRIPT_NAME install --version v6.0.0rc --port 8388 --psk-mode auto
+  $SCRIPT_NAME install --version v6.0.0rc --port 8388 --psk-mode manual --psk 'ReplaceWithRandomPSK'
 EOF
 }
 
