@@ -59,6 +59,13 @@
         "action": "reject"
       },
       {
+        "query_type": [
+          "HTTPS",
+          "SVCB"
+        ],
+        "action": "reject"
+      },
+      {
         "rule_set": [
           "geosite-private"
         ],
@@ -84,13 +91,6 @@
         "clash_mode": "Global",
         "action": "route",
         "server": "dns_proxy"
-      },
-      {
-        "query_type": [
-          "HTTPS",
-          "SVCB"
-        ],
-        "action": "reject"
       }
     ],
     "reverse_mapping": true,
@@ -103,10 +103,11 @@
       "path": "cache.db"
     },
     "clash_api": {
-      "external_controller": "127.0.0.1:9090",
-      "external_ui": "ui",
+      "external_controller": "0.0.0.0:9090",
+      "secret": "REPLACE_WITH_SECRET",
+      "external_ui": "zashboard",
       "external_ui_download_detour": "Proxy",
-      "external_ui_download_url": "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
+      "external_ui_download_url": "https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip"
     }
   },
   "inbounds": [
