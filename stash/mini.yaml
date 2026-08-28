@@ -164,6 +164,8 @@ rules:
   # > 非中国大陆域名兜底
   - RULE-SET,geolocation_not_cn,Proxy
   # ===== IP 规则 =====
+  # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到代理策略被阻断）
+  - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   - RULE-SET,telegram_ip,Telegram,no-resolve
   - RULE-SET,cn_ip,DIRECT
   - RULE-SET,lan_ip,DIRECT

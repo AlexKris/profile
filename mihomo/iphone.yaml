@@ -322,6 +322,8 @@ rules:
   - RULE-SET,geolocation_not_cn,Proxy
   # ===== 域名规则 end =====
   # ===== IP 规则 start =====
+  # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到代理策略被阻断）
+  - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
   # > 中国大陆 IP
@@ -330,8 +332,6 @@ rules:
   # > LAN IP
   - RULE-SET,lan_ip,DIRECT
   # ===== IP 规则 end =====
-  # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到不支持 UDP 的代理被 REJECT）
-  - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   - GEOIP,CN,DIRECT
   # > Final
   - MATCH,Final
