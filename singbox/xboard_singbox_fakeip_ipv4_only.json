@@ -382,19 +382,6 @@
         "outbound": "Direct"
       },
       {
-        "domain_suffix": [
-          "kurogame.com",
-          "kurogames.com",
-          "kurobbs.com",
-          "aki-game.com",
-          "aki-game2.com",
-          "kurogames-global.com",
-          "kurogame.xyz"
-        ],
-        "action": "route",
-        "outbound": "Direct"
-      },
-      {
         "rule_set": [
           "direct-extra"
         ],

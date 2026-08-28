@@ -296,14 +296,6 @@ rules:
   - PROCESS-NAME,Nutstore.exe,DIRECT
   - PROCESS-NAME,iperf3-darwin,DIRECT
   # ===== 域名规则 start =====
-  # > 国内游戏直连
-  - DOMAIN-SUFFIX,kurogame.com,DIRECT
-  - DOMAIN-SUFFIX,kurogames.com,DIRECT
-  - DOMAIN-SUFFIX,kurobbs.com,DIRECT
-  - DOMAIN-SUFFIX,aki-game.com,DIRECT
-  - DOMAIN-SUFFIX,aki-game2.com,DIRECT
-  - DOMAIN-SUFFIX,kurogames-global.com,DIRECT
-  - DOMAIN-SUFFIX,kurogame.xyz,DIRECT
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
   # > 测速网站
