@@ -361,6 +361,8 @@ rules:
   # > LAN IP
   - RULE-SET,lan_ip,DIRECT
   # ===== IP 规则 end =====
+  # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到不支持 UDP 的代理被 REJECT）
+  - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   - GEOIP,CN,DIRECT
   # > Final
   - MATCH,Final

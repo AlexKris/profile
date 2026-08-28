@@ -509,6 +509,13 @@
         "strategy": "ipv4_only"
       },
       {
+        "ip_cidr": [
+          "17.0.0.0/8"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
         "rule_set": [
           "geoip-cn"
         ],
