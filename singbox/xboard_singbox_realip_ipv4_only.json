@@ -408,7 +408,7 @@
       },
       {
         "rule_set": [
-          "geosite-paypal"
+          "paypal"
         ],
         "action": "route",
         "outbound": "PayPal"
@@ -597,10 +597,10 @@
         "download_detour": "Proxy"
       },
       {
-        "tag": "geosite-paypal",
+        "tag": "paypal",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-paypal.srs",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/paypal.srs",
         "download_detour": "Proxy"
       },
       {

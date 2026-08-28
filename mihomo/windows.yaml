@@ -325,6 +325,7 @@ rules:
   # > Telegram 域名
   - RULE-SET,telegram,Telegram
   # > Apple
+  - RULE-SET,apple_proxy,Proxy
   - RULE-SET,apple_domain,DIRECT
   - RULE-SET,apple,DIRECT
   # > Microsoft CDN
@@ -396,6 +397,9 @@ rule-providers:
   stream_tw:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-tw.mrs'
+  apple_proxy:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple-proxy.mrs'
   apple_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/apple.mrs'
@@ -467,7 +471,7 @@ rule-providers:
   # ===== 域名规则集（MRS） =====
   paypal_rule:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/paypal.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/paypal.mrs'
   cn_domain:
     <<: *BehaviorMrsDN
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'

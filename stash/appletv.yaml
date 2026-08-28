@@ -233,6 +233,7 @@ rules:
   - RULE-SET,stream,GlobalMedia
   - RULE-SET,stream_keyword,GlobalMedia
   # > Apple
+  - RULE-SET,apple_proxy,Proxy
   - RULE-SET,apple_domain,DIRECT
   - RULE-SET,apple,DIRECT
   # > Download
@@ -285,6 +286,9 @@ rule-providers:
   stream_tw:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-tw.mrs'
+  apple_proxy:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple-proxy.mrs'
   apple_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/apple.mrs'

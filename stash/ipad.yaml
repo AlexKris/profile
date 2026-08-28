@@ -265,6 +265,7 @@ rules:
   # > Telegram 域名
   - RULE-SET,telegram,Telegram
   # > Apple
+  - RULE-SET,apple_proxy,Proxy
   - RULE-SET,apple_domain,DIRECT
   - RULE-SET,apple,DIRECT
   # > Microsoft CDN
@@ -334,6 +335,9 @@ rule-providers:
   telegram:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/telegram.mrs'
+  apple_proxy:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple-proxy.mrs'
   apple_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/apple.mrs'
