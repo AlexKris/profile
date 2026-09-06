@@ -267,7 +267,7 @@
       "tag": "AIGC",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Hawaii|家宽))"
+      "include": "(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))"
     },
     {
       "tag": "Google",
