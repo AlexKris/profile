@@ -31,11 +31,145 @@
     ],
     "rules": [
       {
-        "domain_suffix": [
-          "cloudflare-ech.com"
+        "query_type": [
+          "AAAA",
+          "HTTPS",
+          "SVCB"
+        ],
+        "action": "predefined",
+        "rcode": "NOERROR"
+      },
+      {
+        "rule_set": [
+          "geosite-private",
+          "local-extra"
+        ],
+        "action": "route",
+        "server": "dns_local"
+      },
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "clash_mode": "Global",
+            "query_type": [
+              "A"
+            ]
+          },
+          {
+            "rule_set": [
+              "dns-realip",
+              "direct-check"
+            ],
+            "invert": true
+          }
+        ],
+        "action": "route",
+        "server": "dns_fakeip"
+      },
+      {
+        "clash_mode": "Global",
+        "action": "route",
+        "server": "dns_proxy"
+      },
+      {
+        "rule_set": [
+          "direct-check",
+          "direct-extra"
         ],
         "action": "route",
         "server": "dns_direct"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "rule_set": [
+              "speedtest-domainset",
+              "ai"
+            ],
+            "query_type": [
+              "A"
+            ]
+          },
+          {
+            "rule_set": [
+              "dns-realip"
+            ],
+            "invert": true
+          }
+        ],
+        "action": "route",
+        "server": "dns_fakeip"
+      },
+      {
+        "rule_set": [
+          "speedtest-domainset",
+          "ai"
+        ],
+        "action": "route",
+        "server": "dns_proxy"
+      },
+      {
+        "rule_set": [
+          "apple-domainset",
+          "apple",
+          "microsoft-cdn"
+        ],
+        "action": "route",
+        "server": "dns_direct"
+      },
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "rule_set": [
+              "geosite-telegram",
+              "stream-jp",
+              "stream-tw",
+              "stream",
+              "paypal",
+              "geosite-cryptocurrency",
+              "geosite-google",
+              "microsoft",
+              "download-domainset"
+            ],
+            "query_type": [
+              "A"
+            ]
+          },
+          {
+            "rule_set": [
+              "dns-realip"
+            ],
+            "invert": true
+          }
+        ],
+        "action": "route",
+        "server": "dns_fakeip"
+      },
+      {
+        "rule_set": [
+          "geosite-telegram",
+          "stream-jp",
+          "stream-tw",
+          "stream",
+          "paypal",
+          "geosite-cryptocurrency",
+          "geosite-google",
+          "microsoft",
+          "download-domainset"
+        ],
+        "action": "route",
+        "server": "dns_proxy"
       },
       {
         "rule_set": [
@@ -45,107 +179,21 @@
         "server": "dns_direct"
       },
       {
-        "query_type": [
-          "PTR"
-        ],
-        "domain_suffix": [
-          "in-addr.arpa",
-          "ip6.arpa"
-        ],
-        "action": "reject"
-      },
-      {
-        "query_type": [
-          "SOA"
-        ],
-        "domain": [
-          "local"
-        ],
-        "action": "reject"
-      },
-      {
-        "query_type": [
-          "HTTPS",
-          "SVCB"
-        ],
-        "action": "reject"
-      },
-      {
         "rule_set": [
-          "geosite-private"
+          "dns-realip"
         ],
         "action": "route",
-        "server": "dns_local"
-      },
-      {
-        "domain": [
-          "dns.msftncsi.com",
-          "stun.l.google.com",
-          "stun.syncthing.net",
-          "lancache.steamcontent.com"
-        ],
-        "domain_suffix": [
-          "msftconnecttest.com",
-          "msftncsi.com",
-          "srv.nintendo.net",
-          "stun.playstation.net",
-          "turn.twilio.com",
-          "stun.twilio.com",
-          "xboxlive.com",
-          "mihoyo.com",
-          "yuanshen.com",
-          "bh3.com",
-          "bhsr.com",
-          "juequling.com",
-          "miyoushe.com",
-          "mhyurl.cn",
-          "kurogame.com",
-          "kurogames.com",
-          "kurobbs.com",
-          "aki-game.com",
-          "aki-game2.com",
-          "kurogames-global.com",
-          "kurogame.xyz",
-          "wegame.com.cn",
-          "game.163.com",
-          "miwifi.com",
-          "market.xiaomi.com"
-        ],
-        "domain_regex": [
-          "^stun\\."
-        ],
-        "action": "route",
-        "server": "dns_direct"
-      },
-      {
-        "domain": [
-          "captive.apple.com",
-          "seed-sequoia.siri.apple.com",
-          "sequoia.apple.com",
-          "www.baidu.com"
-        ],
-        "action": "route",
-        "server": "dns_direct"
-      },
-      {
-        "clash_mode": "Direct",
-        "action": "route",
-        "server": "dns_direct"
-      },
-      {
-        "clash_mode": "Global",
-        "action": "route",
-        "server": "dns_fakeip"
+        "server": "dns_proxy"
       },
       {
         "query_type": [
-          "A",
-          "AAAA"
+          "A"
         ],
         "action": "route",
         "server": "dns_fakeip"
       }
     ],
+    "reverse_mapping": true,
     "final": "dns_proxy",
     "strategy": "ipv4_only"
   },
@@ -156,24 +204,59 @@
       "store_fakeip": true
     },
     "clash_api": {
-      "external_controller": "0.0.0.0:9090",
-      "secret": "REPLACE_WITH_SECRET",
-      "external_ui": "ui",
-      "external_ui_download_detour": "Proxy",
-      "external_ui_download_url": "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
+      "default_mode": "Rule"
     }
   },
+  "http_clients": [
+    {
+      "tag": "http_proxy",
+      "detour": "Proxy"
+    }
+  ],
+  "services": [
+    {
+      "type": "api",
+      "tag": "api",
+      "listen": "127.0.0.1",
+      "listen_port": 9090,
+      "secret": "REPLACE_WITH_SECRET",
+      "access_control_allow_origin": [
+        "http://127.0.0.1:9090",
+        "http://localhost:9090"
+      ],
+      "access_control_allow_private_network": true,
+      "dashboard": {
+        "enabled": true
+      }
+    },
+    {
+      "type": "api",
+      "tag": "api-lan",
+      "listen": "0.0.0.0",
+      "listen_port": 9091,
+      "secret": "REPLACE_WITH_SECRET",
+      "access_control_allow_origin": [
+        "http://127.0.0.1:9090",
+        "http://localhost:9090"
+      ],
+      "access_control_allow_private_network": true,
+      "dashboard": {
+        "enabled": true,
+        "path": "dashboard-lan"
+      }
+    }
+  ],
   "inbounds": [
     {
       "type": "tun",
       "tag": "tun-in",
       "address": [
-        "172.19.0.1/30"
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
       ],
       "mtu": 1400,
       "auto_route": true,
       "strict_route": true,
-      "endpoint_independent_nat": true,
       "stack": "mixed",
       "platform": {
         "http_proxy": {
@@ -207,85 +290,99 @@
       "tag": "HK",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇭🇰|HK))"
+      "include": "🇭🇰|(?<![A-Za-z])(?:HKG?|Hong[ -]?Kong)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "TW",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇨🇳|TW))"
+      "include": "🇨🇳|🇹🇼|(?<![A-Za-z])(?:TWN?|Taiwan)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "JP",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇯🇵|JP))"
+      "include": "🇯🇵|(?<![A-Za-z])(?:JPN?|Japan)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "US",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇺🇸|US))"
+      "include": "🇺🇸|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "DE",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇩🇪|DE))"
+      "include": "🇩🇪|(?<![A-Za-z])(?:DEU?|GER|Germany)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "SG",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇸🇬|SG))"
+      "include": "🇸🇬|(?<![A-Za-z])(?:SGP?|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "Telegram",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇯🇵|HK|JP"
+      "include": "🇭🇰|🇯🇵|(?<![A-Za-z])(?:HKG?|JPN?|Hong[ -]?Kong|Japan)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "GlobalMedia",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇨🇳|🇸🇬|HK|TW|SG"
+      "include": "🇭🇰|🇨🇳|🇹🇼|🇸🇬|(?<![A-Za-z])(?:HKG?|TWN?|SGP?|Hong[ -]?Kong|Taiwan|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "GlobalEmby",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))"
+      "include": "🇭🇰|🇯🇵|🇸🇬|(?<![A-Za-z])(?:HKG?|JPN?|SGP?|Hong[ -]?Kong|Japan|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "RFCEmby",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))(?=.*(?:RFC|Jinx))"
+      "include": "^(?=.*(?:🇭🇰|🇯🇵|🇸🇬|(?<![A-Za-z])(?:HKG?|JPN?|SGP?|Hong[ -]?Kong|Japan|Singapore)(?![A-Za-z])))(?=.*(?:RFC|Jinx))",
+      "fallback": "Proxy"
     },
     {
       "tag": "AIGC",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))"
+      "include": "^(?=.*(?:🇨🇳|🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|英国|(?<![A-Za-z])(?:TWN?|JPN?|SGP?|USA?|UK|GBR?|Taiwan|Japan|Singapore|United[ -]?States|United[ -]?Kingdom)(?![A-Za-z])))(?=.*(?:家宽|(?<![A-Za-z])(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii)(?![A-Za-z])))",
+      "fallback": "Proxy"
     },
     {
       "tag": "Google",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇺🇸|US))"
+      "include": "🇺🇸|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "Speedtest",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))"
+      "include": "🇭🇰|🇨🇳|🇹🇼|🇯🇵|🇸🇬|(?<![A-Za-z])(?:HKG?|TWN?|JPN?|SGP?|Hong[ -]?Kong|Taiwan|Japan|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "Download",
       "type": "selector",
       "outbounds": [],
-      "include": "(?=.*(?:🇭🇰|🇯🇵|HK|JP))"
+      "include": "🇭🇰|🇯🇵|(?<![A-Za-z])(?:HKG?|JPN?|Hong[ -]?Kong|Japan)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "PayPal",
@@ -336,6 +433,7 @@
   ],
   "route": {
     "auto_detect_interface": true,
+    "default_http_client": "http_proxy",
     "default_domain_resolver": {
       "server": "dns_direct",
       "strategy": "ipv4_only"
@@ -343,15 +441,27 @@
     "final": "Final",
     "rules": [
       {
-        "action": "sniff"
-      },
-      {
-        "protocol": "dns",
+        "port": 53,
         "action": "hijack-dns"
       },
       {
+        "ip_version": 6,
+        "action": "reject",
+        "no_drop": true
+      },
+      {
         "rule_set": [
-          "geosite-private"
+          "geosite-private",
+          "local-extra"
+        ],
+        "action": "resolve",
+        "server": "dns_local",
+        "strategy": "ipv4_only"
+      },
+      {
+        "rule_set": [
+          "geosite-private",
+          "local-extra"
         ],
         "action": "route",
         "outbound": "Direct"
@@ -372,17 +482,22 @@
         "outbound": "Proxy"
       },
       {
-        "domain": [
-          "captive.apple.com",
-          "seed-sequoia.siri.apple.com",
-          "sequoia.apple.com",
-          "www.baidu.com"
-        ],
-        "action": "route",
-        "outbound": "Direct"
+        "ip_version": 4,
+        "action": "sniff",
+        "sniffer": [
+          "http",
+          "tls",
+          "quic",
+          "dns"
+        ]
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
       },
       {
         "rule_set": [
+          "direct-check",
           "direct-extra"
         ],
         "action": "route",
@@ -491,13 +606,7 @@
       {
         "rule_set": [
           "proxy-domainset",
-          "proxy"
-        ],
-        "action": "route",
-        "outbound": "Proxy"
-      },
-      {
-        "rule_set": [
+          "proxy",
           "geosite-geolocation-noncn"
         ],
         "action": "route",
@@ -505,8 +614,12 @@
       },
       {
         "action": "resolve",
-        "server": "dns_direct",
         "strategy": "ipv4_only"
+      },
+      {
+        "ip_is_private": true,
+        "action": "route",
+        "outbound": "Direct"
       },
       {
         "ip_cidr": [
@@ -525,158 +638,208 @@
     ],
     "rule_set": [
       {
+        "tag": "local-extra",
+        "type": "inline",
+        "rules": [
+          {
+            "domain": [
+              "lancache.steamcontent.com"
+            ],
+            "domain_suffix": [
+              "miwifi.com"
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "direct-check",
+        "type": "inline",
+        "rules": [
+          {
+            "domain": [
+              "captive.apple.com",
+              "seed-sequoia.siri.apple.com",
+              "sequoia.apple.com",
+              "www.baidu.com",
+              "dns.msftncsi.com"
+            ],
+            "domain_suffix": [
+              "msftconnecttest.com",
+              "msftncsi.com"
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "dns-realip",
+        "type": "inline",
+        "rules": [
+          {
+            "domain": [
+              "stun.l.google.com",
+              "stun.syncthing.net"
+            ],
+            "domain_suffix": [
+              "srv.nintendo.net",
+              "stun.playstation.net",
+              "turn.twilio.com",
+              "stun.twilio.com",
+              "xboxlive.com",
+              "mihoyo.com",
+              "yuanshen.com",
+              "bh3.com",
+              "bhsr.com",
+              "juequling.com",
+              "miyoushe.com",
+              "mhyurl.cn",
+              "kurogame.com",
+              "kurogames.com",
+              "kurobbs.com",
+              "aki-game.com",
+              "aki-game2.com",
+              "kurogames-global.com",
+              "kurogame.xyz",
+              "wegame.com.cn",
+              "game.163.com",
+              "market.xiaomi.com"
+            ],
+            "domain_regex": [
+              "^stun\\."
+            ]
+          }
+        ]
+      },
+      {
         "tag": "ai",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/ai.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/ai.srs"
       },
       {
         "tag": "apple-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/apple.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/apple.srs"
       },
       {
         "tag": "apple",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/apple.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/apple.srs"
       },
       {
         "tag": "direct-extra",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/direct-extra.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/direct-extra.srs"
       },
       {
         "tag": "microsoft-cdn",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft-cdn.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft-cdn.srs"
       },
       {
         "tag": "microsoft",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft.srs"
       },
       {
         "tag": "stream",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream.srs"
       },
       {
         "tag": "stream-jp",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-jp.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-jp.srs"
       },
       {
         "tag": "stream-tw",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-tw.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-tw.srs"
       },
       {
         "tag": "download-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/download.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/download.srs"
       },
       {
         "tag": "geosite-private",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs"
       },
       {
         "tag": "speedtest-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/speedtest.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/speedtest.srs"
       },
       {
         "tag": "geosite-cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs"
       },
       {
         "tag": "proxy-domainset",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/proxy.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/proxy.srs"
       },
       {
         "tag": "proxy",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/proxy.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/proxy.srs"
       },
       {
         "tag": "geosite-geolocation-noncn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs"
       },
       {
         "tag": "geosite-telegram",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs"
       },
       {
         "tag": "paypal",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/paypal.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/paypal.srs"
       },
       {
         "tag": "geosite-cryptocurrency",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-cryptocurrency.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-cryptocurrency.srs"
       },
       {
         "tag": "geosite-google",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs"
       },
       {
         "tag": "geoip-cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-        "download_detour": "Proxy"
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
       },
       {
         "tag": "telegram-ip",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/ip/telegram-ip.srs",
-        "download_detour": "Proxy"
+        "url": "https://alexkris-rules.pages.dev/sing-box/ip/telegram-ip.srs"
       }
     ]
   }

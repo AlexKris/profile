@@ -61,9 +61,9 @@ class SingBox extends AbstractProtocol
     {
         $appName = admin_setting('app_name', 'XBoard');
         $this->config = $this->loadConfig();
+        $this->validateApiSecrets();
         $this->buildOutbounds();
         $this->buildRule();
-        $this->adaptConfigForVersion();
         $user = $this->user;
 
         return response()
@@ -91,6 +91,25 @@ class SingBox extends AbstractProtocol
         }
 
         return is_array($jsonData) ? $jsonData : json_decode($jsonData, true);
+    }
+
+    protected function validateApiSecrets(): void
+    {
+        $secrets = [];
+        foreach ($this->config['services'] ?? [] as $service) {
+            if (($service['type'] ?? null) === 'api') {
+                $secrets[] = $service['secret'] ?? null;
+            }
+        }
+        $clashApi = $this->config['experimental']['clash_api'] ?? [];
+        if (!empty($clashApi['external_controller'])) {
+            $secrets[] = $clashApi['secret'] ?? null;
+        }
+        foreach ($secrets as $index => $secret) {
+            if (!is_string($secret) || trim($secret) === '' || strtoupper(trim($secret)) === 'REPLACE_WITH_SECRET') {
+                throw new \RuntimeException("Sing-box API listener {$index} requires a non-empty private secret; replace the public placeholder.");
+            }
+        }
     }
 
     protected function buildOutbounds()
@@ -132,6 +151,15 @@ class SingBox extends AbstractProtocol
         }
 
         $allTags = array_column($proxies, 'tag');
+        if (empty($allTags)) {
+            throw new \RuntimeException('Sing-box subscription has no supported proxy nodes.');
+        }
+        if (count($allTags) !== count(array_unique($allTags))) {
+            throw new \RuntimeException('Sing-box proxy node names must be unique.');
+        }
+        if (array_intersect($allTags, array_column($outbounds, 'tag'))) {
+            throw new \RuntimeException('Sing-box proxy node names must not collide with template outbound tags.');
+        }
         $keywordMatchedTags = [];
         $othersOutboundIndexes = [];
 
@@ -175,12 +203,15 @@ class SingBox extends AbstractProtocol
 
                 if (empty($tags) && $fallback !== null) {
                     $tags = $this->resolveFallback($fallback, $allTags, $outbounds, $outbound['tag'] ?? '');
+                    if (!empty($tags)) {
+                        Log::warning("[SingBox] outbound group '{$outbound['tag']}' has no matching nodes; using explicit fallback");
+                    }
                 }
 
                 if (!empty($tags)) {
                     array_push($outbound['outbounds'], ...$tags);
                 } elseif (empty($outbound['outbounds'])) {
-                    $outbound['outbounds'][] = 'Direct';
+                    throw new \RuntimeException("Sing-box outbound group '{$outbound['tag']}' has no matching nodes or usable fallback.");
                 }
 
                 continue;
@@ -250,14 +281,15 @@ class SingBox extends AbstractProtocol
             array_push($outbounds[$index]['outbounds'], ...$othersNodes);
         }
 
-        // Pass 3: cleanup — fallback empty outbounds, remove _filter
+        // Do not silently turn an unavailable proxy group into direct traffic.
         foreach ($outbounds as &$outbound) {
             if (!in_array($outbound['type'], ['urltest', 'selector'])) {
                 continue;
             }
             if (empty($outbound['outbounds'])) {
-                $outbound['outbounds'][] = 'Direct';
+                throw new \RuntimeException("Sing-box outbound group '{$outbound['tag']}' is empty.");
             }
+            $outbound['outbounds'] = array_values(array_unique($outbound['outbounds']));
         }
         unset($outbound);
 
@@ -288,9 +320,7 @@ class SingBox extends AbstractProtocol
 
         if ($result === false) {
             $err = preg_last_error_msg();
-            Log::warning("[SingBox] invalid outbound pattern {$pattern}: {$err}");
-            $cache[$pattern] = '~(*FAIL)~';
-            return false;
+            throw new \RuntimeException("Sing-box template contains an invalid outbound pattern: {$err}");
         }
 
         return $result === 1;
@@ -302,7 +332,7 @@ class SingBox extends AbstractProtocol
         $templateTags = array_column($outbounds, 'tag');
 
         foreach ($candidates as $candidate) {
-            if (!is_string($candidate) || $candidate === '') {
+            if (!is_string($candidate) || $candidate === '' || $candidate === $groupTag) {
                 continue;
             }
 
@@ -338,98 +368,6 @@ class SingBox extends AbstractProtocol
         //     'outbound' => 'direct',
         // ]);
         $this->config['route']['rules'] = $rules;
-    }
-
-    /**
-     * 根据客户端版本自适应配置格式。
-     */
-    protected function adaptConfigForVersion(): void
-    {
-        $coreVersion = $this->getSingBoxCoreVersion();
-        if (empty($coreVersion)) {
-            return;
-        }
-
-        if (version_compare($coreVersion, '1.14.0', '>=')) {
-            $this->migrateDnsFor114();
-            $this->migrateCacheFileFor114();
-            $this->migrateRuleSetDownloadsFor114();
-        }
-    }
-
-    private function getSingBoxCoreVersion(): ?string
-    {
-        if (!empty($this->userAgent)) {
-            if (preg_match('/sing-box[\/\s]+v?(\d+(?:\.\d+){0,2})/i', $this->userAgent, $matches)) {
-                return $matches[1];
-            }
-        }
-
-        if (empty($this->clientVersion)) {
-            return null;
-        }
-
-        if ($this->clientName === 'sing-box') {
-            return $this->clientVersion;
-        }
-
-        return '1.13.0';
-    }
-
-    private function migrateDnsFor114(): void
-    {
-        if (!isset($this->config['dns'])) {
-            return;
-        }
-
-        $removedStrategy = false;
-        if (isset($this->config['dns']['rules']) && is_array($this->config['dns']['rules'])) {
-            foreach ($this->config['dns']['rules'] as &$rule) {
-                if (isset($rule['strategy'])) {
-                    unset($rule['strategy']);
-                    $removedStrategy = true;
-                }
-            }
-            unset($rule);
-        }
-
-        if ($removedStrategy && empty($this->config['dns']['strategy'])) {
-            $this->config['dns']['strategy'] = 'prefer_ipv4';
-        }
-
-        unset($this->config['dns']['independent_cache']);
-    }
-
-    private function migrateCacheFileFor114(): void
-    {
-        if (!isset($this->config['experimental']['cache_file'])) {
-            return;
-        }
-
-        $cacheFile = &$this->config['experimental']['cache_file'];
-        if (!empty($cacheFile['store_rdrc'])) {
-            $cacheFile['store_dns'] = true;
-        }
-        unset($cacheFile['store_rdrc'], $cacheFile['rdrc_timeout']);
-    }
-
-    private function migrateRuleSetDownloadsFor114(): void
-    {
-        if (empty($this->config['route']['rule_set']) || !is_array($this->config['route']['rule_set'])) {
-            return;
-        }
-
-        foreach ($this->config['route']['rule_set'] as &$ruleSet) {
-            if (($ruleSet['type'] ?? null) !== 'remote' || empty($ruleSet['download_detour'])) {
-                continue;
-            }
-
-            $ruleSet['http_client'] = [
-                'detour' => $ruleSet['download_detour'],
-            ];
-            unset($ruleSet['download_detour']);
-        }
-        unset($ruleSet);
     }
 
     protected function buildShadowsocks($password, $server)
