@@ -1,0 +1,17 @@
+#!name=po0fw · 自用
+#!desc=把本机当前出口 /24 加入 po0 防火墙白名单。network-changed 事件 + 每 10 分钟 cron 双触发，支持多 token，token 后加 @N 钉固定槽位。
+#!category=po0
+#!arguments=tokens:"",quiet:true
+#!arguments-desc=tokens：pgnfw_ 开头的 token，多台机器用英文逗号分隔；可在 token 后加 @0～@4 钉固定槽位（家宽出口建议 @0）。quiet：true 时只在失败或新占坑位时通知，false 时每次运行都通知。
+
+[Rule]
+# 加白 API 必须直连，服务端才能看到本机真实出口 IP（而不是代理出口）
+IP-CIDR,124.221.69.228/32,DIRECT,no-resolve
+
+[Script]
+po0fw-cron  = type=cron,cronexp="*/10 * * * *",script-path=https://raw.githubusercontent.com/AlexKris/profile/main/surge/script/po0fw.js,timeout=30,argument="tokens={{{tokens}}}&quiet={{{quiet}}}"
+po0fw-event = type=event,event-name=network-changed,script-path=https://raw.githubusercontent.com/AlexKris/profile/main/surge/script/po0fw.js,timeout=30,argument="tokens={{{tokens}}}&quiet={{{quiet}}}"
+po0fw-panel = type=generic,script-path=https://raw.githubusercontent.com/AlexKris/profile/main/surge/script/po0fw.js,timeout=30,argument="tokens={{{tokens}}}&quiet={{{quiet}}}"
+
+[Panel]
+po0fw = script-name=po0fw-panel,title=po0 防火墙加白,content=点击刷新,update-interval=600
