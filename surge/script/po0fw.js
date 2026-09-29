@@ -17,11 +17,15 @@
 const DEFAULT_API = "https://124.221.69.228/api/firewall";
 const IPRE = /\b(\d{1,3}(?:\.\d{1,3}){3})(?:\/(\d{1,2}))?\b/g;
 
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch (e) { return s; }
+}
+
 function parseArgs(s) {
   const o = {};
   (s || "").split("&").forEach(kv => {
     const i = kv.indexOf("=");
-    if (i > 0) o[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    if (i > 0) o[kv.slice(0, i)] = safeDecode(kv.slice(i + 1));
   });
   return o;
 }
@@ -40,7 +44,7 @@ function parseSlots(s) {
   const m = new Map();
   (s || "").split(",").map(t => t.trim()).filter(Boolean).forEach(t => {
     const i = t.lastIndexOf("@");
-    if (i > 0 && t.slice(i + 1) !== "") m.set(t.slice(0, i), t.slice(i + 1));
+    if (i > 0 && t.slice(i + 1) !== "") m.set(t.slice(0, i).trim(), t.slice(i + 1));
   });
   return m;
 }

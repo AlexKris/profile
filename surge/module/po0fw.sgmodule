@@ -2,7 +2,7 @@
 #!desc=把本机当前出口 /24 加入 po0 防火墙白名单。network-changed 事件 + 每 10 分钟 cron 双触发，支持多 token 别名，按当前 WiFi SSID / 蜂窝 / 有线决定钉哪个槽位。
 #!category=po0
 #!arguments=api:"https://124.221.69.228/api/firewall",tokens:"",slots:"",quiet:true
-#!arguments-desc=api：加白接口 base URL，服务器换 IP 只改这里。\ntokens：别名:token，多台机器用英文逗号分隔，别名可省略。例：home:pgnfw_aaa,vps2:pgnfw_bbb\nslots：网络名@槽位（0～4），逗号分隔；网络名填 WiFi 的 SSID，cellular 代表蜂窝，wired 代表有线；未列出的网络不钉槽位。例：HomeWiFi@0,OfficeWiFi@1,wired@2\n注意：Surge 需要定位权限才能读到 SSID，未授权时 WiFi 会被当成 wired；SSID 不能含英文逗号和 @。\nquiet：true 只在失败或新占坑位时通知，false 每次运行都通知。
+#!arguments-desc=api：加白接口 base URL，服务器换 IP 只改这里。\ntokens：别名:token，多台机器用英文逗号分隔，别名可省略。例：home:pgnfw_aaa,vps2:pgnfw_bbb\nslots：网络名@槽位（0～4），逗号分隔；网络名填 WiFi 的 SSID，cellular 代表蜂窝，wired 代表有线；未列出的网络不钉槽位。例：HomeWiFi@0,OfficeWiFi@1,wired@2\n注意：Surge 需要定位权限才能读到 SSID，未授权时 WiFi 会被当成 wired；SSID 不能含 , @ & = 这四个字符。固定位置、Wi-Fi 和网线共用一个出口 IP 的机器，把 wired 和该 Wi-Fi 的 SSID 钉到同一个槽位号。会在多个地点插网线的机器，只有当各地点的 wired 出口 IP 互不相同且能确定时才配置 wired，否则不要配置，让它浮动。5 个槽位建议至少留 1 个不钉，给未列出的网络浮动使用。\nquiet：true 只在失败或新占坑位时通知，false 每次运行都通知。
 
 [Script]
 po0fw-cron  = type=cron,cronexp="*/10 * * * *",script-path=https://raw.githubusercontent.com/AlexKris/profile/main/surge/script/po0fw.js,timeout=30,argument="api={{{api}}}&tokens={{{tokens}}}&slots={{{slots}}}&quiet={{{quiet}}}"
