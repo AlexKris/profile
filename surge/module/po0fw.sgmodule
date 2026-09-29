@@ -1,4 +1,4 @@
-#!name=po0fw · 自用
+#!name=Po0 防火墙
 #!desc=把本机当前出口 /24 加入 po0 防火墙白名单。network-changed 事件 + 每 10 分钟 cron 双触发，支持多 token 别名，按当前 WiFi SSID / 蜂窝 / 有线决定钉哪个槽位。
 #!category=po0
 #!arguments=api:"https://124.221.69.228/api/firewall",tokens:"",slots:"",quiet:true
@@ -10,4 +10,4 @@ po0fw-event = type=event,event-name=network-changed,script-path=https://raw.gith
 po0fw-panel = type=generic,script-path=https://raw.githubusercontent.com/AlexKris/profile/main/surge/script/po0fw.js,timeout=30,argument="api={{{api}}}&tokens={{{tokens}}}&slots={{{slots}}}&quiet={{{quiet}}}"
 
 [Panel]
-po0fw = script-name=po0fw-panel,title=po0 防火墙加白,content=点击刷新,update-interval=600
+po0fw = script-name=po0fw-panel,title=Po0 防火墙,content=点击刷新,update-interval=600

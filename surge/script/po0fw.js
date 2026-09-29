@@ -71,14 +71,13 @@ function extractNets(body) {
   const quiet = args.quiet !== "false";
 
   if (!tokens.length) {
-    $notification.post("po0fw", "未配置 tokens", "在模块参数里填入 pgnfw_ 开头的 token");
-    return $done({ title: "po0fw", content: "未配置 tokens" });
+    $notification.post("Po0 防火墙", "未配置 tokens", "在模块参数里填入 pgnfw_ 开头的 token");
+    return $done({ title: "Po0 防火墙", content: "未配置 tokens" });
   }
 
   const net = currentNet();
   const slot = parseSlots(args.slots).get(net.name);
-  const netLabel = (net.isCell ? "蜂窝" : net.name === "wired" ? "有线" : net.name) + (slot !== undefined ? ` @${slot}` : "");
-  const cellMark = net.isCell ? " 📶" : "";
+  const netLabel = (net.isCell ? "蜂窝" : net.name === "wired" ? "有线" : net.name) + (slot !== undefined ? ` → 槽位 ${slot}` : "");
   const lines = [];
 
   for (let i = 0; i < tokens.length; i++) {
@@ -92,8 +91,8 @@ function extractNets(body) {
 
     if (r.err || !r.status || r.status >= 400) {
       const msg = r.err ? String(r.err) : `HTTP ${r.status}`;
-      $notification.post(`po0fw ${alias} 加白失败`, msg, r.body.slice(0, 120));
-      lines.push(`${alias} ❌ ${msg}`);
+      $notification.post(`Po0 防火墙 · ${alias}`, `加白失败 · ${msg}`, r.body.slice(0, 120));
+      lines.push(`${alias}  ❌ ${msg}`);
       continue;
     }
 
@@ -103,14 +102,18 @@ function extractNets(body) {
     $persistentStore.write(nets.join(","), key);
 
     if (prevN > 0 && nets.length > prevN) {
-      $notification.post(`po0fw ${alias}`, `新占坑位 ${nets.length}/5${cellMark}`, nets.join("\n"));
+      $notification.post(`Po0 防火墙 · ${alias}`, `新占槽位 ${nets.length}/5 · ${netLabel}`, nets.join("\n"));
     } else if (!quiet) {
-      $notification.post(`po0fw ${alias}`, `已提交 ${nets.length}/5${cellMark}`, nets.join("\n"));
+      $notification.post(`Po0 防火墙 · ${alias}`, `已加白 ${nets.length}/5 · ${netLabel}`, nets.join("\n"));
     }
 
-    lines.push(`${alias} ✅ ${nets.length ? nets.length + "/5" : "已提交"}${cellMark}`);
-    nets.forEach(n => lines.push("   " + n));
+    lines.push(`${alias}  ✅ ${nets.length ? `已加白 ${nets.length}/5` : "已提交"}`);
+    if (nets.length) lines.push("  " + nets.join(" · "));
   }
 
-  $done({ title: `po0fw · ${tokens.length} 机 · ${netLabel}`, content: lines.join("\n") });
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  lines.push("", `上次运行 ${hhmm}`);
+
+  $done({ title: `Po0 防火墙 · ${netLabel}`, content: lines.join("\n") });
 })();
