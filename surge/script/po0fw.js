@@ -8,7 +8,7 @@
  * 参数（模块 argument）：
  *   api    加白接口 base URL
  *   tokens 别名:token，逗号分隔，别名可省略
- *   slots  网络名@槽位，逗号分隔；网络名为 WiFi SSID，cellular 代表蜂窝；未列出的网络不带 slot
+ *   slots  网络名@槽位，逗号分隔；网络名为 WiFi SSID，cellular 代表蜂窝，wired 代表有线；未列出的网络不带 slot
  *   quiet  true 只在失败/新占坑位时通知
  *
  * 只用到 Surge 的 $argument / $network / $httpClient / $persistentStore / $notification / $done。
@@ -26,13 +26,14 @@ function parseArgs(s) {
   return o;
 }
 
-// 当前网络：蜂窝 → cellular；WiFi → SSID（iOS 需给 Surge 定位权限才读得到）；其他 → ""
+// 当前网络：蜂窝 → cellular；WiFi → SSID；非蜂窝且读不到 SSID → wired
+// 注意：Surge 需要定位权限才读得到 SSID，未授权时 WiFi 也会被判成 wired
 function currentNet() {
   try {
     if (/^pdp_ip/.test(($network.v4 && $network.v4.primaryInterface) || "")) return { name: "cellular", isCell: true };
     const ssid = $network.wifi && $network.wifi.ssid;
-    return { name: ssid || "", isCell: false };
-  } catch (e) { return { name: "", isCell: false }; }
+    return { name: ssid || "wired", isCell: false };
+  } catch (e) { return { name: "wired", isCell: false }; }
 }
 
 function parseSlots(s) {
@@ -76,7 +77,7 @@ function extractNets(body) {
 
   const net = currentNet();
   const slot = parseSlots(args.slots).get(net.name);
-  const netLabel = (net.isCell ? "蜂窝" : net.name || "未知网络") + (slot !== undefined ? ` @${slot}` : "");
+  const netLabel = (net.isCell ? "蜂窝" : net.name === "wired" ? "有线" : net.name) + (slot !== undefined ? ` @${slot}` : "");
   const cellMark = net.isCell ? " 📶" : "";
   const lines = [];
 
