@@ -105,6 +105,20 @@ class GenerationTests(unittest.TestCase):
         self.assertTrue(real["dns"]["reverse_mapping"])
         self.assertTrue(fake["dns"]["reverse_mapping"])
 
+    def test_self_hosted_rules_and_apple_domain_routing(self):
+        for mode, path in TEMPLATES.items():
+            with self.subTest(mode=mode):
+                config = json.loads(path.read_text())
+                for rule_set in config["route"]["rule_set"]:
+                    if rule_set["type"] == "remote":
+                        self.assertTrue(rule_set["url"].startswith(
+                            "https://alexkris-rules.pages.dev/sing-box/"))
+                        self.assertEqual(rule_set["format"], "binary")
+                self.assertNotIn("17.0.0.0/8", json.dumps(config["route"]["rules"]))
+                apple = next(rule for rule in config["route"]["rules"]
+                             if "apple" in rule.get("rule_set", []))
+                self.assertEqual(apple["outbound"], "Direct")
+
     def test_region_regex_does_not_match_substrings(self):
         aliases = {
             "HK": ["HKG RFC sample", "Hong Kong RFC sample"],

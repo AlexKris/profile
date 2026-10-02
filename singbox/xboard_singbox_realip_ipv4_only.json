@@ -528,13 +528,6 @@
         "outbound": "Direct"
       },
       {
-        "ip_cidr": [
-          "17.0.0.0/8"
-        ],
-        "action": "route",
-        "outbound": "Direct"
-      },
-      {
         "rule_set": [
           "geoip-cn"
         ],
@@ -640,7 +633,7 @@
         "tag": "geosite-private",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-private.srs"
       },
       {
         "tag": "speedtest-domainset",
@@ -652,7 +645,7 @@
         "tag": "geosite-cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-cn.srs"
       },
       {
         "tag": "proxy-domainset",
@@ -670,13 +663,13 @@
         "tag": "geosite-geolocation-noncn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-geolocation-!cn.srs"
       },
       {
         "tag": "geosite-telegram",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-telegram.srs"
       },
       {
         "tag": "paypal",
@@ -688,19 +681,19 @@
         "tag": "geosite-cryptocurrency",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-cryptocurrency.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-category-cryptocurrency.srs"
       },
       {
         "tag": "geosite-google",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-google.srs"
       },
       {
         "tag": "geoip-cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/geoip/geoip-cn.srs"
       },
       {
         "tag": "telegram-ip",
