@@ -52,7 +52,7 @@ function parseSlots(s) {
 function post(url) {
   return new Promise(resolve => {
     $httpClient.post(
-      { url, policy: "DIRECT", insecure: true, timeout: 20, headers: { "User-Agent": "po0fw-surge/1" } },
+      { url, policy: "DIRECT", timeout: 20, headers: { "User-Agent": "po0fw-surge/1" } },
       (err, resp, body) => resolve({ err, status: resp && resp.status, body: body || "" })
     );
   });
