@@ -93,7 +93,13 @@
           {
             "rule_set": [
               "speedtest-domainset",
-              "ai"
+              "ai",
+              "paypal",
+              "stream-jp",
+              "stream-tw",
+              "stream",
+              "geosite-telegram",
+              "apple-proxy"
             ],
             "query_type": [
               "A"
@@ -112,7 +118,13 @@
       {
         "rule_set": [
           "speedtest-domainset",
-          "ai"
+          "ai",
+          "paypal",
+          "stream-jp",
+          "stream-tw",
+          "stream",
+          "geosite-telegram",
+          "apple-proxy"
         ],
         "action": "route",
         "server": "dns_proxy"
@@ -132,15 +144,9 @@
         "rules": [
           {
             "rule_set": [
-              "geosite-telegram",
-              "stream-jp",
-              "stream-tw",
-              "stream",
-              "paypal",
-              "geosite-cryptocurrency",
-              "geosite-google",
-              "microsoft",
-              "download-domainset"
+              "download-domainset",
+              "download",
+              "geosite-google"
             ],
             "query_type": [
               "A"
@@ -158,22 +164,18 @@
       },
       {
         "rule_set": [
-          "geosite-telegram",
-          "stream-jp",
-          "stream-tw",
-          "stream",
-          "paypal",
-          "geosite-cryptocurrency",
-          "geosite-google",
-          "microsoft",
-          "download-domainset"
+          "download-domainset",
+          "download",
+          "geosite-google"
         ],
         "action": "route",
         "server": "dns_proxy"
       },
       {
         "rule_set": [
-          "geosite-cn"
+          "domestic",
+          "direct",
+          "cn-domain"
         ],
         "action": "route",
         "server": "dns_direct"
@@ -290,98 +292,56 @@
       "tag": "HK",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|(?<![A-Za-z])(?:HKG?|Hong[ -]?Kong)(?![A-Za-z])",
+      "include": "🇭🇰|香港|(?<![A-Za-z])(?:HKG?|Hong[ -]?Kong)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
       "tag": "TW",
       "type": "selector",
       "outbounds": [],
-      "include": "🇨🇳|🇹🇼|(?<![A-Za-z])(?:TWN?|Taiwan)(?![A-Za-z])",
+      "include": "🇹🇼|台湾|台灣|(?<![A-Za-z])(?:TWN?|Taiwan)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
       "tag": "JP",
       "type": "selector",
       "outbounds": [],
-      "include": "🇯🇵|(?<![A-Za-z])(?:JPN?|Japan)(?![A-Za-z])",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "US",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇺🇸|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "DE",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇩🇪|(?<![A-Za-z])(?:DEU?|GER|Germany)(?![A-Za-z])",
+      "include": "🇯🇵|日本|(?<![A-Za-z])(?:JPN?|Japan)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
       "tag": "SG",
       "type": "selector",
       "outbounds": [],
-      "include": "🇸🇬|(?<![A-Za-z])(?:SGP?|Singapore)(?![A-Za-z])",
+      "include": "🇸🇬|新加坡|(?<![A-Za-z])(?:SGP?|Singapore)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
-      "tag": "Telegram",
+      "tag": "US",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇯🇵|(?<![A-Za-z])(?:HKG?|JPN?|Hong[ -]?Kong|Japan)(?![A-Za-z])",
+      "include": "🇺🇸|美国|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
-      "tag": "GlobalMedia",
+      "tag": "DE",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇨🇳|🇹🇼|🇸🇬|(?<![A-Za-z])(?:HKG?|TWN?|SGP?|Hong[ -]?Kong|Taiwan|Singapore)(?![A-Za-z])",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "GlobalEmby",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇭🇰|🇯🇵|🇸🇬|(?<![A-Za-z])(?:HKG?|JPN?|SGP?|Hong[ -]?Kong|Japan|Singapore)(?![A-Za-z])",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "RFCEmby",
-      "type": "selector",
-      "outbounds": [],
-      "include": "^(?=.*(?:🇭🇰|🇯🇵|🇸🇬|(?<![A-Za-z])(?:HKG?|JPN?|SGP?|Hong[ -]?Kong|Japan|Singapore)(?![A-Za-z])))(?=.*(?:RFC|Jinx))",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "AIGC",
-      "type": "selector",
-      "outbounds": [],
-      "include": "^(?=.*(?:🇨🇳|🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|英国|(?<![A-Za-z])(?:TWN?|JPN?|SGP?|USA?|UK|GBR?|Taiwan|Japan|Singapore|United[ -]?States|United[ -]?Kingdom)(?![A-Za-z])))(?=.*(?:家宽|(?<![A-Za-z])(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii)(?![A-Za-z])))",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "Google",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇺🇸|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
+      "include": "🇩🇪|德国|(?<![A-Za-z])(?:DEU?|GER|Germany)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
       "tag": "Speedtest",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇨🇳|🇹🇼|🇯🇵|🇸🇬|(?<![A-Za-z])(?:HKG?|TWN?|JPN?|SGP?|Hong[ -]?Kong|Taiwan|Japan|Singapore)(?![A-Za-z])",
+      "include": "🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|(?<![A-Za-z])(?:HKG?|TWN?|JPN?|SGP?|Hong[ -]?Kong|Taiwan|Japan|Singapore)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
-      "tag": "Download",
+      "tag": "AIGC",
       "type": "selector",
       "outbounds": [],
-      "include": "🇭🇰|🇯🇵|(?<![A-Za-z])(?:HKG?|JPN?|Hong[ -]?Kong|Japan)(?![A-Za-z])",
+      "include": "^(?=.*(?:🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|(?<![A-Za-z])(?:TWN?|JPN?|SGP?|USA?|UK|GBR?|Taiwan|Japan|Singapore|United[ -]?States|United[ -]?Kingdom)(?![A-Za-z])))(?=.*(?:家宽|(?<![A-Za-z])(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii)(?![A-Za-z])))",
       "fallback": "Proxy"
     },
     {
@@ -396,15 +356,18 @@
       "_filter": "none"
     },
     {
-      "tag": "Crypto",
+      "tag": "GlobalMedia",
       "type": "selector",
-      "default": "TW",
-      "outbounds": [
-        "TW",
-        "Proxy",
-        "Direct"
-      ],
-      "_filter": "none"
+      "outbounds": [],
+      "include": "🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|(?<![A-Za-z])(?:HKG?|TWN?|SGP?|Hong[ -]?Kong|Taiwan|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
+    },
+    {
+      "tag": "Telegram",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇯🇵|香港|日本|(?<![A-Za-z])(?:HKG?|JPN?|Hong[ -]?Kong|Japan)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "MSCDN",
@@ -415,6 +378,34 @@
         "Proxy"
       ],
       "_filter": "none"
+    },
+    {
+      "tag": "Download",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇯🇵|香港|日本|(?<![A-Za-z])(?:HKG?|JPN?|Hong[ -]?Kong|Japan)(?![A-Za-z])",
+      "fallback": "Proxy"
+    },
+    {
+      "tag": "Google",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇺🇸|美国|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
+      "fallback": "Proxy"
+    },
+    {
+      "tag": "GlobalEmby",
+      "type": "selector",
+      "outbounds": [],
+      "include": "🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|(?<![A-Za-z])(?:HKG?|JPN?|SGP?|Hong[ -]?Kong|Japan|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
+    },
+    {
+      "tag": "RFCEmby",
+      "type": "selector",
+      "outbounds": [],
+      "include": "^(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|(?<![A-Za-z])(?:HKG?|JPN?|SGP?|Hong[ -]?Kong|Japan|Singapore)(?![A-Za-z])))(?=.*(?:RFC|Jinx))",
+      "fallback": "Proxy"
     },
     {
       "tag": "Final",
@@ -519,26 +510,10 @@
       },
       {
         "rule_set": [
-          "apple-domainset",
-          "apple"
+          "paypal"
         ],
         "action": "route",
-        "outbound": "Direct"
-      },
-      {
-        "rule_set": [
-          "microsoft-cdn"
-        ],
-        "action": "route",
-        "outbound": "MSCDN"
-      },
-      {
-        "rule_set": [
-          "geosite-telegram",
-          "telegram-ip"
-        ],
-        "action": "route",
-        "outbound": "Telegram"
+        "outbound": "PayPal"
       },
       {
         "rule_set": [
@@ -563,17 +538,41 @@
       },
       {
         "rule_set": [
-          "paypal"
+          "geosite-telegram",
+          "telegram-ip"
         ],
         "action": "route",
-        "outbound": "PayPal"
+        "outbound": "Telegram"
       },
       {
         "rule_set": [
-          "geosite-cryptocurrency"
+          "apple-proxy"
         ],
         "action": "route",
-        "outbound": "Crypto"
+        "outbound": "Proxy"
+      },
+      {
+        "rule_set": [
+          "apple-domainset",
+          "apple"
+        ],
+        "action": "route",
+        "outbound": "Direct"
+      },
+      {
+        "rule_set": [
+          "microsoft-cdn"
+        ],
+        "action": "route",
+        "outbound": "MSCDN"
+      },
+      {
+        "rule_set": [
+          "download-domainset",
+          "download"
+        ],
+        "action": "route",
+        "outbound": "Download"
       },
       {
         "rule_set": [
@@ -584,40 +583,10 @@
       },
       {
         "rule_set": [
-          "microsoft"
+          "domestic",
+          "direct",
+          "cn-domain"
         ],
-        "action": "route",
-        "outbound": "Proxy"
-      },
-      {
-        "rule_set": [
-          "download-domainset"
-        ],
-        "action": "route",
-        "outbound": "Download"
-      },
-      {
-        "rule_set": [
-          "geosite-cn"
-        ],
-        "action": "route",
-        "outbound": "Direct"
-      },
-      {
-        "rule_set": [
-          "proxy-domainset",
-          "proxy",
-          "geosite-geolocation-noncn"
-        ],
-        "action": "route",
-        "outbound": "Proxy"
-      },
-      {
-        "action": "resolve",
-        "strategy": "ipv4_only"
-      },
-      {
-        "ip_is_private": true,
         "action": "route",
         "outbound": "Direct"
       },
@@ -721,6 +690,12 @@
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/apple.srs"
       },
       {
+        "tag": "apple-proxy",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/apple-proxy.srs"
+      },
+      {
         "tag": "direct-extra",
         "type": "remote",
         "format": "binary",
@@ -731,12 +706,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft-cdn.srs"
-      },
-      {
-        "tag": "microsoft",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/microsoft.srs"
       },
       {
         "tag": "stream",
@@ -763,6 +732,12 @@
         "url": "https://alexkris-rules.pages.dev/sing-box/domainset/download.srs"
       },
       {
+        "tag": "download",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/download.srs"
+      },
+      {
         "tag": "geosite-private",
         "type": "remote",
         "format": "binary",
@@ -775,28 +750,22 @@
         "url": "https://alexkris-rules.pages.dev/sing-box/domainset/speedtest.srs"
       },
       {
-        "tag": "geosite-cn",
+        "tag": "cn-domain",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-cn.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/cn-domain.srs"
       },
       {
-        "tag": "proxy-domainset",
+        "tag": "domestic",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/proxy.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/domestic.srs"
       },
       {
-        "tag": "proxy",
+        "tag": "direct",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/proxy.srs"
-      },
-      {
-        "tag": "geosite-geolocation-noncn",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-geolocation-!cn.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/direct.srs"
       },
       {
         "tag": "geosite-telegram",
@@ -809,12 +778,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/paypal.srs"
-      },
-      {
-        "tag": "geosite-cryptocurrency",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-category-cryptocurrency.srs"
       },
       {
         "tag": "geosite-google",

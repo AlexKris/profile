@@ -101,7 +101,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(real["route"]["rules"], fake["route"]["rules"])
         remote = lambda cfg: [rs for rs in cfg["route"]["rule_set"] if rs["type"] == "remote"]
         self.assertEqual(remote(real), remote(fake))
-        self.assertEqual(len(remote(real)), 22)
+        self.assertEqual(len(remote(real)), 21)
         self.assertTrue(real["dns"]["reverse_mapping"])
         self.assertTrue(fake["dns"]["reverse_mapping"])
 
@@ -148,6 +148,23 @@ class GenerationTests(unittest.TestCase):
                                        "Download": ["HK", "JP"]}.items():
                     expected = {name for region in regions for name in aliases[region]}
                     self.assertTrue(expected <= set(groups[group]["outbounds"]), group)
+
+    def test_chinese_names_and_taiwan_nodes_with_cn_flag(self):
+        names = NODES + ["🇨🇳TW.Hinet", "香港 01", "台湾 Ucom 02", "日本 03", "新加坡 04",
+                         "美国 05", "德国 06", "🇨🇳 Relay 07"]
+        for path in TEMPLATES.values():
+            with self.subTest(path=path.name):
+                groups = {item["tag"]: set(item.get("outbounds", []))
+                          for item in generate(path, names)["config"]["outbounds"]}
+                for group, members in {"HK": ["香港 01"], "TW": ["🇨🇳TW.Hinet", "台湾 Ucom 02"],
+                                       "JP": ["日本 03"], "SG": ["新加坡 04"], "US": ["美国 05"],
+                                       "DE": ["德国 06"], "GlobalMedia": ["🇨🇳TW.Hinet", "香港 01"],
+                                       "Speedtest": ["🇨🇳TW.Hinet", "日本 03"], "AIGC": ["台湾 Ucom 02"],
+                                       "Telegram": ["香港 01", "日本 03"], "Google": ["美国 05"]}.items():
+                    self.assertTrue(set(members) <= groups[group], group)
+                self.assertNotIn("🇨🇳TW.Hinet", groups["AIGC"])
+                for group in ("TW", "GlobalMedia", "Speedtest", "AIGC", "HK"):
+                    self.assertNotIn("🇨🇳 Relay 07", groups[group], group)
 
     def test_api_secrets_required_in_both_template_sources(self):
         for path in TEMPLATES.values():
@@ -292,12 +309,13 @@ def query(dns_port, name, kind="A"):
 def fixture_rules(config):
     domains = {
         "geosite-private": ["lan.test", "in-addr.arpa"],
-        "geosite-cn": ["cn.test", "apple.cn.test", "ai.cn.test", "stream.cn.test"],
+        "cn-domain": ["cn.test", "apple.cn.test", "ai.cn.test", "stream.cn.test"],
+        "direct": ["pt.direct.test"],
         "ai": ["ai.cn.test"],
+        "apple-proxy": ["mask.apple.cn.test"],
         "apple": ["apple.cn.test", "ai.cn.test"],
         "microsoft-cdn": ["cdn.microsoft.test"],
-        "microsoft": ["microsoft.test"],
-        "stream": ["stream.cn.test"],
+        "stream": ["stream.cn.test", "tv.apple.cn.test"],
         "geosite-google": ["google.test", "stun.l.google.com"],
     }
     for rule_set in config["route"]["rule_set"]:
@@ -413,7 +431,8 @@ class RuntimeTests(unittest.TestCase):
                         "unknown.test": foreign, "unlisted.foreign.test": foreign,
                         "www.cn.test": "dns_direct", "www.apple.cn.test": "dns_direct",
                         "www.ai.cn.test": foreign, "www.stream.cn.test": foreign,
-                        "cdn.microsoft.test": "dns_direct", "www.microsoft.test": foreign,
+                        "tv.apple.cn.test": foreign, "mask.apple.cn.test": foreign,
+                        "pt.direct.test": "dns_direct", "cdn.microsoft.test": "dns_direct",
                         "stun.l.google.com": "dns_proxy", "stun.cn.test": "dns_direct",
                         "www.msftconnecttest.com": "dns_direct",
                         "router.lan.test": "dns_local", "lancache.steamcontent.com": "dns_local",
@@ -454,24 +473,46 @@ class RuntimeTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_route_resolve_uses_dns_rules_and_skips_fake_transport(self):
+    def test_unmatched_domains_reach_final_without_local_resolution(self):
         for profile in TEMPLATES:
             with self.subTest(profile=profile):
                 config = self.config(profile)
+                # Unreachable SOCKS nodes: a proxy hands the domain to the remote side, unlike
+                # the Direct stand-ins, so any DNS hit here would come from rule matching.
+                closed = port()
+                for outbound in config["outbounds"]:
+                    if outbound["tag"] in NODES:
+                        tag = outbound["tag"]
+                        outbound.clear()
+                        outbound.update(tag=tag, type="socks", server="127.0.0.1", server_port=closed)
                 with running(config) as log:
-                    for name, expected in (("http-unknown.test", "dns_proxy"),
-                                           ("http-router.lan.test", "dns_local")):
+                    names = ["http-unknown.test"]
+                    if profile == "fakeip":
+                        names.append("http-fake.test")
+                        fake = self.assert_resolver(config, "http-fake.test", "fake")["ip"]
+                    for name in names:
+                        self.hits.clear()
+                        self.proxy_request(config, fake if name == "http-fake.test" else name)
+                        self.assertEqual(self.hits, [], name)
+                    for name, expected in (("http-router.lan.test", "dns_local"),
+                                           ("http-site.cn.test", "dns_direct")):
                         self.hits.clear()
                         self.http_request(config, name)
                         self.assertEqual(self.hits, [(expected, name, 1)])
-                    if profile == "fakeip":
-                        reply = self.assert_resolver(config, "http-fake.test", "fake")
-                        self.http_request(config, reply["ip"])
-                        self.assertEqual(self.hits, [("dns_proxy", "http-fake.test", 1)])
                     log.seek(0)
                     output = log.read()
+                    for name in names:
+                        self.assertIn(f"outbound/socks[{NODES[0]}]: outbound connection to {name}:", output)
                     self.assertNotIn("sniffed", output)
                     self.assertNotIn("only IP queries", output)
+
+    def proxy_request(self, config, destination):
+        connection = http.client.HTTPConnection("127.0.0.1", config["inbounds"][0]["listen_port"], timeout=3)
+        try:
+            connection.request("GET", f"http://{destination}:{self.origin.server_address[1]}/")
+            self.assertEqual(connection.getresponse().status, 502)
+        finally:
+            connection.close()
 
     def test_explicit_ipv6_rejected_in_all_modes(self):
         for mode in ("Rule", "Direct", "Global"):
@@ -496,7 +537,8 @@ class RuntimeTests(unittest.TestCase):
             with running(config):
                 self.hits.clear()
                 self.http_request(config, reply["ip"])
-                self.assertEqual(self.hits, [("dns_proxy", "http-persistent.test", 1)])
+                # The Direct stand-in node dials the restored domain via default_domain_resolver.
+                self.assertEqual(self.hits, [("dns_direct", "http-persistent.test", 1)])
 
     def test_remote_rules_use_shared_client_and_warm_cache(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -509,9 +551,9 @@ class RuntimeTests(unittest.TestCase):
             self.origin.rule_available = True
             config = self.config("realip")
             config["experimental"]["cache_file"]["path"] = str(Path(directory) / "cache.db")
-            rule = next(item for item in config["route"]["rule_set"] if item["tag"] == "geosite-cn")
+            rule = next(item for item in config["route"]["rule_set"] if item["tag"] == "cn-domain")
             rule.clear()
-            rule.update(tag="geosite-cn", type="remote", format="binary",
+            rule.update(tag="cn-domain", type="remote", format="binary",
                         url=f"http://127.0.0.1:{self.origin.server_address[1]}/rules.srs")
             with running(config):
                 self.assert_resolver(config, "cold.cn.test", "dns_direct")
