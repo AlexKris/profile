@@ -10,33 +10,26 @@ BaseProvider: &BaseProvider
     timeout: 5000
     lazy: true
 
-BaseSelect: &BaseSelect {type: select}
+BaseSelect: &BaseSelect {type: select, empty-fallback: PASS}
+BaseProxySelect: &BaseProxySelect {type: select, empty-fallback: DIRECT}
 
-FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
-FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
-FilterJP: &FilterJP '(?=.*(?:🇯🇵|JP|Japan))'
-FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
-FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
-FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
+FilterHK: &FilterHK '(?=.*(?:🇭🇰|香港|Hong|\bHK\b))'
+FilterTW: &FilterTW '(?=.*(?:🇹🇼|台湾|台灣|Taiwan|\bTW\b))'
+FilterJP: &FilterJP '(?=.*(?:🇯🇵|日本|Japan|\bJP\b))'
+FilterSG: &FilterSG '(?=.*(?:🇸🇬|新加坡|Singapore|\bSG\b))'
+FilterUS: &FilterUS '(?=.*(?:🇺🇸|美国|United States|\bUSA?\b))'
+FilterDE: &FilterDE '(?=.*(?:🇩🇪|德国|Germany|\bDEU?\b))'
 
-FilterJP_All: &FilterJP_All '(?=.*(?:🇯🇵|JP|Japan))'
-
-FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
-FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
-FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇨🇳|🇸🇬|HK|TW|SG|Hong|Tai|Sing))'
-FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))'
-FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|HK|JP|SG))(?=.*(?:RFC|Jinx))'
-FilterAIGC: &FilterAIGC '(?=.*(?:🇨🇳|🇯🇵|🇸🇬|🇺🇸|🇬🇧|TW|JP|SG|US|英国))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
-FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|US|USA))'
-FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇨🇳|🇯🇵|🇸🇬|HK|TW|JP|SG))'
-
-BehaviorDN: &BehaviorDN {type: http, behavior: domain, format: text, interval: 86400}
+FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
+FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
+FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|\bHK\b|\bTW\b|\bSG\b))'
+FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))'
+FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))(?=.*(?:RFC|Jinx))'
+FilterAIGC: &FilterAIGC '(?=.*(?:🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|Taiwan|Japan|Singapore|United States|\bTW\b|\bJP\b|\bSG\b|\bUSA?\b))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
+FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|美国|United States|\bUSA?\b))'
+FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|Hong|Taiwan|Japan|Singapore|\bHK\b|\bTW\b|\bJP\b|\bSG\b))'
 
 BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
-
-BehaviorIP: &BehaviorIP {type: http, behavior: classical, format: text, interval: 86400}
-
-BehaviorIPCIDRText: &BehaviorIPCIDRText {type: http, behavior: ipcidr, format: text, interval: 86400}
 
 BehaviorMrsDN: &BehaviorMrsDN {type: http, behavior: domain, format: mrs, interval: 86400}
 
@@ -53,9 +46,7 @@ proxy-providers:
 mode: rule
 port: 7890
 socks-port: 7891
-redir-port: 7892
 mixed-port: 7893
-tproxy-port: 7895
 ipv6: false
 allow-lan: true
 unified-delay: true
@@ -168,10 +159,11 @@ dns:
 proxy-groups:
   # ===== 顶层策略 =====
   - name: Proxy
-    <<: *BaseSelect
+    <<: *BaseProxySelect
     include-all-providers: true
+    exclude-filter: '流量|到期|官网|套餐|剩余|过期|重置'
 
-  # ===== 地区策略=====
+  # ===== 地区策略 =====
   - name: HK
     <<: *BaseSelect
     include-all-providers: true
@@ -203,16 +195,49 @@ proxy-groups:
     filter: *FilterDE
 
   # ===== 专用策略 =====
-  - name: Telegram
+  - name: Speedtest
     <<: *BaseSelect
     include-all-providers: true
-    filter: *FilterTelegram
+    filter: *FilterSpeedtest
+
+  - name: AIGC
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterAIGC
+
+  - name: PayPal
+    <<: *BaseSelect
+    proxies: [US, HK, DIRECT]
 
   - name: GlobalMedia
     <<: *BaseSelect
     include-all-providers: true
     filter: *FilterGlobalMedia
 
+  - name: Telegram
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterTelegram
+
+  - name: MSCDN
+    <<: *BaseSelect
+    proxies: [DIRECT, Proxy]
+
+  - name: GameDownload
+    <<: *BaseSelect
+    proxies: [DIRECT, Download, Proxy]
+
+  - name: Download
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterHKJPWide
+
+  - name: Google
+    <<: *BaseSelect
+    include-all-providers: true
+    filter: *FilterGoogle
+
+  # ===== 手动策略 =====
   - name: GlobalEmby
     <<: *BaseSelect
     include-all-providers: true
@@ -223,47 +248,7 @@ proxy-groups:
     include-all-providers: true
     filter: *FilterRFCEmby
 
-  - name: AIGC
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterAIGC
-
-  - name: Google
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterGoogle
-
-  - name: Speedtest
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterSpeedtest
-
-  - name: Download
-    <<: *BaseSelect
-    include-all-providers: true
-    filter: *FilterHKJPWide
-
-  - name: GameDownload
-    <<: *BaseSelect
-    proxies: [DIRECT, Download, Proxy]
-
-  - name: PayPal
-    <<: *BaseSelect
-    proxies: [US, HK, DIRECT]
-
-  - name: Crypto
-    <<: *BaseSelect
-    proxies: [TW, Proxy, DIRECT]
-
-  - name: MSCDN
-    <<: *BaseSelect
-    proxies: [DIRECT, Proxy]
-
-  - name: MSSvc
-    <<: *BaseSelect
-    proxies: [Proxy, DIRECT]
-
-  # ===== 顶层策略 =====
+  # ===== 兜底策略 =====
   - name: Final
     <<: *BaseSelect
     proxies: [Proxy, DIRECT]
@@ -301,12 +286,9 @@ rules:
   # > 测速网站
   - RULE-SET,speedtest_domain,Speedtest
   # > AIGC
-  - RULE-SET,openai,AIGC
   - RULE-SET,ai,AIGC
   # > PayPal
   - RULE-SET,paypal_rule,PayPal
-  # > Crypto
-  - RULE-SET,crypto_rule,Crypto
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
   # > 流媒体（TW）
@@ -327,8 +309,6 @@ rules:
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
-  # > Microsoft
-  - RULE-SET,microsoft,MSSvc
   # > Google 服务
   - RULE-SET,google,Google
   # > 国内常见域名
@@ -347,47 +327,49 @@ rules:
   - RULE-SET,proxy_domain,Proxy
   - RULE-SET,global,Proxy
   - RULE-SET,proxy_keyword,Proxy
-  # > 内网域名
-  - RULE-SET,lan_nonip,DIRECT
   # > 非中国大陆域名兜底
   - RULE-SET,geolocation_not_cn,Proxy
   # ===== 域名规则 end =====
   # ===== IP 规则 start =====
+  # > LAN IP
+  - RULE-SET,lan_ip,DIRECT
   # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到代理策略被阻断）
   - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
   # > 中国大陆 IP
   - RULE-SET,china_ip,DIRECT
-  - RULE-SET,cn_ip,DIRECT
-  # > LAN IP
-  - RULE-SET,lan_ip,DIRECT
   # ===== IP 规则 end =====
-  - GEOIP,CN,DIRECT
   # > Final
   - MATCH,Final
 
 # ==================== 规则集提供者 ====================
 rule-providers:
   # ===== 域名规则集 =====
+  direct_extra:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct-extra.mrs'
   speedtest_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/speedtest.mrs'
-  openai:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
   ai:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/ai.mrs'
-  stream:
+  paypal_rule:
     <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/paypal.mrs'
   stream_jp:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-jp.mrs'
   stream_tw:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-tw.mrs'
+  stream:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream.mrs'
+  stream_keyword:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/stream.list'
   telegram:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/telegram.mrs'
@@ -400,27 +382,33 @@ rule-providers:
   apple:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple.mrs'
-  direct_extra:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct-extra.mrs'
   microsoft_cdn:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft-cdn.mrs'
-  microsoft:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft.mrs'
-  download_domain:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/download.mrs'
   game_download:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/game-download.mrs'
+  download_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/download.mrs'
   download_nonip:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/download.mrs'
+  google:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/google.mrs'
+  domestic:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/domestic.mrs'
   direct:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct.mrs'
+  direct_keyword:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/direct.list'
+  cn_domain:
+    <<: *BehaviorMrsDN
+    url: 'https://alexkris-rules.pages.dev/mihomo/geosite/cn.mrs'
   proxy_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/proxy.mrs'
@@ -430,52 +418,19 @@ rule-providers:
   proxy_keyword:
     <<: *BehaviorCL
     url: 'https://alexkris-rules.pages.dev/mihomo/classical/proxy.list'
-  stream_keyword:
-    <<: *BehaviorCL
-    url: 'https://alexkris-rules.pages.dev/mihomo/classical/stream.list'
-  direct_keyword:
-    <<: *BehaviorCL
-    url: 'https://alexkris-rules.pages.dev/mihomo/classical/direct.list'
-  domestic:
+  geolocation_not_cn:
     <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/domestic.mrs'
-  lan_nonip:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/lan.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/geosite/geolocation-!cn.mrs'
 
   # ===== IP 规则集 =====
+  lan_ip:
+    <<: *BehaviorMrsIP
+    url: 'https://alexkris-rules.pages.dev/mihomo/ip/lan-ip.mrs'
   telegram_ip:
     <<: *BehaviorMrsIP
     url: 'https://alexkris-rules.pages.dev/mihomo/ip/telegram-ip.mrs'
   china_ip:
     <<: *BehaviorMrsIP
     url: 'https://alexkris-rules.pages.dev/mihomo/ip/china-ip.mrs'
-  lan_ip:
-    <<: *BehaviorMrsIP
-    url: 'https://alexkris-rules.pages.dev/mihomo/ip/lan-ip.mrs'
-
-  # ===== 补充规则集 =====
-  cn_ip:
-    <<: *BehaviorMrsIP
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs'
-  google:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs'
-
-  # ===== 域名规则集（MRS） =====
-  paypal_rule:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/paypal.mrs'
-  cn_domain:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
-  geolocation_not_cn:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs'
-
-  # ===== 自定义规则集 =====
-  crypto_rule:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-cryptocurrency.mrs'
 
 # ==================== EOF ====================
