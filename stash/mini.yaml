@@ -144,6 +144,7 @@ rules:
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
   - RULE-SET,ai,AIGC
+  - RULE-SET,ai_keyword,AIGC
   - RULE-SET,stream,GlobalMedia
   - RULE-SET,stream_keyword,GlobalMedia
   - RULE-SET,telegram,Telegram
@@ -165,6 +166,9 @@ rule-providers:
   ai:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/ai.mrs'
+  ai_keyword:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/ai.list'
   telegram:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/telegram.mrs'

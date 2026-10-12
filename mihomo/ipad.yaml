@@ -254,6 +254,7 @@ rules:
   - RULE-SET,speedtest_domain,Speedtest
   # > AIGC
   - RULE-SET,ai,AIGC
+  - RULE-SET,ai_keyword,AIGC
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
   # > 流媒体（TW）
@@ -305,6 +306,9 @@ rule-providers:
   ai:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/ai.mrs'
+  ai_keyword:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/ai.list'
   stream_jp:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-jp.mrs'

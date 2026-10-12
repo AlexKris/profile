@@ -170,6 +170,7 @@ rules:
   - RULE-SET,direct_extra,DIRECT
   # > AIGC
   - RULE-SET,ai,AIGC
+  - RULE-SET,ai_keyword,AIGC
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
   - RULE-SET,stream_keyword,GlobalMedia
@@ -198,6 +199,9 @@ rule-providers:
   ai:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/ai.mrs'
+  ai_keyword:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/ai.list'
   stream:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream.mrs'
