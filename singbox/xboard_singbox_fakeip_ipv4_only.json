@@ -98,7 +98,7 @@
               "stream-jp",
               "stream-tw",
               "stream",
-              "geosite-telegram",
+              "telegram",
               "apple-proxy"
             ],
             "query_type": [
@@ -123,7 +123,7 @@
           "stream-jp",
           "stream-tw",
           "stream",
-          "geosite-telegram",
+          "telegram",
           "apple-proxy"
         ],
         "action": "route",
@@ -145,7 +145,7 @@
             "rule_set": [
               "download-domainset",
               "download",
-              "geosite-google"
+              "google"
             ],
             "query_type": [
               "A"
@@ -165,7 +165,7 @@
         "rule_set": [
           "download-domainset",
           "download",
-          "geosite-google"
+          "google"
         ],
         "action": "route",
         "server": "dns_proxy"
@@ -536,7 +536,7 @@
       },
       {
         "rule_set": [
-          "geosite-telegram",
+          "telegram",
           "telegram-ip"
         ],
         "action": "route",
@@ -573,7 +573,7 @@
       },
       {
         "rule_set": [
-          "geosite-google"
+          "google"
         ],
         "action": "route",
         "outbound": "Google"
@@ -588,7 +588,7 @@
       },
       {
         "rule_set": [
-          "geoip-cn"
+          "china-ip"
         ],
         "action": "route",
         "outbound": "Direct"
@@ -752,10 +752,10 @@
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/direct.srs"
       },
       {
-        "tag": "geosite-telegram",
+        "tag": "telegram",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-telegram.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/telegram.srs"
       },
       {
         "tag": "paypal",
@@ -764,16 +764,16 @@
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/paypal.srs"
       },
       {
-        "tag": "geosite-google",
+        "tag": "google",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/geosite/geosite-google.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/google.srs"
       },
       {
-        "tag": "geoip-cn",
+        "tag": "china-ip",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/geoip/geoip-cn.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/ip/china-ip.srs"
       },
       {
         "tag": "telegram-ip",

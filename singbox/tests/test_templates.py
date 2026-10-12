@@ -316,7 +316,7 @@ def fixture_rules(config):
         "apple": ["apple.cn.test", "ai.cn.test"],
         "microsoft-cdn": ["cdn.microsoft.test"],
         "stream": ["stream.cn.test", "tv.apple.cn.test"],
-        "geosite-google": ["google.test", "stun.l.google.com"],
+        "google": ["google.test", "stun.l.google.com"],
     }
     for rule_set in config["route"]["rule_set"]:
         if rule_set["type"] == "remote":
