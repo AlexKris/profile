@@ -7,7 +7,7 @@ BaseProvider: &BaseProvider
   proxy: Proxy
   health-check:
     enable: true
-    url: 'http://1.1.1.1/generate_204'
+    url: 'http://cp.cloudflare.com/generate_204'
     interval: 300
     timeout: 5000
     lazy: true
