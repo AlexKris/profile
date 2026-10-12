@@ -13,7 +13,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 - DNS 劫持先于 IPv6 拒绝，允许应用通过 IPv6 地址提交 DNS 查询；公共 DoH 上游使用 IPv4，`dns_local` 仍遵循平台本地解析实现。
 - IPv6 拒绝先于私网、Direct、Global；`no_drop: true` 避免频繁命中后变成静默丢包，减少应用等待超时。
 - 客户端直连 IPv6-only 目标不在支持范围内；节点入口本身也应具备可用的 IPv4。系统明确排除在 VPN 外的流量不受模板控制。
-- 分流逻辑与 Surge/mihomo 一致：未命中任何域名规则的连接直接走 Final，路由中不解析域名；`geoip-cn`、`telegram-ip` 只对目标本身是 IP 的连接生效。国内域名依赖自建 `cn-domain`（v2fly `geolocation-cn` ∪ Loyalsoldier direct-list，约 11.2 万条），不再保留与 Final 等价的 `proxy`、`geolocation-!cn` 海外兜底。
+- 分流逻辑与 Surge/mihomo 一致：未命中任何域名规则的连接直接走 Final，路由中不解析域名；`geoip-cn`、`telegram-ip` 只对目标本身是 IP 的连接生效。国内域名依赖自建 `cn-domain`（v2fly `cn` ∪ 经 Tranco 前 100 万过滤的 Loyalsoldier direct-list，约 1.39 万条），不再保留与 Final 等价的 `proxy`、`geolocation-!cn` 海外兜底。
 - 所有远程 SRS 统一使用自建 Pages；其中 4 个基础集合（geosite-private、geosite-telegram、geosite-google、geoip-cn）按 SagerNet 原文件同步，不改变其正则语义。
 - Apple 按现有域名规则分流，不设整个 `17.0.0.0/8` 直连兜底；Surge 的历史 QUIC 修复不移植到此模板。
 - 规则顺序与 Surge/mihomo 一致：stream → apple-proxy → apple。Apple TV+ 走 GlobalMedia，iCloud 专用代理、Apple News、开发者服务走 Proxy，其余 Apple 域名直连。
@@ -77,7 +77,7 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 - 尊重 DNS TTL；不启用长期 stale/optimistic 结果、不禁用过期、不强行延长 TTL，避免 CDN 地址改变后继续使用失效 IP。
 - FakeIP 保留 `store_fakeip`，避免重启后应用缓存的假地址失去域名对应关系。该映射和普通 DNS 缓存不同，不建议为节省少量磁盘直接关闭。
 - 继续使用二进制 SRS，同一规则集在 DNS 和路由中按 tag 复用；合并相邻的同目的匹配（如 domestic/direct/cn-domain → Direct），不改变专用服务优先级。
-- 当前 21 个远程 SRS 合计 562,777 字节，约 550 KiB，其中 cn-domain 约 437 KiB。**这是下载体积，不是进程内存**。实测 1.14.2 的 Go 在用内存（clash_api `/memory`）：单独加载 cn-domain 比空配置多约 1 MiB；被替换掉的 geosite-cn、geolocation-!cn、proxy×2、microsoft、cryptocurrency 合计多约 2.3 MiB，换源后内存反而下降。
+- 当前 21 个远程 SRS 合计 179,456 字节，约 175 KiB，其中 cn-domain 约 63 KiB。**这是下载体积，不是进程内存**。实测 1.14.2 的 Go 在用内存（clash_api `/memory`）：11.2 万条版本的 cn-domain 单独加载比空配置多约 1 MiB（精简后未重测，条数约为原来的八分之一）；被替换掉的 geosite-cn、geolocation-!cn、proxy×2、microsoft、cryptocurrency 合计多约 2.3 MiB，换源后内存反而下降。
 - 规则和 Dashboard 共用具名 `http_proxy`，由 `route.default_http_client` 指定。删除旧 `download_detour` 及重复逐项配置，避免未来格式移除。
 - 保留 `mixed` 栈、MTU 1400 和平台默认 UDP 会话容量，不凭经验扩大缓冲、强加多路复用、TCP Fast Open 或频繁主动测速。路径 MTU、节点协议及实际负载决定这些参数是否有收益。
 - `endpoint_independent_nat` 早已不生效，删除它；1.14 的 `udp_mapping`、`udp_filtering` 默认就是 endpoint-independent，不重复配置。NAT 最终结果还受转发链及出口实现影响，客户端配置不能保证 NAT A。[UDP NAT 文档](https://sing-box.sagernet.org/configuration/shared/udp-nat/)。
