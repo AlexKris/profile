@@ -161,48 +161,48 @@ proxy-groups:
   # ===== 顶层策略 =====
   - name: Proxy
     <<: *BaseProxySelect
-    include-all-providers: true
+    include-all: true
 
   # ===== 地区策略 =====
   - name: HK
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterHK
 
   - name: TW
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterTW
 
   - name: JP
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterJP
 
   - name: SG
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterSG
 
   - name: US
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterUS
 
   - name: DE
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterDE
 
   # ===== 专用策略 =====
   - name: Speedtest
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterSpeedtest
 
   - name: AIGC
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterAIGC
 
   - name: PayPal
@@ -211,12 +211,12 @@ proxy-groups:
 
   - name: GlobalMedia
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterGlobalMedia
 
   - name: Telegram
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterTelegram
 
   - name: MSCDN
@@ -229,23 +229,23 @@ proxy-groups:
 
   - name: Download
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterHKJPWide
 
   - name: Google
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterGoogle
 
   # ===== 手动策略 =====
   - name: GlobalEmby
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterGlobalEmby
 
   - name: RFCEmby
     <<: *BaseSelect
-    include-all-providers: true
+    include-all: true
     filter: *FilterRFCEmby
 
   # ===== 兜底策略 =====
