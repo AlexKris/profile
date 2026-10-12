@@ -36,7 +36,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | API secret 漏填或仍为公开占位符时也能生成订阅 | `handle()` 加载模板后检查 API secret，含回退模板中实际启用的旧 Clash API 监听 | 文件模板及后台回退模板都不能输出空密钥或 `REPLACE_WITH_SECRET` |
 | 日常连接和 DNS 日志需要可见 | 默认 info | 保留日常排查信息；深入诊断时临时调为 debug |
 | SagerNet geosite-cn（约 9.3k 条）加 `proxy`、`geolocation-!cn` 海外兜底 | 换自建 `cn-domain`，删除海外兜底 | 与 Surge/mihomo 共用同一份国内列表；海外兜底与 Final 等价 |
-| 缺 `direct`、`domestic`、`apple-proxy` 和非 IP 的 `download` | 补齐，DNS 同步 | PT/学术站等 167 条不在 cn-domain，原先走代理；iCloud 专用代理原先被 apple 直连 |
+| 缺 `direct`、`apple-proxy` 和非 IP 的 `download` | 补齐，DNS 同步 | PT/学术站等 167 条不在 cn-domain，原先走代理；iCloud 专用代理原先被 apple 直连 |
 | apple 先于 stream，Apple TV+ 被 apple 直连 | 路由和 DNS 都改为 stream → apple-proxy → apple | rules 仓库要求的顺序，避免 TV+ 链路分到不同出口 |
 | Crypto（默认 TW）、microsoft → Proxy | 删除，交给 Final | 与 Surge 一致 |
 | 地区正则没有中文地名；TW 等组含 🇨🇳 | 加中文地名，去掉 🇨🇳 | 台湾节点名含 TW（如 `🇨🇳TW.Hinet`）；避免 🇨🇳 中转节点混入 TW/GlobalMedia/Speedtest/AIGC |
@@ -54,7 +54,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | AI、测速、PayPal、流媒体、Telegram、apple-proxy | Cloudflare DoH 经 Proxy | FakeIP，真实地址例外除外 |
 | Apple、微软 CDN | 阿里 DoH 直连 | 阿里 DoH 直连 |
 | Download、Google | Cloudflare DoH 经 Proxy | FakeIP，真实地址例外除外 |
-| domestic、direct、cn-domain | 阿里 DoH 直连 | 阿里 DoH 直连 |
+| direct、cn-domain | 阿里 DoH 直连 | 阿里 DoH 直连 |
 | 其余目标 | Cloudflare DoH 经 Proxy | FakeIP；真实地址例外使用 Cloudflare DoH |
 
 Direct 模式：除局域网外使用阿里 DNS。Global 模式：除局域网外使用代理 DNS，FakeIP 模板的普通 A 查询使用 FakeIP。两种模式均保留 IPv4 边界及 HTTPS/SVCB 处理。
@@ -76,8 +76,8 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 - 普通 DNS LRU 使用核心默认的 1024 项下限，删除了等同默认值的显式 `cache_capacity: 1024`。这是去冗余，不是内存优化；字段本身有效，设为更大值会改变容量。反向域名映射是核心另一份 1024 项缓存。[1.14.1 缓存实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/dns/client.go)、[反向映射实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/dns/router.go)。
 - 尊重 DNS TTL；不启用长期 stale/optimistic 结果、不禁用过期、不强行延长 TTL，避免 CDN 地址改变后继续使用失效 IP。
 - FakeIP 保留 `store_fakeip`，避免重启后应用缓存的假地址失去域名对应关系。该映射和普通 DNS 缓存不同，不建议为节省少量磁盘直接关闭。
-- 继续使用二进制 SRS，同一规则集在 DNS 和路由中按 tag 复用；合并相邻的同目的匹配（如 domestic/direct/cn-domain → Direct），不改变专用服务优先级。
-- 当前 21 个远程 SRS 合计 179,456 字节，约 175 KiB，其中 cn-domain 约 63 KiB。**这是下载体积，不是进程内存**。实测 1.14.2 的 Go 在用内存（clash_api `/memory`）：11.2 万条版本的 cn-domain 单独加载比空配置多约 1 MiB（精简后未重测，条数约为原来的八分之一）；被替换掉的 geosite-cn、geolocation-!cn、proxy×2、microsoft、cryptocurrency 合计多约 2.3 MiB，换源后内存反而下降。
+- 继续使用二进制 SRS，同一规则集在 DNS 和路由中按 tag 复用；合并相邻的同目的匹配（如 direct/cn-domain → Direct），不改变专用服务优先级。
+- 当前 19 个远程 SRS 合计 173,871 字节，约 170 KiB，其中 cn-domain 约 63 KiB。**这是下载体积，不是进程内存**。实测 1.14.2 的 Go 在用内存（clash_api `/memory`）：11.2 万条版本的 cn-domain 单独加载比空配置多约 1 MiB（精简后未重测，条数约为原来的八分之一）；被替换掉的 geosite-cn、geolocation-!cn、proxy×2、microsoft、cryptocurrency 合计多约 2.3 MiB，换源后内存反而下降。
 - 规则和 Dashboard 共用具名 `http_proxy`，由 `route.default_http_client` 指定。删除旧 `download_detour` 及重复逐项配置，避免未来格式移除。
 - 保留 `mixed` 栈、MTU 1400 和平台默认 UDP 会话容量，不凭经验扩大缓冲、强加多路复用、TCP Fast Open 或频繁主动测速。路径 MTU、节点协议及实际负载决定这些参数是否有收益。
 - `endpoint_independent_nat` 早已不生效，删除它；1.14 的 `udp_mapping`、`udp_filtering` 默认就是 endpoint-independent，不重复配置。NAT 最终结果还受转发链及出口实现影响，客户端配置不能保证 NAT A。[UDP NAT 文档](https://sing-box.sagernet.org/configuration/shared/udp-nat/)。

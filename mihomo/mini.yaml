@@ -175,8 +175,6 @@ rules:
   - RULE-SET,stream_keyword,GlobalMedia
   # > Telegram 域名
   - RULE-SET,telegram,Telegram
-  # > 国内常见域名
-  - RULE-SET,domestic,DIRECT
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
   - RULE-SET,direct_keyword,DIRECT
@@ -209,9 +207,6 @@ rule-providers:
   telegram:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/telegram.mrs'
-  domestic:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/domestic.mrs'
   direct:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct.mrs'

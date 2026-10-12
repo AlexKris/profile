@@ -265,17 +265,15 @@ rules:
   - RULE-SET,telegram,Telegram
   # > Apple
   - RULE-SET,apple_proxy,Proxy
-  - RULE-SET,apple_domain,DIRECT
   - RULE-SET,apple,DIRECT
   # > Microsoft CDN
   - RULE-SET,microsoft_cdn,MSCDN
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
+  - RULE-SET,download_classical,Download
   # > Google 服务
   - RULE-SET,google,Google
-  # > 国内常见域名
-  - RULE-SET,domestic,DIRECT
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
   - RULE-SET,direct_keyword,DIRECT
@@ -325,9 +323,6 @@ rule-providers:
   apple_proxy:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple-proxy.mrs'
-  apple_domain:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/apple.mrs'
   apple:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple.mrs'
@@ -340,12 +335,12 @@ rule-providers:
   download_nonip:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/download.mrs'
+  download_classical:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/download.list'
   google:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/google.mrs'
-  domestic:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/domestic.mrs'
   direct:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct.mrs'

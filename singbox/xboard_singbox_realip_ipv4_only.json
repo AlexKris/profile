@@ -76,7 +76,6 @@
       },
       {
         "rule_set": [
-          "apple-domainset",
           "apple",
           "microsoft-cdn"
         ],
@@ -94,7 +93,6 @@
       },
       {
         "rule_set": [
-          "domestic",
           "direct",
           "cn-domain"
         ],
@@ -459,7 +457,6 @@
       },
       {
         "rule_set": [
-          "apple-domainset",
           "apple"
         ],
         "action": "route",
@@ -489,7 +486,6 @@
       },
       {
         "rule_set": [
-          "domestic",
           "direct",
           "cn-domain"
         ],
@@ -543,12 +539,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/ai.srs"
-      },
-      {
-        "tag": "apple-domainset",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/apple.srs"
       },
       {
         "tag": "apple",
@@ -621,12 +611,6 @@
         "type": "remote",
         "format": "binary",
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/cn-domain.srs"
-      },
-      {
-        "tag": "domestic",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/domestic.srs"
       },
       {
         "tag": "direct",

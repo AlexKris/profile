@@ -101,7 +101,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(real["route"]["rules"], fake["route"]["rules"])
         remote = lambda cfg: [rs for rs in cfg["route"]["rule_set"] if rs["type"] == "remote"]
         self.assertEqual(remote(real), remote(fake))
-        self.assertEqual(len(remote(real)), 21)
+        self.assertEqual(len(remote(real)), 19)
         self.assertTrue(real["dns"]["reverse_mapping"])
         self.assertTrue(fake["dns"]["reverse_mapping"])
 

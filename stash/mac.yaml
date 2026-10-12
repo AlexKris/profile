@@ -221,21 +221,11 @@ proxy-groups:
     proxies: [US, HK, DIRECT]
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/PayPal.png
 
-  - name: Crypto
-    type: select
-    proxies: [TW, Proxy, DIRECT]
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Cryptocurrency.png
-
 
   - name: MSCDN
     type: select
     proxies: [DIRECT, Proxy]
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Microsoft.png
-
-  - name: MSSvc
-    type: select
-    proxies: [Proxy, DIRECT]
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/OneDrive.png
 
   # ===== 顶层策略 =====
   - name: sub
@@ -280,12 +270,9 @@ rules:
   # > 测速网站
   - RULE-SET,speedtest_domain,Speedtest
   # > AIGC
-  - RULE-SET,openai,AIGC
   - RULE-SET,ai,AIGC
   # > PayPal
   - RULE-SET,paypal_rule,PayPal
-  # > Crypto
-  - RULE-SET,crypto_rule,Crypto
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
   # > 流媒体（TW）
@@ -297,37 +284,20 @@ rules:
   - RULE-SET,telegram,Telegram
   # > Apple
   - RULE-SET,apple_proxy,Proxy
-  - RULE-SET,apple_domain,DIRECT
   - RULE-SET,apple,DIRECT
   # > Microsoft CDN
   - RULE-SET,microsoft_cdn,MSCDN
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
-  # > Microsoft
-  - RULE-SET,microsoft,MSSvc
+  - RULE-SET,download_classical,Download
   # > Google 服务
   - RULE-SET,google,Google
-  # > 国内常见域名
-  - RULE-SET,domestic,DIRECT
   # > 常见直连规则
   - RULE-SET,direct,DIRECT
   - RULE-SET,direct_keyword,DIRECT
   # > 国内域名兜底
   - RULE-SET,cn_domain,DIRECT
-  # > 国内游戏直连补充
-  - DOMAIN,end-api.shallow.ink,DIRECT
-  - DOMAIN,end.shallow.ink,DIRECT
-  - DOMAIN-SUFFIX,tgpro.top,DIRECT
-  - DOMAIN-SUFFIX,vrzwk.top,DIRECT
-  # > 常见海外域名
-  - RULE-SET,proxy_domain,Proxy
-  - RULE-SET,global,Proxy
-  - RULE-SET,proxy_keyword,Proxy
-  # > 内网域名
-  - RULE-SET,lan_nonip,DIRECT
-  # > 非中国大陆域名兜底
-  - RULE-SET,geolocation_not_cn,Proxy
   # ===== 域名规则 end =====
   # ===== IP 规则 start =====
   # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到代理策略被阻断）
@@ -335,12 +305,10 @@ rules:
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
   # > 中国大陆 IP
-  - RULE-SET,china_ip,DIRECT
-  - RULE-SET,cn_ip,DIRECT
+  - RULE-SET,china_ip,DIRECT,no-resolve
   # > LAN IP
-  - RULE-SET,lan_ip,DIRECT
+  - RULE-SET,lan_ip,DIRECT,no-resolve
   # ===== IP 规则 end =====
-  - GEOIP,CN,DIRECT
   # > Final
   - MATCH,Final
 
@@ -350,9 +318,6 @@ rule-providers:
   speedtest_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/speedtest.mrs'
-  openai:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs'
   ai:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/ai.mrs'
@@ -371,9 +336,6 @@ rule-providers:
   apple_proxy:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple-proxy.mrs'
-  apple_domain:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/apple.mrs'
   apple:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/apple.mrs'
@@ -383,39 +345,24 @@ rule-providers:
   microsoft_cdn:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft-cdn.mrs'
-  microsoft:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft.mrs'
   download_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/download.mrs'
   download_nonip:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/download.mrs'
+  download_classical:
+    <<: *BehaviorCL
+    url: 'https://alexkris-rules.pages.dev/mihomo/classical/download.list'
   direct:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/direct.mrs'
-  proxy_domain:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/proxy.mrs'
-  global:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/proxy.mrs'
-  proxy_keyword:
-    <<: *BehaviorCL
-    url: 'https://alexkris-rules.pages.dev/mihomo/classical/proxy.list'
   stream_keyword:
     <<: *BehaviorCL
     url: 'https://alexkris-rules.pages.dev/mihomo/classical/stream.list'
   direct_keyword:
     <<: *BehaviorCL
     url: 'https://alexkris-rules.pages.dev/mihomo/classical/direct.list'
-  domestic:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/domestic.mrs'
-  lan_nonip:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/lan.mrs'
 
   # ===== IP 规则集 =====
   telegram_ip:
@@ -429,24 +376,14 @@ rule-providers:
     url: 'https://alexkris-rules.pages.dev/mihomo/ip/lan-ip.mrs'
 
   # ===== MRS 规则集（Stash 3.1.1+ 支持 domain / ipcidr） =====
-  cn_ip:
-    <<: *BehaviorMrsIP
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs'
   google:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/google.mrs'
   paypal_rule:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/paypal.mrs'
   cn_domain:
     <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs'
-  geolocation_not_cn:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs'
+    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/cn-domain.mrs'
 
-  # ===== 自定义规则集 =====
-  crypto_rule:
-    <<: *BehaviorMrsDN
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-cryptocurrency.mrs'
 # ==================== EOF ====================
