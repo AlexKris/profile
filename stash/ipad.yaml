@@ -141,7 +141,6 @@ proxy-groups:
   # ===== 顶层策略 =====
   - name: Proxy
     <<: *BaseSelect
-    proxies: [DIRECT]
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Proxy.png
 
   # ===== 地区策略 =====
