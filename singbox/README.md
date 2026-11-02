@@ -113,7 +113,7 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 
 ```sh
 php -l singbox/protocols_data/SingBox.php
-python3 singbox/tests/test_templates.py
+uv run singbox/tests/test_templates.py
 git diff --check
 ```
 
