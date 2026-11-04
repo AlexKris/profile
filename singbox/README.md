@@ -40,6 +40,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | apple 先于 stream，Apple TV+ 被 apple 直连 | 路由和 DNS 都改为 stream → apple-proxy → apple | rules 仓库要求的顺序，避免 TV+ 链路分到不同出口 |
 | Crypto（默认 TW）、microsoft → Proxy | 删除，交给 Final | 与 Surge 一致 |
 | 地区正则没有中文地名；TW 等组含 🇨🇳 | 加中文地名，去掉 🇨🇳 | 台湾节点名含 TW（如 `🇨🇳TW.Hinet`）；避免 🇨🇳 中转节点混入 TW/GlobalMedia/Speedtest/AIGC |
+| TUN 带 `platform.http_proxy`，客户端默认开启系统代理；另有与 mixed 重复的 socks 入站 | 删除两者，只保留 127.0.0.1:2334 的 mixed 入站供手动指定代理 | Windows 系统代理指向回环地址，UWP/WAM（设置、Outlook 登录）受回环隔离限制报 0x80190001；TUN 已接管全部流量，路由规则不区分入站，系统代理只在 RealIP 下省一次 DoH；mixed 已支持 SOCKS |
 
 专用组 fallback 到 Proxy 只在没有合适节点时发生，会记录服务端警告。此时不保证原来的地区/ISP 条件，但不自动直连。Proxy 本身没有可用节点时生成失败，不输出一份全直连的“成功”订阅。
 

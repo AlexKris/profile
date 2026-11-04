@@ -92,6 +92,8 @@ class GenerationTests(unittest.TestCase):
                 self.assertEqual(config["route"]["rules"][1],
                                  {"ip_version": 6, "action": "reject", "no_drop": True})
                 self.assertTrue(any(":" in address for address in config["inbounds"][0]["address"]))
+                self.assertEqual([item["tag"] for item in config["inbounds"]], ["tun-in", "mixed-in"])
+                self.assertNotIn("platform", config["inbounds"][0])
                 self.assertEqual(config["route"]["default_http_client"], "http_proxy")
 
     def test_common_behavior_stays_aligned(self):

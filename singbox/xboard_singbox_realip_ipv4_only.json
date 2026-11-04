@@ -163,20 +163,7 @@
       "mtu": 1400,
       "auto_route": true,
       "strict_route": true,
-      "stack": "mixed",
-      "platform": {
-        "http_proxy": {
-          "enabled": true,
-          "server": "127.0.0.1",
-          "server_port": 2334
-        }
-      }
-    },
-    {
-      "type": "socks",
-      "tag": "socks-in",
-      "listen": "127.0.0.1",
-      "listen_port": 2333
+      "stack": "mixed"
     },
     {
       "type": "mixed",
