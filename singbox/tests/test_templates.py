@@ -136,12 +136,12 @@ class GenerationTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 config = generate(path, names)["config"]
                 groups = {item["tag"]: item for item in config["outbounds"]}
-                for region, values in aliases.items():
-                    self.assertTrue(set(values) <= set(groups[region]["outbounds"]), region)
-                self.assertEqual(groups["DE"]["outbounds"], ["DE sample"] + aliases["DE"])
+                self.assertFalse({"SG", "DE"} & set(groups))
+                for region in ("HK", "TW", "JP", "US"):
+                    self.assertTrue(set(aliases[region]) <= set(groups[region]["outbounds"]), region)
+                self.assertEqual(groups["JP"]["outbounds"], ["JP SoftBank sample"] + aliases["JP"])
                 self.assertNotIn("Australia Edge", groups["US"]["outbounds"])
                 self.assertNotIn("USAGI sample", groups["US"]["outbounds"])
-                self.assertNotIn("SGPOOL sample", groups["SG"]["outbounds"])
                 self.assertNotIn("US Seattle sample", groups["AIGC"]["outbounds"])
                 for group, regions in {"Telegram": ["HK", "JP"], "GlobalMedia": ["HK", "TW", "SG"],
                                        "GlobalEmby": ["HK", "JP", "SG"], "RFCEmby": ["HK"],
@@ -159,8 +159,8 @@ class GenerationTests(unittest.TestCase):
                 groups = {item["tag"]: set(item.get("outbounds", []))
                           for item in generate(path, names)["config"]["outbounds"]}
                 for group, members in {"HK": ["香港 01"], "TW": ["🇨🇳TW.Hinet", "台湾 Ucom 02"],
-                                       "JP": ["日本 03"], "SG": ["新加坡 04"], "US": ["美国 05"],
-                                       "DE": ["德国 06"], "GlobalMedia": ["🇨🇳TW.Hinet", "香港 01"],
+                                       "JP": ["日本 03"], "US": ["美国 05"],
+                                       "GlobalMedia": ["🇨🇳TW.Hinet", "香港 01"],
                                        "Speedtest": ["🇨🇳TW.Hinet", "日本 03"], "AIGC": ["台湾 Ucom 02"],
                                        "Telegram": ["香港 01", "日本 03"], "Google": ["美国 05"]}.items():
                     self.assertTrue(set(members) <= groups[group], group)
@@ -176,7 +176,7 @@ class GenerationTests(unittest.TestCase):
                     core_check(result["config"])
                     self.assertNotIn("REPLACE_WITH_SECRET", json.dumps(result["config"]))
                     self.assertEqual(bool(result["warnings"]), admin_template)
-                    for index in (0, 1):
+                    for index in range(len(json.loads(path.read_text())["services"])):
                         for secret in (None, "", " \t", "REPLACE_WITH_SECRET", " REPLACE_WITH_SECRET ",
                                        "replace_with_secret", 0):
                             with self.subTest(index=index, secret=secret), tempfile.TemporaryDirectory() as directory:
@@ -216,7 +216,7 @@ class GenerationTests(unittest.TestCase):
         for path in TEMPLATES.values():
             result = generate(path, ["HK RFC sample"])
             groups = {item["tag"]: item for item in result["config"]["outbounds"]}
-            self.assertEqual(groups["DE"]["outbounds"], ["Proxy"])
+            self.assertEqual(groups["US"]["outbounds"], ["Proxy"])
             self.assertEqual(groups["AIGC"]["outbounds"], ["Proxy"])
             self.assertTrue(result["warnings"])
             core_check(result["config"])
@@ -229,8 +229,8 @@ class GenerationTests(unittest.TestCase):
 
     def test_unusable_fallback_fails(self):
         config = json.loads(TEMPLATES["realip"].read_text())
-        group = next(item for item in config["outbounds"] if item["tag"] == "DE")
-        for fallback in (None, "DE", "no-such-group"):
+        group = next(item for item in config["outbounds"] if item["tag"] == "US")
+        for fallback in (None, "US", "no-such-group"):
             with self.subTest(fallback=fallback), tempfile.TemporaryDirectory() as directory:
                 group["fallback"] = fallback
                 path = Path(directory) / "config.json"
@@ -434,7 +434,8 @@ class RuntimeTests(unittest.TestCase):
                         "www.cn.test": "dns_direct", "www.apple.cn.test": "dns_direct",
                         "www.ai.cn.test": foreign, "www.stream.cn.test": foreign,
                         "tv.apple.cn.test": foreign, "mask.apple.cn.test": foreign,
-                        "pt.direct.test": "dns_direct", "cdn.microsoft.test": "dns_direct",
+                        "pt.direct.test": "dns_direct",
+                        "cdn.microsoft.test": "fake" if profile == "fakeip" else "dns_direct",
                         "stun.l.google.com": "dns_proxy", "stun.cn.test": "dns_direct",
                         "www.msftconnecttest.com": "dns_direct",
                         "router.lan.test": "dns_local", "lancache.steamcontent.com": "dns_local",
@@ -541,6 +542,33 @@ class RuntimeTests(unittest.TestCase):
                 self.http_request(config, reply["ip"])
                 # The Direct stand-in node dials the restored domain via default_domain_resolver.
                 self.assertEqual(self.hits, [("dns_direct", "http-persistent.test", 1)])
+
+    def test_mscdn_resolution_follows_selected_outbound(self):
+        name = "http-mscdn.cdn.microsoft.test"
+        config = self.config("fakeip")
+        with running(config):
+            fake = self.assert_resolver(config, name, "fake")["ip"]
+            self.hits.clear()
+            # MSCDN defaults to Direct: the domain is resolved locally when dialing.
+            self.http_request(config, fake)
+            self.assertEqual(self.hits, [("dns_direct", name, 1)])
+        config = self.config("fakeip")
+        closed = port()
+        for outbound in config["outbounds"]:
+            if outbound["tag"] == "MSCDN":
+                outbound["default"] = "Proxy"
+            elif outbound["tag"] in NODES:
+                tag = outbound["tag"]
+                outbound.clear()
+                outbound.update(tag=tag, type="socks", server="127.0.0.1", server_port=closed)
+        with running(config) as log:
+            fake = self.assert_resolver(config, name, "fake")["ip"]
+            self.hits.clear()
+            # MSCDN on Proxy: the domain goes to the node, nothing is resolved locally.
+            self.proxy_request(config, fake)
+            self.assertEqual(self.hits, [])
+            log.seek(0)
+            self.assertIn(f"outbound/socks[{NODES[0]}]: outbound connection to {name}:", log.read())
 
     def test_remote_rules_use_shared_client_and_warm_cache(self):
         with tempfile.TemporaryDirectory() as directory:

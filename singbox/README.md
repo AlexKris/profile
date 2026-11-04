@@ -41,10 +41,14 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | Crypto（默认 TW）、microsoft → Proxy | 删除，交给 Final | 与 Surge 一致 |
 | 地区正则没有中文地名；TW 等组含 🇨🇳 | 加中文地名，去掉 🇨🇳 | 台湾节点名含 TW（如 `🇨🇳TW.Hinet`）；避免 🇨🇳 中转节点混入 TW/GlobalMedia/Speedtest/AIGC |
 | TUN 带 `platform.http_proxy`，客户端默认开启系统代理；另有与 mixed 重复的 socks 入站 | 删除两者，只保留 127.0.0.1:2334 的 mixed 入站供手动指定代理 | Windows 系统代理指向回环地址，UWP/WAM（设置、Outlook 登录）受回环隔离限制报 0x80190001；TUN 已接管全部流量，路由规则不区分入站，系统代理只在 RealIP 下省一次 DoH；mixed 已支持 SOCKS |
+| FakeIP 模板把 `microsoft-cdn` 写死用阿里 DoH，MSCDN 切到 Proxy 后节点收到的仍是国内 CDN 的 IP，从境外绕回国内 | `microsoft-cdn` 的 A 查询改走 FakeIP，解析推迟到出口确定后 | 路由 `sniff` 不替换连接目标；与 mihomo 一致，Direct 拨号用阿里解析、Proxy 由节点解析。不用"DNS 经 MSCDN 出口问阿里"：阿里按来源网段应答，日本、新加坡网段实测多为 SERVFAIL。RealIP 不加 FakeIP，保持其真实地址语义 |
+| 第二个 API 监听 0.0.0.0:9091，所有订阅者共用模板里的同一个 secret | 删除 `api-lan`，只保留 127.0.0.1:9090 | PHP 原样下发模板，无法按用户派生密钥；同一局域网内的其他订阅者可用该 secret 订阅日志和连接、切换模式、断开连接 |
+| TUN 显式写 `mtu: 1400`、`stack: mixed` | 两项都删除，使用核心按平台的默认值 | MTU 默认 NetworkExtension 4064、安卓 9000、桌面 65535，官方示例不写；Apple 端开 Include All Networks 后 `mixed`/`system` 不可用，显式写会启动失败，不写则自动改 gvisor |
+| `SG`、`DE` 地区组没有任何规则引用 | 删除，其他客户端配置同步删除 | 只能手动选用，却要求有匹配节点或 fallback |
 
 专用组 fallback 到 Proxy 只在没有合适节点时发生，会记录服务端警告。此时不保证原来的地区/ISP 条件，但不自动直连。Proxy 本身没有可用节点时生成失败，不输出一份全直连的“成功”订阅。
 
-地区匹配保留国旗和中文地名（香港、台湾/台灣、日本、新加坡、美国、德国），英文别名按完整词匹配且不区分大小写：HK/HKG/Hong Kong、TW/TWN/Taiwan、JP/JPN/Japan、US/USA/United States、DE/DEU/GER/Germany、SG/SGP/Singapore；AIGC 另支持 UK/GB/GBR/United Kingdom 和“英国”。🇨🇳 不作为任何地区条件：台湾节点按名字中的 TW 匹配（如 `🇨🇳TW.Hinet`），所以台湾节点名必须含 TW/TWN/Taiwan/台湾。地区组及复合服务组使用同样的别名，运营商条件不放宽。测试覆盖这些名字，但本轮未读取 XBoard 实际节点清单，部署前仍须检查真实生成结果，不能只看订阅是否成功。
+地区匹配保留国旗和中文地名（香港、台湾/台灣、日本、新加坡、美国），英文别名按完整词匹配且不区分大小写：HK/HKG/Hong Kong、TW/TWN/Taiwan、JP/JPN/Japan、US/USA/United States、SG/SGP/Singapore（只用于复合组）；AIGC 另支持 UK/GB/GBR/United Kingdom 和“英国”。🇨🇳 不作为任何地区条件：台湾节点按名字中的 TW 匹配（如 `🇨🇳TW.Hinet`），所以台湾节点名必须含 TW/TWN/Taiwan/台湾。地区组及复合服务组使用同样的别名，运营商条件不放宽。测试覆盖这些名字，但本轮未读取 XBoard 实际节点清单，部署前仍须检查真实生成结果，不能只看订阅是否成功。
 
 ## DNS 逻辑
 
@@ -53,7 +57,8 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | 私有域名、路由器域名、局域网下载缓存 | 系统本地 DNS | 系统本地 DNS |
 | 连通性检查、direct-extra | 阿里 DoH 直连 | 阿里 DoH 直连 |
 | AI、测速、PayPal、流媒体、Telegram、apple-proxy | Cloudflare DoH 经 Proxy | FakeIP，真实地址例外除外 |
-| Apple、微软 CDN | 阿里 DoH 直连 | 阿里 DoH 直连 |
+| Apple | 阿里 DoH 直连 | 阿里 DoH 直连 |
+| 微软 CDN（MSCDN 组） | 阿里 DoH 直连，只有 Direct 生效 | FakeIP：选 Direct 时拨号用阿里解析，选 Proxy 时域名交给节点解析 |
 | Download、Google | Cloudflare DoH 经 Proxy | FakeIP，真实地址例外除外 |
 | direct、cn-domain | 阿里 DoH 直连 | 阿里 DoH 直连 |
 | 其余目标 | Cloudflare DoH 经 Proxy | FakeIP；真实地址例外使用 Cloudflare DoH |
@@ -80,7 +85,7 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 - 继续使用二进制 SRS，同一规则集在 DNS 和路由中按 tag 复用；合并相邻的同目的匹配（如 direct/cn-domain → Direct），不改变专用服务优先级。
 - 当前 19 个远程 SRS 合计 152,174 字节，约 149 KiB，其中 cn-domain 约 63 KiB。**这是下载体积，不是进程内存**。实测 1.14.2 的 Go 在用内存（clash_api `/memory`）：11.2 万条版本的 cn-domain 单独加载比空配置多约 1 MiB（精简后未重测，条数约为原来的八分之一）；被替换掉的 geosite-cn、geolocation-!cn、proxy×2、microsoft、cryptocurrency 合计多约 2.3 MiB，换源后内存反而下降。
 - 规则和 Dashboard 共用具名 `http_proxy`，由 `route.default_http_client` 指定。删除旧 `download_detour` 及重复逐项配置，避免未来格式移除。
-- 保留 `mixed` 栈、MTU 1400 和平台默认 UDP 会话容量，不凭经验扩大缓冲、强加多路复用、TCP Fast Open 或频繁主动测速。路径 MTU、节点协议及实际负载决定这些参数是否有收益。
+- TUN 的栈和 MTU 不写，使用核心按平台的默认值（栈默认 mixed，Apple 端开 Include All Networks 时自动改 gvisor；MTU 默认 NetworkExtension 4064、安卓 9000、桌面 65535）；保留平台默认 UDP 会话容量，不凭经验扩大缓冲、强加多路复用、TCP Fast Open 或频繁主动测速。路径 MTU、节点协议及实际负载决定这些参数是否有收益。
 - `endpoint_independent_nat` 早已不生效，删除它；1.14 的 `udp_mapping`、`udp_filtering` 默认就是 endpoint-independent，不重复配置。NAT 最终结果还受转发链及出口实现影响，客户端配置不能保证 NAT A。[UDP NAT 文档](https://sing-box.sagernet.org/configuration/shared/udp-nat/)。
 
 这是以正确分流、可靠连接和受控开销为目标的基线，不代表在所有设备上同时取得最低内存和最大吞吐。未测量真实手机负载、峰值 RSS、长时间下载和漫游切网，不能虚构性能提升百分比。
@@ -88,7 +93,7 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 ## 保留的明确取舍
 
 - HTTPS/SVCB 返回空结果是现有“优先确定性分流”策略的统一实现，不是 DNS 协议要求。会放弃这些记录提供的 ECH、地址提示及部分协议发现能力；普通 A/TLS 和通过其他机制发现的 HTTP/3 不因此被禁止。
-- MSCDN 按当前默认 Direct 设计国内 DNS；手动切到 Proxy 不会自动换解析器。Final 也是路由选择，不是 DNS 选择。需要全局直连语义时应切 Direct 模式。
+- RealIP 下 MSCDN 的 DNS 固定为阿里，只有 Direct 生效；要让 MSCDN 走 Proxy，用 FakeIP 模板。Final 也是路由选择，不是 DNS 选择。需要全局直连语义时应切 Direct 模式。
 - 不为每个专用策略组创建单独 DoH 实例，避免传输、缓存和维护项膨胀。RealIP 的代理 DNS 出口可能与专用组出口不同，无法承诺每个 CDN 均获得该专用出口的最优地址。
 - 首次没有规则缓存时需要 Proxy 可用；有有效缓存后可先从缓存启动。没有改成国内网络可能无法访问的全直连下载，也没有去掉关键规则。
 - 应用自带 DoH、系统缓存未清理及平台 VPN 排除项不保证经过这里的 DNS 分流。RealIP 对域名的识别依赖反向映射和可嗅探内容，不可能在共享 IP、ECH 等所有场景都精确还原域名。
@@ -96,15 +101,13 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 
 ## 官方 Dashboard
 
-- 本机：`http://127.0.0.1:9090/dashboard/`。
-- 局域网：`http://设备内网IPv4:9091/dashboard/`。
-- 面板 URL 填对应的 API 基址，不加 `/dashboard/`。远程设备不要填自己的 `127.0.0.1`。
-- 两个地址都是 IPv4 监听，不监听 `::1`；本机验收应使用明确的 `127.0.0.1`，不能假定 localhost 的 IPv6 解析一定可用。
-- 两个监听器分别使用 `dashboard`、`dashboard-lan`，避免两个下载器同时替换同一目录。保留此前为 SFM 验证有效的独立回环监听，不再依赖通配监听兼容回环访问。
-- 两份 Dashboard 首次各下载、解压一份资源，托管目录默认各每 24 小时检查更新；有 ETag 时可以返回 304，不代表每天必定重下整个压缩包。压缩包大小随版本变化，两份磁盘资源和更新请求是双入口的实际代价。[1.14.1 Dashboard 实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/service/api/dashboard.go)。
-- CORS 列表限制浏览器普通 HTTP/gRPC-Web 的跨域读取许可，不是请求来源 ACL；同源页面不依赖这份许可。`localhost:9090` 与 `127.0.0.1:9090` 互访、9090 页面连接 9091 API 仍属于跨域。
+- 只有本机：`http://127.0.0.1:9090/dashboard/`。不再提供局域网监听：模板里的 secret 对所有订阅者相同，`0.0.0.0` 监听会让同一局域网的其他订阅者控制这台设备。
+- 面板 URL 填 API 基址，不加 `/dashboard/`。
+- IPv4 监听，不监听 `::1`；本机验收应使用明确的 `127.0.0.1`，不能假定 localhost 的 IPv6 解析一定可用。
+- Dashboard 首次下载、解压一份资源，托管目录默认每 24 小时检查更新；有 ETag 时可以返回 304，不代表每天必定重下整个压缩包。[1.14.1 Dashboard 实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/service/api/dashboard.go)。
+- CORS 列表限制浏览器普通 HTTP/gRPC-Web 的跨域读取许可，不是请求来源 ACL；同源页面不依赖这份许可。`localhost:9090` 与 `127.0.0.1:9090` 互访仍属于跨域。
 - 1.14.1 的 WebSocket 升级不校验 Origin，不能由 HTTP CORS 设置推导出 WebSocket 来源被限制；API 权限必须依赖 secret。[1.14.1 WebSocket 实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/service/api/web_bridge_websocket.go)。
-- **`0.0.0.0` 不是“仅限内网”**。必须保留服务端私有强 secret；`REPLACE_WITH_SECRET` 不可用于实际部署。不要把 9091 暴露至公网，只在可信局域网使用明文 HTTP。
+- 必须保留服务端私有强 secret；`REPLACE_WITH_SECRET` 不可用于实际部署。
 - PHP 拒绝缺失、空白、非字符串或公开占位符 secret，且报错不打印密钥。这个检查不是密码强度审计，部署仍需使用私有随机密钥；不要每次生成订阅时随机换密钥，以免已保存的面板连接失效。
 - CORS 和 `access_control_allow_private_network` 不是客户端 IP ACL，尤其不能代替鉴权或主机防火墙。[API 文档](https://sing-box.sagernet.org/configuration/service/api/)。
 
@@ -122,7 +125,7 @@ git diff --check
 
 生成测试使用最小 Laravel 桩调用实际 `handle()`，覆盖文件模板/后台回退模板加载、两处原生 API 及旧 Clash API 监听的 secret 校验、空组/重名/正则及地区别名；只有 `default_mode` 而不监听的 Clash API 不要求 secret。在临时模板中注入测试专用密钥，不改仓库占位符。它仍不是生产 Laravel HTTP 集成测试。
 
-运行测试覆盖核心配置校验、两种模板三种模式、DNS 查询类型与缓存、未命中域名不在本机解析、中文地名与 `🇨🇳TW` 节点筛选、IPv6 拒绝、FakeIP 重启映射、SRS 缓存启动、两个 API 的页面/鉴权/HTTP CORS。但代理传输换成了 Direct（未命中解析测试改用不可达 SOCKS）、本地 DNS/DoH 换成 UDP 桩、远程规则多数换成小样例、Dashboard 页面换成静态样例，不能代替真实节点、Apple 本地 DNS、原生面板 WebSocket 或 TUN 验证。2026-10-10 另下载 Pages 上全部 21 个实际远程 SRS（与仓库逐字节一致），全部反编译，并用生成的两份配置加载检查：vrzwk.top、kskwai.com、hdsky.me、www.ieee.org → Direct；mask.icloud.com → Proxy；tv.apple.com → GlobalMedia；www.apple.com → Direct；223.5.5.5 → geoip-cn；未收录域名、1.1.1.1 及 FakeIP 还原的域名 → Final，路由阶段本机无 DNS 查询。
+运行测试覆盖核心配置校验、两种模板三种模式、DNS 查询类型与缓存、未命中域名不在本机解析、中文地名与 `🇨🇳TW` 节点筛选、IPv6 拒绝、FakeIP 重启映射、SRS 缓存启动、API 的页面/鉴权/HTTP CORS。但代理传输换成了 Direct（未命中解析测试改用不可达 SOCKS）、本地 DNS/DoH 换成 UDP 桩、远程规则多数换成小样例、Dashboard 页面换成静态样例，不能代替真实节点、Apple 本地 DNS、原生面板 WebSocket 或 TUN 验证。2026-10-10 另下载 Pages 上全部 21 个实际远程 SRS（与仓库逐字节一致），全部反编译，并用生成的两份配置加载检查：vrzwk.top、kskwai.com、hdsky.me、www.ieee.org → Direct；mask.icloud.com → Proxy；tv.apple.com → GlobalMedia；www.apple.com → Direct；223.5.5.5 → geoip-cn；未收录域名、1.1.1.1 及 FakeIP 还原的域名 → Final，路由阶段本机无 DNS 查询。
 
 以下实机项目尚未完成，暂不据离线测试通过直接部署：
 
@@ -130,7 +133,7 @@ git diff --check
 | --- | --- |
 | FakeIP/FQDN 冷启动解析 | 同一网络、节点下比较首次与缓存命中的连接耗时；核对实际 DNS/出站，确认代理 DNS 故障时的表现 |
 | iPhone 本地 DNS | 在 Wi-Fi/蜂窝分别观察私网 PTR、`.local` 的 A/SOA/SRV 查询去向及耗时，确认没有回环或持续重试；tvOS 需单独验证 |
-| SFM Dashboard | 127.0.0.1:9090 和另一台局域网设备访问 9091 均成功，正确 secret 可控制、错误 secret 被拒绝，不能只看静态页面 200 |
+| SFM Dashboard | 127.0.0.1:9090 访问成功，正确 secret 可控制、错误 secret 被拒绝，不能只看静态页面 200 |
 | 问题网站与 IPv4 边界 | 两模板 Rule 模式下验证 TLS、页面和实际 DNS/路由；FakeIP 给应用假地址是正常行为，CDN 的真实 IP 可变化，不以固定 IP 段作为验收条件；同时验证 TUN 接管后的 IPv6 不绕行 |
 
 这些验证不得擅自启动 SFM、切换系统代理或连接生产服务器；应先取得用户授权。调试日志及私有配置只放临时目录，不提交 Git。
