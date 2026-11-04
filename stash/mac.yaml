@@ -15,9 +15,7 @@ BaseSelect: &BaseSelect {type: select, use: [sub]}
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|HK|Hong))'
 FilterTW: &FilterTW '(?=.*(?:🇨🇳|TW|Tai))'
 FilterJP: &FilterJP '(?=.*(?:🇯🇵|JP|Japan))'
-FilterSG: &FilterSG '(?=.*(?:🇸🇬|SG|Sing))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|US|USA))'
-FilterDE: &FilterDE '(?=.*(?:🇩🇪|DE|DEU))'
 
 FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
 FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|HK|JP|Hong|Japan))'
@@ -159,20 +157,10 @@ proxy-groups:
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Japan.png
     filter: *FilterJP
 
-  - name: SG
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Singapore.png
-    filter: *FilterSG
-
   - name: US
     <<: *BaseSelect
     icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/United_States.png
     filter: *FilterUS
-
-  - name: DE
-    <<: *BaseSelect
-    icon: https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Germany.png
-    filter: *FilterDE
 
   # ===== 专用策略 =====
   - name: Telegram
