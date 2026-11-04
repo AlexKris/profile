@@ -2,7 +2,6 @@
 BaseProvider: &BaseProvider
   type: http
   interval: 86400
-  proxy: Proxy
   health-check:
     enable: true
     url: 'http://cp.cloudflare.com/generate_204'
@@ -17,17 +16,13 @@ BaseProxySelect: &BaseProxySelect {type: select, empty-fallback: DIRECT}
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|香港|Hong|\bHK\b))'
 FilterTW: &FilterTW '(?=.*(?:🇹🇼|台湾|台灣|Taiwan|\bTW\b))'
 FilterJP: &FilterJP '(?=.*(?:🇯🇵|日本|Japan|\bJP\b))'
-FilterSG: &FilterSG '(?=.*(?:🇸🇬|新加坡|Singapore|\bSG\b))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|美国|United States|\bUSA?\b))'
-FilterDE: &FilterDE '(?=.*(?:🇩🇪|德国|Germany|\bDEU?\b))'
 
 FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
-FilterTelegram: &FilterTelegram '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|\bHK\b|\bTW\b|\bSG\b))'
 FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))'
 FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))(?=.*(?:RFC|Jinx))'
 FilterAIGC: &FilterAIGC '(?=.*(?:🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|Taiwan|Japan|Singapore|United States|\bTW\b|\bJP\b|\bSG\b|\bUSA?\b))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
-FilterGoogle: &FilterGoogle '(?=.*(?:🇺🇸|美国|United States|\bUSA?\b))'
 FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|Hong|Taiwan|Japan|Singapore|\bHK\b|\bTW\b|\bJP\b|\bSG\b))'
 
 BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
@@ -44,12 +39,12 @@ proxy-providers:
     path: ./proxy_providers/sub.yaml
 
 # ==================== 核心配置 ====================
+# FlClash 会用 App 设置覆盖本段的端口、allow-lan、find-process-mode、keep-alive、log-level、external-*，
+# 以及 tun.stack、dns-hijack；PROCESS-NAME 规则需在 FlClash 里打开「查找进程」。
 mode: rule
-port: 7890
-socks-port: 7891
 mixed-port: 7893
 ipv6: false
-allow-lan: true
+allow-lan: false
 unified-delay: true
 tcp-concurrent: true
 log-level: warning
@@ -80,7 +75,6 @@ sniffer:
 # ==================== TUN 模式 ====================
 tun:
   enable: true
-  stack: mixed
   dns-hijack: ["any:53", "tcp://any:53"]
   auto-route: true
   # auto-redirect: true  # 仅 Linux 支持，macOS 无效
@@ -103,10 +97,9 @@ dns:
     - "+.lan"
     - "+.internal"
     - "+.localdomain"
-    - home.arpa
+    - "+.home.arpa"
     - 127.0.0.1.sslip.io
     - 127.atlas.skk.moe
-    - dns.msftncsi.com
     - "*.srv.nintendo.net"
     - "*.stun.playstation.net"
     - xbox.*.microsoft.com
@@ -114,7 +107,6 @@ dns:
     - "*.stun.twilio.com"
     - stun.syncthing.net
     - "stun.*"
-    - lancache.steamcontent.com
     - "+.ea.com"
     - "+.eaassets-a.akamaihd.net"
     - "+.battle.net"
@@ -154,7 +146,14 @@ dns:
     - "+.miwifi.com"
     - "+.market.xiaomi.com"
   default-nameserver: [119.29.29.29, 223.5.5.5]
-  nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
+  # 真实解析：局域网域名问系统 DNS，国内域名走阿里/腾讯，其余经 Proxy 问 Cloudflare
+  nameserver-policy:
+    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com': system
+    'rule-set:direct_extra,apple,microsoft_cdn,direct,cn_domain': ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
+  nameserver: ["https://1.1.1.1/dns-query#Proxy"]
+  # DIRECT 拨号和节点域名用国内 DNS，避免依赖尚未建立的代理
+  direct-nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
+  proxy-server-nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
 
 # ==================== 代理策略组 ====================
 proxy-groups:
@@ -179,20 +178,10 @@ proxy-groups:
     include-all: true
     filter: *FilterJP
 
-  - name: SG
-    <<: *BaseSelect
-    include-all: true
-    filter: *FilterSG
-
   - name: US
     <<: *BaseSelect
     include-all: true
     filter: *FilterUS
-
-  - name: DE
-    <<: *BaseSelect
-    include-all: true
-    filter: *FilterDE
 
   # ===== 专用策略 =====
   - name: Speedtest
@@ -213,7 +202,7 @@ proxy-groups:
   - name: Telegram
     <<: *BaseSelect
     include-all: true
-    filter: *FilterTelegram
+    filter: *FilterHKJPWide
 
   - name: MSCDN
     <<: *BaseSelect
@@ -227,7 +216,7 @@ proxy-groups:
   - name: Google
     <<: *BaseSelect
     include-all: true
-    filter: *FilterGoogle
+    filter: *FilterUS
 
   # ===== 手动策略 =====
   - name: GlobalEmby
