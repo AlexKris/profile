@@ -95,6 +95,7 @@ class GenerationTests(unittest.TestCase):
                 self.assertEqual([item["tag"] for item in config["inbounds"]], ["tun-in", "mixed-in"])
                 self.assertNotIn("platform", config["inbounds"][0])
                 self.assertEqual(config["route"]["default_http_client"], "http_proxy")
+                self.assertTrue(config["dns"]["optimistic"])
 
     def test_common_behavior_stays_aligned(self):
         real, fake = (json.loads(path.read_text()) for path in TEMPLATES.values())
@@ -305,7 +306,8 @@ def query(dns_port, name, kind="A"):
         reply = sock.recv(4096)
     flags, _, count = struct.unpack("!HHH", reply[2:8])
     return {"rcode": flags & 15, "count": count,
-            "ip": socket.inet_ntoa(reply[-4:]) if kind == "A" and count else None}
+            "ip": socket.inet_ntoa(reply[-4:]) if kind == "A" and count else None,
+            "ttl": struct.unpack("!I", reply[-10:-6])[0] if kind == "A" and count else None}
 
 
 def fixture_rules(config):
@@ -415,6 +417,8 @@ class RuntimeTests(unittest.TestCase):
         if expected == "fake":
             self.assertEqual(reply["count"], 1)
             self.assertIn(ipaddress.ip_address(reply["ip"]), ipaddress.ip_network("198.18.0.0/15"))
+            # Fake addresses must not outlive the core in system caches (mihomo also answers with TTL 1).
+            self.assertEqual(reply["ttl"], 1)
             self.assertEqual(self.hits, [])
         elif expected is None:
             self.assertEqual(reply["count"], 0)
@@ -462,7 +466,10 @@ class RuntimeTests(unittest.TestCase):
                         reply = self.assert_resolver(config, "cache.cn.test",
                                                      "dns_direct" if mode != "Global" else foreign)
                         self.hits.clear()
-                        self.assertEqual(query(config["inbounds"][1]["listen_port"], "cache.cn.test"), reply)
+                        cached = query(config["inbounds"][1]["listen_port"], "cache.cn.test")
+                        # A cache hit returns the same record with the remaining, not the original, TTL.
+                        self.assertLessEqual(cached.pop("ttl"), reply.pop("ttl"))
+                        self.assertEqual(cached, reply)
                         self.assertEqual(self.hits, [], "repeat query missed cache")
 
     def http_request(self, config, destination):

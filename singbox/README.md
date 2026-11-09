@@ -45,6 +45,8 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | 第二个 API 监听 0.0.0.0:9091，所有订阅者共用模板里的同一个 secret | 删除 `api-lan`，只保留 127.0.0.1:9090 | PHP 原样下发模板，无法按用户派生密钥；同一局域网内的其他订阅者可用该 secret 订阅日志和连接、切换模式、断开连接 |
 | TUN 显式写 `mtu: 1400`、`stack: mixed` | 两项都删除，使用核心按平台的默认值 | MTU 默认 NetworkExtension 4064、安卓 9000、桌面 65535，官方示例不写；Apple 端开 Include All Networks 后 `mixed`/`system` 不可用，显式写会启动失败，不写则自动改 gvisor |
 | `SG`、`DE` 地区组没有任何规则引用 | 删除，其他客户端配置同步删除 | 只能手动选用，却要求有匹配节点或 fallback |
+| FakeIP 应答沿用核心通用 TTL 600 | 走 `dns_fakeip` 的规则都加 `rewrite_ttl: 1` | 假地址只在核心运行时有意义；停用或切换模板后系统缓存里的 198.18.x.x 否则还要存活 10 分钟，期间网站打不开。mihomo 的 fake-ip 应答固定 TTL 1；重新查询只到本机 FakeIP 表，无额外开销 |
+| 普通 DNS 缓存到期后每次都等上游 | `dns.optimistic: true` | RFC 8767 serve-stale：到期先返回旧记录并后台刷新。直连域名的阿里 DoH 与 RealIP 下经节点的 Cloudflare DoH 在重复访问时不再等待；代价是到期后首个应答可能是 CDN 已轮换的地址，只影响这一次 |
 
 专用组 fallback 到 Proxy 只在没有合适节点时发生，会记录服务端警告。此时不保证原来的地区/ISP 条件，但不自动直连。Proxy 本身没有可用节点时生成失败，不输出一份全直连的“成功”订阅。
 
@@ -64,6 +66,8 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | 其余目标 | Cloudflare DoH 经 Proxy | FakeIP；真实地址例外使用 Cloudflare DoH |
 
 Direct 模式：除局域网外使用阿里 DNS。Global 模式：除局域网外使用代理 DNS，FakeIP 模板的普通 A 查询使用 FakeIP。两种模式均保留 IPv4 边界及 HTTPS/SVCB 处理。
+
+FakeIP 应答 TTL 为 1（`rewrite_ttl`），与 mihomo 一致，停用核心后假地址不残留在系统缓存；真实应答的缓存开启 `optimistic`，到期先用旧记录、后台刷新。
 
 STUN、主机游戏等真实地址例外集中在 `dns-realip`，**只决定不使用 FakeIP，不改变业务路由**。MX/TXT/SRV/SOA 按对应真实 DNS 分流，不送进 FakeIP。
 

@@ -71,7 +71,8 @@
           }
         ],
         "action": "route",
-        "server": "dns_fakeip"
+        "server": "dns_fakeip",
+        "rewrite_ttl": 1
       },
       {
         "clash_mode": "Global",
@@ -113,7 +114,8 @@
           }
         ],
         "action": "route",
-        "server": "dns_fakeip"
+        "server": "dns_fakeip",
+        "rewrite_ttl": 1
       },
       {
         "rule_set": [
@@ -149,7 +151,8 @@
           }
         ],
         "action": "route",
-        "server": "dns_fakeip"
+        "server": "dns_fakeip",
+        "rewrite_ttl": 1
       },
       {
         "rule_set": [
@@ -181,7 +184,8 @@
           }
         ],
         "action": "route",
-        "server": "dns_fakeip"
+        "server": "dns_fakeip",
+        "rewrite_ttl": 1
       },
       {
         "rule_set": [
@@ -212,10 +216,12 @@
           "A"
         ],
         "action": "route",
-        "server": "dns_fakeip"
+        "server": "dns_fakeip",
+        "rewrite_ttl": 1
       }
     ],
     "reverse_mapping": true,
+    "optimistic": true,
     "final": "dns_proxy",
     "strategy": "ipv4_only"
   },

@@ -101,6 +101,7 @@
       }
     ],
     "reverse_mapping": true,
+    "optimistic": true,
     "strategy": "ipv4_only",
     "final": "dns_proxy"
   },
