@@ -142,10 +142,15 @@ git diff --check
 
 这些验证不得擅自启动 SFM、切换系统代理或连接生产服务器；应先取得用户授权。调试日志及私有配置只放临时目录，不提交 Git。
 
-生产部署属于独立操作，本轮未执行。部署时必须：
+生产成品由 `protocols_data/render_singbox.py` 合成（服务器副本：`/opt/xboard/protocols_data/private/render_singbox.py`，仅标准库）。输入三样：仓库模板（默认从 GitHub `main` 拉取，`--ref` 指定分支/提交，`--template-dir` 改用本地文件）、服务器私有目录里的 `policies.json`（`{"policies": [{"outbound": "GlobalEmby", "domain": [...], "domain_suffix": [...]}, ...]}`，顺序即优先级）和 `api_secret`（一行）。私有目录 root 0700，内容不进仓库。
 
-1. 备份服务器上 PHP、两份模板及私有差异。
-2. 仅在服务器临时目录合并私有域名和 API secret，不能把私有成品回写或提交到本仓库。
-3. 保留私有规则既有优先级，并同时检查 DNS。私有直连域名通常应显式选择合适的真实解析器且先于 CN/FakeIP 兜底：局域网用本地解析，国内可用阿里，受污染的公网域名不能一律改给阿里；FQDN 直连若需要非默认解析器，还需在直连前显式 resolve。私有代理域名若会被 Apple/CN 等 DNS 直连规则先命中，也需补 DNS 例外，不能假定走 Proxy 就无需检查。保留现有模式规则的相对优先级。
-4. 用实际节点生成订阅并执行 1.14 配置校验，确认每组实际成员、私有域名的 DNS/出站、无模板扩展字段、引用有效、两处 secret 已替换，再替换生产文件。文件缺失时的后台回退模板也必须兼容 1.14；密钥检查不会替它自动迁移旧格式。
-5. 客户端更新订阅并重启连接；切换 RealIP/FakeIP 或验证此前缓存错误的域名时，清理客户端/系统 DNS 缓存后重测。不要无条件删除 `cache.db`，以免一并丢失规则缓存、模式/分组选择和 FakeIP 映射。
+```sh
+sudo python3 /opt/xboard/protocols_data/private/render_singbox.py render --dry-run   # 看脱敏 diff，不写
+sudo python3 /opt/xboard/protocols_data/private/render_singbox.py render             # 写入两份成品
+```
+
+- 每条 policy 生成一条路由规则，外加模板对该类出站使用的 DNS 规则：代理出站在 FakeIP 模板是 `A ∧ 非 dns-realip → FakeIP（TTL 1）` 加 `→ dns_proxy`，在 RealIP 模板是 `→ dns_proxy`；direct 出站两模板都是 `→ dns_direct`。整块插在 `direct-check, direct-extra` 规则之前，私有域名优先于所有远程规则集。policies 只放公网域名，局域网域名走模板的 geosite-private/local-extra。
+- 锚点缺失或多于一个、outbound 不是模板里的 tag、secret 缺失或仍为占位符、policies 重复或为空都会报错退出，不写文件。
+- 成品原地重写（单文件 bind mount 的 inode 不变），有改动时先复制到 `backups/render-<UTC 时间戳>/`，内容相同则跳过。`extract --from 成品` 从现有文件反推 policies，用于首次迁移和核对。
+- 模板的 DNS 模式变化（FakeIP 规则结构、解析器 tag、锚点规则）要同步改脚本；`RenderTests` 用仓库模板和示例 policies 检查两者一致、渲染结果通过 1.14 校验、幂等、脱敏输出不含密钥。
+- 客户端更新订阅并重启连接。不要无条件删除 `cache.db`，以免一并丢失规则缓存、模式/分组选择和 FakeIP 映射。

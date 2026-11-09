@@ -3,6 +3,8 @@
 import contextlib
 import http.client
 import http.server
+import importlib.util
+import io
 import ipaddress
 import json
 import os
@@ -21,6 +23,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = {mode: ROOT / f"xboard_singbox_{mode}_ipv4_only.json"
              for mode in ("realip", "fakeip")}
+RENDERER_SPEC = importlib.util.spec_from_file_location("render_singbox", ROOT / "protocols_data" / "render_singbox.py")
+renderer = importlib.util.module_from_spec(RENDERER_SPEC)
+RENDERER_SPEC.loader.exec_module(renderer)
 CORE = os.environ.get("SING_BOX", "sing-box")
 NODES = ["HK RFC sample", "TW Ucom sample", "JP SoftBank sample",
          "US ATT sample", "DE sample", "SG Starlink sample"]
@@ -632,6 +637,151 @@ class RuntimeTests(unittest.TestCase):
                         response.read()
                 finally:
                     connection.close()
+
+
+PRIVATE_POLICIES = {"policies": [
+    {"outbound": "GlobalEmby", "domain_suffix": ["emby.private.test"]},
+    {"outbound": "GlobalEmby", "domain": ["cdn.media.private.test"], "domain_suffix": ["media.private.test"]},
+    {"outbound": "Direct", "domain_suffix": ["bank.private.test", "office.private.test"]},
+    {"outbound": "Proxy", "domain": ["only.private.test"]},
+]}
+PRIVATE_SECRET = "fixture-private-secret-not-for-deployment"
+ANCHOR = ["direct-check", "direct-extra"]
+
+
+class RenderTests(unittest.TestCase):
+    """The server-side renderer merges the public templates with private policies and the API secret."""
+
+    def rendered(self, profile, policies=PRIVATE_POLICIES, secret=PRIVATE_SECRET):
+        template = json.loads(TEMPLATES[profile].read_text())
+        return renderer.render(template, profile, renderer.load_policies(policies), secret)
+
+    @staticmethod
+    def anchor(rules):
+        return next(index for index, rule in enumerate(rules) if rule.get("rule_set") == ANCHOR)
+
+    def test_private_block_sits_before_direct_check_and_follows_template_patterns(self):
+        def proxy(match):
+            return {**match, "action": "route", "server": "dns_proxy"}
+
+        def fake(match):
+            return {"type": "logical", "mode": "and",
+                    "rules": [{**match, "query_type": ["A"]}, {"rule_set": ["dns-realip"], "invert": True}],
+                    "action": "route", "server": "dns_fakeip", "rewrite_ttl": 1}
+
+        emby = {"domain_suffix": ["emby.private.test"]}
+        media = {"domain": ["cdn.media.private.test"], "domain_suffix": ["media.private.test"]}
+        bank = {"domain_suffix": ["bank.private.test", "office.private.test"]}
+        only = {"domain": ["only.private.test"]}
+        direct = {**bank, "action": "route", "server": "dns_direct"}
+        for profile in TEMPLATES:
+            with self.subTest(profile=profile):
+                config = self.rendered(profile)
+                dns, route = config["dns"]["rules"], config["route"]["rules"]
+                end = self.anchor(route)
+                self.assertEqual(route[end - 4:end], [
+                    {**emby, "action": "route", "outbound": "GlobalEmby"},
+                    {**media, "action": "route", "outbound": "GlobalEmby"},
+                    {**bank, "action": "route", "outbound": "Direct"},
+                    {**only, "action": "route", "outbound": "Proxy"},
+                ])
+                end = self.anchor(dns)
+                if profile == "fakeip":
+                    self.assertEqual(dns[end - 7:end], [fake(emby), proxy(emby), fake(media), proxy(media),
+                                                        direct, fake(only), proxy(only)])
+                    # The private FakeIP rule must stay identical in shape to the template's own proxied-set rule.
+                    template_fake = next(rule for rule in dns if rule.get("type") == "logical"
+                                         and "ai" in rule["rules"][0].get("rule_set", []))
+                    self.assertEqual({key: value for key, value in fake(emby).items() if key != "rules"},
+                                     {key: value for key, value in template_fake.items() if key != "rules"})
+                    self.assertEqual(fake(emby)["rules"][1], template_fake["rules"][1])
+                else:
+                    self.assertEqual(dns[end - 4:end], [proxy(emby), proxy(media), direct, proxy(only)])
+                self.assertEqual(json.dumps(config).count("REPLACE_WITH_SECRET"), 0)
+                self.assertEqual([service["secret"] for service in config["services"]], [PRIVATE_SECRET])
+
+    def test_rendered_output_passes_generation_and_core_check(self):
+        for profile in TEMPLATES:
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / f"rendered_{profile}.json"
+                path.write_text(renderer.dumps(self.rendered(profile)))
+                config = generate(path)["config"]
+                core_check(config)
+                self.assertIn("emby.private.test", json.dumps(config))
+
+    def test_render_is_idempotent_and_extract_round_trips(self):
+        for profile in TEMPLATES:
+            with self.subTest(profile=profile):
+                first, second = (renderer.dumps(self.rendered(profile)) for _ in range(2))
+                self.assertEqual(first, second)
+                self.assertEqual(renderer.extract(json.loads(first)), PRIVATE_POLICIES)
+
+    def test_render_rejects_invalid_input(self):
+        template = json.loads(TEMPLATES["fakeip"].read_text())
+        for bad in ({"policies": []}, {"policies": [{"outbound": "Proxy"}]},
+                    {"policies": [{"outbound": "Proxy", "domain": ["a.test"]}, {"outbound": "Direct", "domain": ["a.test"]}]},
+                    {"policies": [{"outbound": "Proxy", "domain": ["a.test"], "server": "dns_proxy"}]},
+                    {"policies": [{"outbound": "Proxy", "domain": ""}]}):
+            with self.subTest(bad=bad), self.assertRaises(renderer.RenderError):
+                renderer.load_policies(bad)
+        unknown = renderer.load_policies({"policies": [{"outbound": "NoSuchGroup", "domain": ["a.test"]}]})
+        with self.assertRaises(renderer.RenderError):
+            renderer.render(template, "fakeip", unknown, PRIVATE_SECRET)
+        policies = renderer.load_policies(PRIVATE_POLICIES)
+        broken = json.loads(json.dumps(template))
+        broken["dns"]["rules"] = [rule for rule in broken["dns"]["rules"] if rule.get("rule_set") != ANCHOR]
+        with self.assertRaises(renderer.RenderError):
+            renderer.render(broken, "fakeip", policies, PRIVATE_SECRET)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "api_secret"
+            with self.assertRaises(renderer.RenderError):
+                renderer.load_secret(path)
+            for text in ("", " \n", "REPLACE_WITH_SECRET\n", "two words\n"):
+                path.write_text(text)
+                with self.subTest(text=text), self.assertRaises(renderer.RenderError):
+                    renderer.load_secret(path)
+            path.write_text("ok-secret\n")
+            self.assertEqual(renderer.load_secret(path), "ok-secret")
+
+    def test_cli_rewrites_in_place_with_backup_and_masked_dry_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            private, out = Path(directory) / "private", Path(directory) / "out"
+            private.mkdir()
+            out.mkdir()
+            (private / "api_secret").write_text(PRIVATE_SECRET + "\n")
+            (private / "policies.json").write_text(json.dumps(PRIVATE_POLICIES))
+            args = ["render", "--template-dir", str(ROOT), "--private-dir", str(private), "--out-dir", str(out)]
+
+            def run(extra=()):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(renderer.main(args + list(extra)), 0)
+                return output.getvalue()
+
+            run(["--dry-run"])
+            self.assertEqual(list(out.iterdir()), [])
+            run()
+            self.assertEqual(sorted(path.name for path in out.iterdir()), ["singbox_fakeip.json", "singbox_realip.json"])
+            target = out / "singbox_fakeip.json"
+            inode = target.stat().st_ino
+            self.assertEqual(run().count("unchanged"), 2)
+            # A stale file that differs only in the secret shows an empty masked diff; add a domain change too.
+            target.write_text(target.read_text().replace(PRIVATE_SECRET, "previous-secret")
+                              .replace("emby.private.test", "old.private.test"))
+            preview = run(["--dry-run"])
+            self.assertIn("would change", preview)
+            self.assertRegex(preview, r'\n-\s+"old\.private\.test"\n\+\s+"emby\.private\.test"\n')
+            for secret in (PRIVATE_SECRET, "previous-secret"):
+                self.assertNotIn(secret, preview)
+            self.assertEqual(renderer.masked('{"secret": "' + PRIVATE_SECRET + '", "x": 1}'), '{"secret": "<secret>", "x": 1}')
+            self.assertIn("previous-secret", target.read_text(), "dry run must not write")
+            run()
+            self.assertEqual(target.stat().st_ino, inode)
+            backups = list((out / "backups").glob("render-*/singbox_fakeip.json"))
+            self.assertEqual(len(backups), 1)
+            self.assertIn("previous-secret", backups[0].read_text())
+            self.assertIn(PRIVATE_SECRET, target.read_text())
+            self.assertEqual(renderer.extract(json.loads(target.read_text())), PRIVATE_POLICIES)
 
 
 if __name__ == "__main__":

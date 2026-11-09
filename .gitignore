@@ -27,3 +27,6 @@ Temporary Items
 
 # Local proxy profiles (private device configs, do not publish)
 local.txt
+
+# Python bytecode (tests import render_singbox.py)
+__pycache__/
