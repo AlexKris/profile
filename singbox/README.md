@@ -29,7 +29,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | FakeIP 真实地址例外全部走国内 DNS | 按国内、境外、局域网分别解析 | STUN 等需要真实地址，不等于需要国内解析器或直连 |
 | FakeIP 模板没有 `reverse_mapping` | 两份均开启 | FakeIP 的真实地址例外也需要域名映射辅助路由 |
 | HTTPS/SVCB 拒绝位置不统一，另有笼统 PTR 拒绝 | 统一返回 NOERROR 空结果；恢复 PTR/SOA 分流路径 | 避免笼统拒绝；Apple 平台非 A/AAAA 的本地解析仍须实机验证 |
-| 所有连接先 sniff | DNS 53 端口、私网、强制模式先处理；只对 IPv4 目的地址 sniff | FQDN 和已还原的 FakeIP 已有目标域名，不必等待首包；RealIP 仍保留 HTTP/TLS/QUIC/DNS 嗅探 |
+| 所有连接先 sniff | DNS 53 端口、私网、强制模式先处理；只对 IPv4 目的地址 sniff | FQDN 和已还原的 FakeIP 已有目标域名，不必等待首包；RealIP 仍保留 HTTP/TLS/QUIC/DNS/NTP 嗅探 |
 | 空筛选组默认填 Direct | 模板显式 fallback 到 Proxy；无节点、重名、保留组名冲突报错 | 避免节点缺失或命名问题使流量悄悄直连 |
 | `DE`、`US`、`ATT` 等正则匹配单词内部 | 国家代码和运营商名加字母边界，同时列出地区别名；复合筛选从行首匹配 | 兼容 HKG/USA/JPN 等命名，又避免 `Node` 命中 DE、`Seattle` 命中 ATT |
 | 无效正则只记录警告并继续 | 生成失败，要求修正模板 | 特别是 `exclude` 失效时，继续生成会放宽原本的排除条件 |
@@ -47,6 +47,8 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | `SG`、`DE` 地区组没有任何规则引用 | 删除，其他客户端配置同步删除 | 只能手动选用，却要求有匹配节点或 fallback |
 | FakeIP 应答沿用核心通用 TTL 600 | 走 `dns_fakeip` 的规则都加 `rewrite_ttl: 1` | 假地址只在核心运行时有意义；停用或切换模板后系统缓存里的 198.18.x.x 否则还要存活 10 分钟，期间网站打不开。mihomo 的 fake-ip 应答固定 TTL 1；重新查询只到本机 FakeIP 表，无额外开销 |
 | 普通 DNS 缓存到期后每次都等上游 | `dns.optimistic: true` | RFC 8767 serve-stale：到期先返回旧记录并后台刷新。直连域名的阿里 DoH 与 RealIP 下经节点的 Cloudflare DoH 在重复访问时不再等待；代价是到期后首个应答可能是 CDN 已轮换的地址，只影响这一次 |
+| DNS 缓存只在内存，重启或切换节点后全部重新解析 | `cache_file.store_dns: true` | 1.14.0 新增。缓存随 cache.db 持久化，配合 optimistic 重启后首批域名也先回旧记录、后台刷新 |
+| NTP 没有规则，`time.windows.com`、`time.android.com` 经代理走 UDP 123 | sniffer 加 `ntp`，sniff 之后 `protocol: ntp → Direct` | 对时不需要也不该经代理；节点不支持 UDP 时系统时间同步会静默失败。`time.apple.com` 原本已在 apple 直连 |
 
 专用组 fallback 到 Proxy 只在没有合适节点时发生，会记录服务端警告。此时不保证原来的地区/ISP 条件，但不自动直连。Proxy 本身没有可用节点时生成失败，不输出一份全直连的“成功”订阅。
 
@@ -67,7 +69,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 
 Direct 模式：除局域网外使用阿里 DNS。Global 模式：除局域网外使用代理 DNS，FakeIP 模板的普通 A 查询使用 FakeIP。两种模式均保留 IPv4 边界及 HTTPS/SVCB 处理。
 
-FakeIP 应答 TTL 为 1（`rewrite_ttl`），与 mihomo 一致，停用核心后假地址不残留在系统缓存；真实应答的缓存开启 `optimistic`，到期先用旧记录、后台刷新。
+FakeIP 应答 TTL 为 1（`rewrite_ttl`），与 mihomo 一致，停用核心后假地址不残留在系统缓存；真实应答的缓存开启 `optimistic`，到期先用旧记录、后台刷新；缓存随 `store_dns` 写入 cache.db，重启后仍可用。
 
 STUN、主机游戏等真实地址例外集中在 `dns-realip`，**只决定不使用 FakeIP，不改变业务路由**。MX/TXT/SRV/SOA 按对应真实 DNS 分流，不送进 FakeIP。
 
@@ -84,7 +86,7 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 ## 内存、网络与规则效率
 
 - 普通 DNS LRU 使用核心默认的 1024 项下限，删除了等同默认值的显式 `cache_capacity: 1024`。这是去冗余，不是内存优化；字段本身有效，设为更大值会改变容量。反向域名映射是核心另一份 1024 项缓存。[1.14.1 缓存实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/dns/client.go)、[反向映射实现](https://github.com/SagerNet/sing-box/blob/v1.14.1/dns/router.go)。
-- 尊重 DNS TTL；不启用长期 stale/optimistic 结果、不禁用过期、不强行延长 TTL，避免 CDN 地址改变后继续使用失效 IP。
+- 尊重 DNS TTL；不禁用过期、不强行延长 TTL。`optimistic` 只在到期后先回一次旧记录并立即后台刷新，不是长期使用失效 IP。
 - FakeIP 保留 `store_fakeip`，避免重启后应用缓存的假地址失去域名对应关系。该映射和普通 DNS 缓存不同，不建议为节省少量磁盘直接关闭。
 - 继续使用二进制 SRS，同一规则集在 DNS 和路由中按 tag 复用；合并相邻的同目的匹配（如 direct/cn-domain → Direct），不改变专用服务优先级。
 - 当前 19 个远程 SRS 合计 152,174 字节，约 149 KiB，其中 cn-domain 约 63 KiB。**这是下载体积，不是进程内存**。实测 1.14.2 的 Go 在用内存（clash_api `/memory`）：11.2 万条版本的 cn-domain 单独加载比空配置多约 1 MiB（精简后未重测，条数约为原来的八分之一）；被替换掉的 geosite-cn、geolocation-!cn、proxy×2、microsoft、cryptocurrency 合计多约 2.3 MiB，换源后内存反而下降。

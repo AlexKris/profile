@@ -101,6 +101,10 @@ class GenerationTests(unittest.TestCase):
                 self.assertNotIn("platform", config["inbounds"][0])
                 self.assertEqual(config["route"]["default_http_client"], "http_proxy")
                 self.assertTrue(config["dns"]["optimistic"])
+                self.assertTrue(config["experimental"]["cache_file"]["store_dns"])
+                sniff = next(index for index, rule in enumerate(config["route"]["rules"]) if rule.get("action") == "sniff")
+                self.assertIn("ntp", config["route"]["rules"][sniff]["sniffer"])
+                self.assertEqual(config["route"]["rules"][sniff + 1], {"protocol": "ntp", "action": "route", "outbound": "Direct"})
 
     def test_common_behavior_stays_aligned(self):
         real, fake = (json.loads(path.read_text()) for path in TEMPLATES.values())

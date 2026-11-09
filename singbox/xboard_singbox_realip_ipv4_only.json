@@ -108,7 +108,8 @@
   "experimental": {
     "cache_file": {
       "enabled": true,
-      "path": "cache.db"
+      "path": "cache.db",
+      "store_dns": true
     },
     "clash_api": {
       "default_mode": "Rule"
@@ -339,8 +340,14 @@
           "http",
           "tls",
           "quic",
-          "dns"
+          "dns",
+          "ntp"
         ]
+      },
+      {
+        "protocol": "ntp",
+        "action": "route",
+        "outbound": "Direct"
       },
       {
         "protocol": "dns",
