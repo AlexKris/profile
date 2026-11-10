@@ -455,6 +455,14 @@
         "outbound": "Proxy"
       },
       {
+        "network": "udp",
+        "port": 123,
+        "action": "sniff",
+        "sniffer": [
+          "ntp"
+        ]
+      },
+      {
         "ip_version": 4,
         "action": "sniff",
         "sniffer": [

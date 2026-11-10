@@ -29,7 +29,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | FakeIP 真实地址例外全部走国内 DNS | 按国内、境外、局域网分别解析 | STUN 等需要真实地址，不等于需要国内解析器或直连 |
 | FakeIP 模板没有 `reverse_mapping` | 两份均开启 | FakeIP 的真实地址例外也需要域名映射辅助路由 |
 | HTTPS/SVCB 拒绝位置不统一，另有笼统 PTR 拒绝 | 统一返回 NOERROR 空结果；恢复 PTR/SOA 分流路径 | 避免笼统拒绝；Apple 平台非 A/AAAA 的本地解析仍须实机验证 |
-| 所有连接先 sniff | DNS 53 端口、私网、强制模式先处理；只对 IPv4 目的地址 sniff | FQDN 和已还原的 FakeIP 已有目标域名，不必等待首包；RealIP 仍保留 HTTP/TLS/QUIC/DNS/NTP 嗅探 |
+| 所有连接先 sniff | DNS 53 端口、私网、强制模式先处理；UDP/123 单独嗅探 NTP，其余只对 IPv4 目的地址 sniff | 普通 FQDN 和已还原的 FakeIP 已有目标域名，不必等待首包；UDP/123 仍需识别对时协议；RealIP 保留 HTTP/TLS/QUIC/DNS/NTP 嗅探 |
 | 空筛选组默认填 Direct | 模板显式 fallback 到 Proxy；无节点、重名、保留组名冲突报错 | 避免节点缺失或命名问题使流量悄悄直连 |
 | `DE`、`US`、`ATT` 等正则匹配单词内部 | 国家代码和运营商名加字母边界，同时列出地区别名；复合筛选从行首匹配 | 兼容 HKG/USA/JPN 等命名，又避免 `Node` 命中 DE、`Seattle` 命中 ATT |
 | 无效正则只记录警告并继续 | 生成失败，要求修正模板 | 特别是 `exclude` 失效时，继续生成会放宽原本的排除条件 |
@@ -48,7 +48,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | FakeIP 应答沿用核心通用 TTL 600 | 走 `dns_fakeip` 的规则都加 `rewrite_ttl: 1` | 假地址只在核心运行时有意义；停用或切换模板后系统缓存里的 198.18.x.x 否则还要存活 10 分钟，期间网站打不开。mihomo 的 fake-ip 应答固定 TTL 1；重新查询只到本机 FakeIP 表，无额外开销 |
 | 普通 DNS 缓存到期后每次都等上游 | `dns.optimistic: true` | RFC 8767 serve-stale：到期先返回旧记录并后台刷新。直连域名的阿里 DoH 与 RealIP 下经节点的 Cloudflare DoH 在重复访问时不再等待；代价是到期后首个应答可能是 CDN 已轮换的地址，只影响这一次 |
 | DNS 缓存只在内存，重启或切换节点后全部重新解析 | `cache_file.store_dns: true` | 1.14.0 新增。缓存随 cache.db 持久化，配合 optimistic 重启后首批域名也先回旧记录、后台刷新 |
-| NTP 没有规则，`time.windows.com`、`time.android.com` 经代理走 UDP 123 | sniffer 加 `ntp`，sniff 之后 `protocol: ntp → Direct` | 对时不需要也不该经代理；节点不支持 UDP 时系统时间同步会静默失败。`time.apple.com` 原本已在 apple 直连 |
+| NTP 没有规则，或 FakeIP/FQDN 跳过 IPv4 嗅探条件，仍经代理走 UDP 123 | 在通用 IPv4 嗅探之前单独对 UDP/123 嗅探 NTP，再由 `protocol: ntp → Direct` 分流 | 不依赖目标是域名还是真实 IP，也避免其他嗅探器先返回而未识别 NTP；只将确认的 NTP 直连，其他 UDP/123 继续按原规则分流。Direct/Global 模式仍优先 |
 
 专用组 fallback 到 Proxy 只在没有合适节点时发生，会记录服务端警告。此时不保证原来的地区/ISP 条件，但不自动直连。Proxy 本身没有可用节点时生成失败，不输出一份全直连的“成功”订阅。
 

@@ -1,3 +1,4 @@
+# Mihomo 移动端：iPhone / iPad / Apple TV / Android，需使用兼容 Mihomo 的客户端
 # ==================== 锚点配置 ====================
 BaseProvider: &BaseProvider
   type: http
@@ -48,7 +49,7 @@ allow-lan: false
 unified-delay: true
 tcp-concurrent: true
 log-level: warning
-find-process-mode: strict
+find-process-mode: 'off'
 keep-alive-interval: 15
 keep-alive-idle: 600
 
@@ -73,10 +74,11 @@ sniffer:
   skip-domain: ["Mijia Cloud", "+.push.apple.com"]
 
 # ==================== TUN 模式 ====================
+# ProjectClash 在 Apple 平台接管 TUN、路由和 DNS 劫持；保留本段供 Android 等客户端使用。
+# 原始 YAML 的字段值不一定等于 ProjectClash 的运行时设置，详见 README。
 tun:
   enable: true
   dns-hijack: ["any:53", "tcp://any:53"]
-  dns-mode: hijack  # macOS 默认 disabled，不注册系统 DNS，TUN 外的查询不会被劫持；Windows/Linux 默认已是 hijack
   auto-route: true
   # auto-redirect: true  # 仅 Linux 支持，macOS 无效
   auto-detect-interface: true
@@ -149,11 +151,12 @@ dns:
   default-nameserver: [119.29.29.29, 223.5.5.5]
   # 真实解析：局域网域名问系统 DNS，国内域名走阿里/腾讯，其余经 Proxy 问 Cloudflare
   nameserver-policy:
-    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com': system
+    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com,+.m2m,+.bogon,lancache.steamcontent.com': system
     'rule-set:direct_extra,apple,microsoft_cdn,direct,cn_domain': ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
   nameserver: ["https://1.1.1.1/dns-query#Proxy"]
   # DIRECT 拨号和节点域名用国内 DNS，避免依赖尚未建立的代理
   direct-nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
+  direct-nameserver-follow-policy: true
   proxy-server-nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
 
 # ==================== 代理策略组 ====================
@@ -213,10 +216,6 @@ proxy-groups:
     <<: *BaseSelect
     proxies: [DIRECT, Proxy]
 
-  - name: GameDownload
-    <<: *BaseSelect
-    proxies: [DIRECT, Download, Proxy]
-
   - name: Download
     <<: *BaseSelect
     include-all: true
@@ -245,32 +244,9 @@ proxy-groups:
 
 # ==================== 规则路由 ====================
 rules:
-  # > 进程规则（macOS/Windows 生效）
-  - PROCESS-NAME,Stash,DIRECT
-  - PROCESS-NAME,v2ray,DIRECT
-  - PROCESS-NAME,ss-local,DIRECT
-  - PROCESS-NAME,UUBooster,DIRECT
-  - PROCESS-NAME,aria2c,DIRECT
-  - PROCESS-NAME,fdm,DIRECT
-  - PROCESS-NAME,Folx,DIRECT
-  - PROCESS-NAME,NetTransport,DIRECT
-  - PROCESS-NAME,Thunder,DIRECT
-  - PROCESS-NAME,Transmission,DIRECT
-  - PROCESS-NAME,uTorrent,DIRECT
-  - PROCESS-NAME,WebTorrent,DIRECT
-  - PROCESS-NAME,WebTorrent Helper,DIRECT
-  - PROCESS-NAME,aria2c.exe,DIRECT
-  - PROCESS-NAME,fdm.exe,DIRECT
-  - PROCESS-NAME,NetTransport.exe,DIRECT
-  - PROCESS-NAME,Thunder.exe,DIRECT
-  - PROCESS-NAME,Transmission.exe,DIRECT
-  - PROCESS-NAME,uTorrent.exe,DIRECT
-  - PROCESS-NAME,qbittorrent.exe,DIRECT
-  - PROCESS-NAME,BitComet.exe,DIRECT
-  - PROCESS-NAME,Nutstore,DIRECT
-  - PROCESS-NAME,Nutstore.exe,DIRECT
-  - PROCESS-NAME,iperf3-darwin,DIRECT
   # ===== 域名规则 start =====
+  # 本地 Steam 缓存优先于游戏和下载策略
+  - DOMAIN,lancache.steamcontent.com,DIRECT
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
   # > 测速网站
@@ -294,8 +270,6 @@ rules:
   - RULE-SET,apple,DIRECT
   # > Microsoft CDN
   - RULE-SET,microsoft_cdn,MSCDN
-  # > 游戏下载（Steam/Epic/Blizzard…）默认直连，可切 Download/Proxy
-  - RULE-SET,game_download,GameDownload
   # > Download
   - RULE-SET,download_domain,Download
   - RULE-SET,download_nonip,Download
@@ -363,9 +337,6 @@ rule-providers:
   microsoft_cdn:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/microsoft-cdn.mrs'
-  game_download:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/domainset/game-download.mrs'
   download_domain:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/domainset/download.mrs'

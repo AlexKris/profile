@@ -28,5 +28,8 @@ Temporary Items
 # Local proxy profiles (private device configs, do not publish)
 local.txt
 
+# Local server tools (ignore untracked files)
+/tool/
+
 # Python bytecode (tests import render_singbox.py)
 __pycache__/

@@ -102,7 +102,7 @@ class GenerationTests(unittest.TestCase):
                 self.assertEqual(config["route"]["default_http_client"], "http_proxy")
                 self.assertTrue(config["dns"]["optimistic"])
                 self.assertTrue(config["experimental"]["cache_file"]["store_dns"])
-                sniff = next(index for index, rule in enumerate(config["route"]["rules"]) if rule.get("action") == "sniff")
+                sniff = max(index for index, rule in enumerate(config["route"]["rules"]) if rule.get("action") == "sniff")
                 self.assertIn("ntp", config["route"]["rules"][sniff]["sniffer"])
                 self.assertEqual(config["route"]["rules"][sniff + 1], {"protocol": "ntp", "action": "route", "outbound": "Direct"})
 
@@ -558,6 +558,42 @@ class RuntimeTests(unittest.TestCase):
                 self.http_request(config, reply["ip"])
                 # The Direct stand-in node dials the restored domain via default_domain_resolver.
                 self.assertEqual(self.hits, [("dns_direct", "http-persistent.test", 1)])
+
+    def test_ntp_routes_direct_for_fakeip_and_domain_destinations(self):
+        for profile, use_domain, valid_ntp in (("fakeip", False, True), ("fakeip", True, True),
+                                                ("realip", False, True), ("fakeip", False, False)):
+            with self.subTest(profile=profile, domain=use_domain, ntp=valid_ntp):
+                config = self.config(profile)
+                closed = port()
+                for outbound in config["outbounds"]:
+                    if outbound["tag"] in [*NODES, "Direct"]:
+                        tag = outbound["tag"]
+                        outbound.clear()
+                        outbound.update(tag=tag, type="socks", server="127.0.0.1", server_port=closed)
+                with running(config) as log:
+                    name = "time.fixture.test"
+                    address = query(config["inbounds"][1]["listen_port"], name)["ip"]
+                    destination = (b"\x03" + bytes([len(name)]) + name.encode() if use_domain else
+                                   b"\x01" + socket.inet_aton(address))
+                    with socket.create_connection(("127.0.0.1", config["inbounds"][0]["listen_port"]), 3) as conn:
+                        conn.sendall(b"\x05\x01\x00")
+                        self.assertEqual(conn.recv(2), b"\x05\x00")
+                        conn.sendall(b"\x05\x03\x00\x01" + b"\x00" * 6)
+                        reply = conn.recv(10, socket.MSG_WAITALL)
+                        self.assertEqual(reply[:4], b"\x05\x00\x00\x01")
+                        endpoint = (socket.inet_ntoa(reply[4:8]), struct.unpack("!H", reply[8:10])[0])
+                        packet = (b"\x23" if valid_ntp else b"\x00") + b"\x00" * 47
+                        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                            sock.sendto(b"\x00\x00\x00" + destination + struct.pack("!H", 123) + packet, endpoint)
+                            expected = f"outbound/socks[{'Direct' if valid_ntp else NODES[0]}]: outbound packet connection"
+                            for _ in range(100):
+                                log.seek(0)
+                                output = log.read()
+                                if "outbound packet connection" in output:
+                                    break
+                                time.sleep(0.02)
+                            self.assertIn(expected, output)
+                            self.assertEqual("sniffed packet protocol: ntp" in output, valid_ntp)
 
     def test_mscdn_resolution_follows_selected_outbound(self):
         name = "http-mscdn.cdn.microsoft.test"

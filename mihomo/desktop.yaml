@@ -1,3 +1,4 @@
+# Mihomo 桌面端：Windows / macOS
 # ==================== 锚点配置 ====================
 BaseProvider: &BaseProvider
   type: http
@@ -76,8 +77,9 @@ sniffer:
 tun:
   enable: true
   dns-hijack: ["any:53", "tcp://any:53"]
-  dns-mode: hijack  # macOS 默认 disabled，不注册系统 DNS，TUN 外的查询不会被劫持；Windows/Linux 默认已是 hijack
+  dns-mode: hijack  # 标准 Mihomo 的 macOS 需显式设置；ProjectClash 由 App 接管并清空此项
   auto-route: true
+  strict-route: true  # 标准 Mihomo 用于 Windows DNS 防绕行、macOS 不使用；ProjectClash 会用它调整默认路由拆分
   # auto-redirect: true  # 仅 Linux 支持，macOS 无效
   auto-detect-interface: true
 
@@ -149,11 +151,12 @@ dns:
   default-nameserver: [119.29.29.29, 223.5.5.5]
   # 真实解析：局域网域名问系统 DNS，国内域名走阿里/腾讯，其余经 Proxy 问 Cloudflare
   nameserver-policy:
-    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com': system
+    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com,+.m2m,+.bogon,lancache.steamcontent.com': system
     'rule-set:direct_extra,apple,microsoft_cdn,direct,cn_domain': ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
   nameserver: ["https://1.1.1.1/dns-query#Proxy"]
   # DIRECT 拨号和节点域名用国内 DNS，避免依赖尚未建立的代理
   direct-nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
+  direct-nameserver-follow-policy: true
   proxy-server-nameserver: ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
 
 # ==================== 代理策略组 ====================
@@ -271,6 +274,8 @@ rules:
   - PROCESS-NAME,Nutstore.exe,DIRECT
   - PROCESS-NAME,iperf3-darwin,DIRECT
   # ===== 域名规则 start =====
+  # 本地 Steam 缓存优先于游戏和下载策略
+  - DOMAIN,lancache.steamcontent.com,DIRECT
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
   # > 测速网站
