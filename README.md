@@ -50,9 +50,18 @@ python3 -B mihomo/tests/test_dns.py
 | [mac.conf](surge/mac.conf) | Mac |
 | [mobile.conf](surge/mobile.conf) | iPhone、iPad、Apple TV |
 
-移动端以原 iPhone 配置的完整分流为基础，统一保留 PayPal、AI、Telegram、微软 CDN 等策略，全部手动选择，Ponte 组也改为手动选择。
+移动端以原 iPhone 配置的完整分流为基础，统一保留 PayPal、AI、Telegram、微软 CDN 等策略。普通业务策略组均手动选择；Mac 和移动端的 Ponte 组作为例外，统一使用 `smart`。
+
+Mac 模板提供仅本机可用的 HTTP 代理 `127.0.0.1:6152` 和 SOCKS5 代理 `127.0.0.1:6153`。两份模板的默认加密 DNS 均使用阿里、腾讯两个 DoH 上游。
 
 模块和 HTTPS 解密按设备管理。移动端模板仅保留 MITM 排除项，不提供解密证书或需要解密的域名；需要解密时，在对应设备单独配置证书、目标域名和开关。重新导入或替换整份远程配置可能覆盖本机修改，更新后检查模块和解密设置。
+
+局域网 DNS 与真实 IP 例外沿用 Sukka 模块，在各设备上单独安装、启用并确认资源加载成功：
+
+- [Local DNS Mapping](https://ruleset.skk.moe/Modules/sukka_local_dns_mapping.sgmodule)：通过 `[Host]` 将 `.lan`、`.internal`、`.home.arpa`、`.localdomain` 等交给系统 DNS，同时提供其他域名的 DNS 分流。启用后无需在主配置中重复维护这些映射。
+- [Always Real IP Plus](https://ruleset.skk.moe/Modules/sukka_common_always_realip.sgmodule)：为指定的 STUN、游戏和下载缓存域名返回真实 IP；它不负责指定 DNS 服务器或直连策略。
+
+`skip-proxy` 是系统代理接管的例外，不替代 DNS 映射或 DIRECT 规则。主配置的空 `[Host]` 不代表启用模块后的有效配置为空；仅导入配置文件也不会自动启用上述模块。使用本地 Steam 缓存时，还需为 `lancache.steamcontent.com` 配置局域网 DNS 和优先 DIRECT 规则，不能仅依赖真实 IP 例外。
 
 原 `surge/iphone.conf`、`surge/ipad.conf`、`surge/appletv.conf` 已合并移除，旧配置链接应改为 `surge/mobile.conf`。
 使用前仍需自行提供 `proxy.conf`，并替换 `sub` 组中的“订阅地址”。Apple TV 的部署方式参见 [Surge tvOS 官方说明](https://kb.nssurge.com/surge-knowledge-base/guidelines/tvos)。
