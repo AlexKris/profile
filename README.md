@@ -61,7 +61,7 @@ Mac 模板提供仅本机可用的 HTTP 代理 `127.0.0.1:6152` 和 SOCKS5 代�
 - [Local DNS Mapping](https://ruleset.skk.moe/Modules/sukka_local_dns_mapping.sgmodule)：通过 `[Host]` 将 `.lan`、`.internal`、`.home.arpa`、`.localdomain` 等交给系统 DNS，同时提供其他域名的 DNS 分流。启用后无需在主配置中重复维护这些映射。
 - [Always Real IP Plus](https://ruleset.skk.moe/Modules/sukka_common_always_realip.sgmodule)：为指定的 STUN、游戏和下载缓存域名返回真实 IP；它不负责指定 DNS 服务器或直连策略。
 
-`skip-proxy` 是系统代理接管的例外，不替代 DNS 映射或 DIRECT 规则。主配置的空 `[Host]` 不代表启用模块后的有效配置为空；仅导入配置文件也不会自动启用上述模块。使用本地 Steam 缓存时，还需为 `lancache.steamcontent.com` 配置局域网 DNS 和优先 DIRECT 规则，不能仅依赖真实 IP 例外。
+`skip-proxy` 是系统代理接管的例外，不替代 DNS 映射或 DIRECT 规则。主配置的空 `[Host]` 不代表启用模块后的有效配置为空；仅导入配置文件也不会自动启用上述模块。
 
 原 `surge/iphone.conf`、`surge/ipad.conf`、`surge/appletv.conf` 已合并移除，旧配置链接应改为 `surge/mobile.conf`。
 使用前仍需自行提供 `proxy.conf`，并替换 `sub` 组中的“订阅地址”。Apple TV 的部署方式参见 [Surge tvOS 官方说明](https://kb.nssurge.com/surge-knowledge-base/guidelines/tvos)。

@@ -2,7 +2,7 @@
 # ==================== 锚点配置 ====================
 BaseProvider: &BaseProvider
   type: http
-  interval: 86400
+  interval: 0
   health-check:
     enable: true
     url: 'http://cp.cloudflare.com/generate_204'
@@ -14,15 +14,15 @@ BaseProvider: &BaseProvider
 BaseSelect: &BaseSelect {type: select, empty-fallback: PASS}
 BaseProxySelect: &BaseProxySelect {type: select, empty-fallback: DIRECT}
 
-FilterHK: &FilterHK '(?=.*(?:🇭🇰|香港|Hong|\bHK\b))'
-FilterJP: &FilterJP '(?=.*(?:🇯🇵|日本|Japan|\bJP\b))'
+FilterHK: &FilterHK '(🇭🇰|香港|Hong|HK)'
+FilterJP: &FilterJP '(🇯🇵|日本|Japan|JP)'
 
-FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
-FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|\bHK\b|\bTW\b|\bSG\b))'
-FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))'
-FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))(?=.*(?:RFC|Jinx))'
-FilterAIGC: &FilterAIGC '(?=.*(?:🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|Taiwan|Japan|Singapore|United States|\bTW\b|\bJP\b|\bSG\b|\bUSA?\b))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
-FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|Hong|Taiwan|Japan|Singapore|\bHK\b|\bTW\b|\bJP\b|\bSG\b))'
+FilterHKJPWide: &FilterHKJPWide '(🇭🇰|🇯🇵|香港|日本|Hong|Japan|HK|JP)'
+FilterGlobalMedia: &FilterGlobalMedia '(🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|HK|TW|SG)'
+FilterGlobalEmby: &FilterGlobalEmby '(🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|HK|JP|SG)'
+FilterRFCEmby: &FilterRFCEmby '(?=.*(🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|HK|JP|SG))(?=.*(RFC|Jinx))'
+FilterAIGC: &FilterAIGC '(?=.*(🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|Taiwan|Japan|Singapore|United States|United Kingdom|TW|JP|SG|US|UK|GB))(?=.*(SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
+FilterSpeedtest: &FilterSpeedtest '(🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|Hong|Taiwan|Japan|Singapore|HK|TW|JP|SG)'
 
 BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
 
@@ -38,8 +38,7 @@ proxy-providers:
     path: ./proxy_providers/sub.yaml
 
 # ==================== 核心配置 ====================
-# FlClash 会用 App 设置覆盖本段的端口、allow-lan、find-process-mode、keep-alive、log-level、external-*，
-# 以及 tun.stack、dns-hijack；PROCESS-NAME 规则需在 FlClash 里打开「查找进程」。
+# FlClash 会用 App 设置覆盖本段的端口、allow-lan、find-process-mode、keep-alive、log-level、external-* 及 tun.stack、dns-hijack。
 mode: rule
 mixed-port: 7893
 ipv6: false
@@ -78,7 +77,6 @@ tun:
   enable: true
   dns-hijack: ["any:53", "tcp://any:53"]
   auto-route: true
-  # auto-redirect: true  # 仅 Linux 支持，macOS 无效
   auto-detect-interface: true
 
 # ==================== DNS 配置 ====================
@@ -149,7 +147,7 @@ dns:
   default-nameserver: [119.29.29.29, 223.5.5.5]
   # 真实解析：局域网域名问系统 DNS，国内域名走阿里/腾讯，其余经 Proxy 问 Cloudflare
   nameserver-policy:
-    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com,+.m2m,+.bogon,lancache.steamcontent.com': system
+    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com,+.m2m,+.bogon': system
     'rule-set:direct_extra,apple,microsoft_cdn,direct,cn_domain': ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
   nameserver: ["https://1.1.1.1/dns-query#Proxy"]
   # DIRECT 拨号和节点域名用国内 DNS，避免依赖尚未建立的代理
@@ -202,6 +200,7 @@ proxy-groups:
 
   - name: MSCDN
     <<: *BaseSelect
+    proxies: [DIRECT]
     include-all: true
 
   - name: Download

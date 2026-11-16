@@ -2,7 +2,7 @@
 # ==================== 锚点配置 ====================
 BaseProvider: &BaseProvider
   type: http
-  interval: 86400
+  interval: 0
   health-check:
     enable: true
     url: 'http://cp.cloudflare.com/generate_204'
@@ -14,15 +14,15 @@ BaseProvider: &BaseProvider
 BaseSelect: &BaseSelect {type: select, empty-fallback: PASS}
 BaseProxySelect: &BaseProxySelect {type: select, empty-fallback: DIRECT}
 
-FilterHK: &FilterHK '(?=.*(?:🇭🇰|香港|Hong|\bHK\b))'
-FilterJP: &FilterJP '(?=.*(?:🇯🇵|日本|Japan|\bJP\b))'
+FilterHK: &FilterHK '(🇭🇰|香港|Hong|HK)'
+FilterJP: &FilterJP '(🇯🇵|日本|Japan|JP)'
 
-FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
-FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|\bHK\b|\bTW\b|\bSG\b))'
-FilterGlobalEmby: &FilterGlobalEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))'
-FilterRFCEmby: &FilterRFCEmby '(?=.*(?:🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|\bHK\b|\bJP\b|\bSG\b))(?=.*(?:RFC|Jinx))'
-FilterAIGC: &FilterAIGC '(?=.*(?:🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|Taiwan|Japan|Singapore|United States|\bTW\b|\bJP\b|\bSG\b|\bUSA?\b))(?=.*(?:SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
-FilterSpeedtest: &FilterSpeedtest '(?=.*(?:🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|Hong|Taiwan|Japan|Singapore|\bHK\b|\bTW\b|\bJP\b|\bSG\b))'
+FilterHKJPWide: &FilterHKJPWide '(🇭🇰|🇯🇵|香港|日本|Hong|Japan|HK|JP)'
+FilterGlobalMedia: &FilterGlobalMedia '(🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|HK|TW|SG)'
+FilterGlobalEmby: &FilterGlobalEmby '(🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|HK|JP|SG)'
+FilterRFCEmby: &FilterRFCEmby '(?=.*(🇭🇰|🇯🇵|🇸🇬|香港|日本|新加坡|Hong|Japan|Singapore|HK|JP|SG))(?=.*(RFC|Jinx))'
+FilterAIGC: &FilterAIGC '(?=.*(🇹🇼|🇯🇵|🇸🇬|🇺🇸|🇬🇧|台湾|台灣|日本|新加坡|美国|英国|Taiwan|Japan|Singapore|United States|United Kingdom|TW|JP|SG|US|UK|GB))(?=.*(SoftBank|Nuro|Ucom|IIJ|Starlink|ATT|Verizon|Frontier|Hawaii|家宽))'
+FilterSpeedtest: &FilterSpeedtest '(🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|Hong|Taiwan|Japan|Singapore|HK|TW|JP|SG)'
 
 BehaviorCL: &BehaviorCL {type: http, behavior: classical, format: text, interval: 86400}
 
@@ -78,7 +78,6 @@ tun:
   dns-mode: hijack  # 标准 Mihomo 的 macOS 需显式设置；ProjectClash 由 App 接管并清空此项
   auto-route: true
   strict-route: true  # 标准 Mihomo 用于 Windows DNS 防绕行、macOS 不使用；ProjectClash 会用它调整默认路由拆分
-  # auto-redirect: true  # 仅 Linux 支持，macOS 无效
   auto-detect-interface: true
 
 # ==================== DNS 配置 ====================
@@ -149,7 +148,7 @@ dns:
   default-nameserver: [119.29.29.29, 223.5.5.5]
   # 真实解析：局域网域名问系统 DNS，国内域名走阿里/腾讯，其余经 Proxy 问 Cloudflare
   nameserver-policy:
-    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com,+.m2m,+.bogon,lancache.steamcontent.com': system
+    '+.lan,+.local,+.internal,+.localdomain,+.home.arpa,+.miwifi.com,+.m2m,+.bogon': system
     'rule-set:direct_extra,apple,microsoft_cdn,direct,cn_domain': ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
   nameserver: ["https://1.1.1.1/dns-query#Proxy"]
   # DIRECT 拨号和节点域名用国内 DNS，避免依赖尚未建立的代理
@@ -202,11 +201,14 @@ proxy-groups:
 
   - name: MSCDN
     <<: *BaseSelect
+    proxies: [DIRECT]
     include-all: true
 
   - name: GameDownload
     <<: *BaseSelect
+    proxies: [DIRECT]
     include-all: true
+    filter: *FilterSpeedtest
 
   - name: Download
     <<: *BaseSelect
@@ -255,14 +257,13 @@ rules:
   - PROCESS-NAME,Thunder.exe,DIRECT
   - PROCESS-NAME,Transmission.exe,DIRECT
   - PROCESS-NAME,uTorrent.exe,DIRECT
+  - PROCESS-NAME,qbittorrent,DIRECT
   - PROCESS-NAME,qbittorrent.exe,DIRECT
   - PROCESS-NAME,BitComet.exe,DIRECT
   - PROCESS-NAME,Nutstore,DIRECT
   - PROCESS-NAME,Nutstore.exe,DIRECT
   - PROCESS-NAME,iperf3-darwin,DIRECT
   # ===== 域名规则 start =====
-  # 本地 Steam 缓存优先于游戏和下载策略
-  - DOMAIN,lancache.steamcontent.com,DIRECT
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
   # > 测速网站
@@ -307,6 +308,7 @@ rules:
   - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
+  - PROCESS-NAME,Telegram,REJECT-DROP
   # > 中国大陆 IP
   - RULE-SET,china_ip,DIRECT,no-resolve
   # ===== IP 规则 end =====

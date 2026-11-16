@@ -20,7 +20,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE = os.environ.get("MIHOMO", "mihomo")
-LOCAL_NAMES = ("nas.lan", "nas.m2m", "nas.bogon", "lancache.steamcontent.com")
+LOCAL_NAMES = ("nas.lan", "nas.local", "nas.internal", "nas.localdomain", "router.home.arpa", "miwifi.com", "nas.m2m", "nas.bogon")
 
 
 def port(kind=socket.SOCK_STREAM):
@@ -93,14 +93,13 @@ class DNSTests(unittest.TestCase):
             payload = {"domain": ["+.unused.invalid"], "classical": ["DOMAIN,unused.invalid"],
                        "ipcidr": ["192.0.2.0/24"]}[behavior]
             if name == "direct":
-                payload = ["+.lan", "+.m2m", "+.bogon"]
-            elif name in ("game_download", "download_domain"):
-                payload = ["+.steamcontent.com"]
+                payload = ["+.lan", "+.local", "+.internal", "+.localdomain", "+.home.arpa", "+.m2m", "+.bogon"]
+            elif name == "cn_domain":
+                payload = ["+.miwifi.com"]
+            elif name == "direct_extra":
+                payload = ["+.msftconnecttest.com", "+.msftncsi.com"]
             provider.clear()
             provider.update(type="inline", behavior=behavior, payload=payload)
-        for group in config["proxy-groups"]:
-            if group["name"] == "GameDownload":
-                group["proxies"] = ["Proxy", "DIRECT", "Download"]
         dns = config["dns"]
         dns["listen"] = f"127.0.0.1:{port(socket.SOCK_DGRAM)}"
         local, public = [f"udp://127.0.0.1:{server.server_address[1]}" for server in self.servers]
