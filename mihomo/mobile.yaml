@@ -232,8 +232,6 @@ proxy-groups:
 # ==================== 规则路由 ====================
 rules:
   # ===== 域名规则 start =====
-  # 本地 Steam 缓存优先于游戏和下载策略
-  - DOMAIN,lancache.steamcontent.com,DIRECT
   # > 自定义直连补充
   - RULE-SET,direct_extra,DIRECT
   # > 测速网站
