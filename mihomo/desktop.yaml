@@ -15,7 +15,6 @@ BaseSelect: &BaseSelect {type: select, empty-fallback: PASS}
 BaseProxySelect: &BaseProxySelect {type: select, empty-fallback: DIRECT}
 
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|香港|Hong|\bHK\b))'
-FilterTW: &FilterTW '(?=.*(?:🇹🇼|台湾|台灣|Taiwan|\bTW\b))'
 FilterJP: &FilterJP '(?=.*(?:🇯🇵|日本|Japan|\bJP\b))'
 FilterUS: &FilterUS '(?=.*(?:🇺🇸|美国|United States|\bUSA?\b))'
 
@@ -172,11 +171,6 @@ proxy-groups:
     include-all: true
     filter: *FilterHK
 
-  - name: TW
-    <<: *BaseSelect
-    include-all: true
-    filter: *FilterTW
-
   - name: JP
     <<: *BaseSelect
     include-all: true
@@ -288,7 +282,7 @@ rules:
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
   # > 流媒体（TW）
-  - RULE-SET,stream_tw,TW
+  - RULE-SET,stream_tw,GlobalMedia
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
   - RULE-SET,stream_keyword,GlobalMedia
