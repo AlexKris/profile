@@ -16,7 +16,6 @@ BaseProxySelect: &BaseProxySelect {type: select, empty-fallback: DIRECT}
 
 FilterHK: &FilterHK '(?=.*(?:🇭🇰|香港|Hong|\bHK\b))'
 FilterJP: &FilterJP '(?=.*(?:🇯🇵|日本|Japan|\bJP\b))'
-FilterUS: &FilterUS '(?=.*(?:🇺🇸|美国|United States|\bUSA?\b))'
 
 FilterHKJPWide: &FilterHKJPWide '(?=.*(?:🇭🇰|🇯🇵|香港|日本|Hong|Japan|\bHK\b|\bJP\b))'
 FilterGlobalMedia: &FilterGlobalMedia '(?=.*(?:🇭🇰|🇹🇼|🇸🇬|香港|台湾|台灣|新加坡|Hong|Taiwan|Singapore|\bHK\b|\bTW\b|\bSG\b))'
@@ -176,11 +175,6 @@ proxy-groups:
     include-all: true
     filter: *FilterJP
 
-  - name: US
-    <<: *BaseSelect
-    include-all: true
-    filter: *FilterUS
-
   # ===== 专用策略 =====
   - name: Speedtest
     <<: *BaseSelect
@@ -194,7 +188,7 @@ proxy-groups:
 
   - name: PayPal
     <<: *BaseSelect
-    proxies: [US, HK, DIRECT]
+    include-all: true
 
   - name: GlobalMedia
     <<: *BaseSelect
@@ -208,11 +202,11 @@ proxy-groups:
 
   - name: MSCDN
     <<: *BaseSelect
-    proxies: [DIRECT, Proxy]
+    include-all: true
 
   - name: GameDownload
     <<: *BaseSelect
-    proxies: [DIRECT, Download, Proxy]
+    include-all: true
 
   - name: Download
     <<: *BaseSelect
@@ -222,7 +216,6 @@ proxy-groups:
   - name: Google
     <<: *BaseSelect
     include-all: true
-    filter: *FilterUS
 
   # ===== 手动策略 =====
   - name: GlobalEmby
