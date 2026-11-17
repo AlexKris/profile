@@ -27,6 +27,8 @@ Temporary Items
 
 # Local proxy profiles (private device configs, do not publish)
 local.txt
+/surge/claude.conf
+/mihomo/claude.yaml
 
 # Local server tools (ignore untracked files)
 /tool/
