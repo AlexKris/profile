@@ -97,7 +97,6 @@
               "ai",
               "paypal",
               "stream-jp",
-              "stream-tw",
               "stream",
               "telegram",
               "apple-proxy"
@@ -123,7 +122,6 @@
           "ai",
           "paypal",
           "stream-jp",
-          "stream-tw",
           "stream",
           "telegram",
           "apple-proxy"
@@ -137,7 +135,8 @@
         "rules": [
           {
             "rule_set": [
-              "microsoft-cdn"
+              "microsoft-cdn",
+              "game-download"
             ],
             "query_type": [
               "A"
@@ -157,7 +156,8 @@
       {
         "rule_set": [
           "apple",
-          "microsoft-cdn"
+          "microsoft-cdn",
+          "game-download"
         ],
         "action": "route",
         "server": "dns_direct"
@@ -292,24 +292,10 @@
       "fallback": "Proxy"
     },
     {
-      "tag": "TW",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇹🇼|台湾|台灣|(?<![A-Za-z])(?:TWN?|Taiwan)(?![A-Za-z])",
-      "fallback": "Proxy"
-    },
-    {
       "tag": "JP",
       "type": "selector",
       "outbounds": [],
       "include": "🇯🇵|日本|(?<![A-Za-z])(?:JPN?|Japan)(?![A-Za-z])",
-      "fallback": "Proxy"
-    },
-    {
-      "tag": "US",
-      "type": "selector",
-      "outbounds": [],
-      "include": "🇺🇸|美国|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
       "fallback": "Proxy"
     },
     {
@@ -329,13 +315,11 @@
     {
       "tag": "PayPal",
       "type": "selector",
-      "default": "US",
+      "default": "Direct",
       "outbounds": [
-        "US",
-        "HK",
         "Direct"
       ],
-      "_filter": "none"
+      "include": ".*"
     },
     {
       "tag": "GlobalMedia",
@@ -356,10 +340,19 @@
       "type": "selector",
       "default": "Direct",
       "outbounds": [
-        "Direct",
-        "Proxy"
+        "Direct"
       ],
-      "_filter": "none"
+      "include": ".*"
+    },
+    {
+      "tag": "GameDownload",
+      "type": "selector",
+      "default": "Direct",
+      "outbounds": [
+        "Direct"
+      ],
+      "include": "🇭🇰|🇹🇼|🇯🇵|🇸🇬|香港|台湾|台灣|日本|新加坡|(?<![A-Za-z])(?:HKG?|TWN?|JPN?|SGP?|Hong[ -]?Kong|Taiwan|Japan|Singapore)(?![A-Za-z])",
+      "fallback": "Proxy"
     },
     {
       "tag": "Download",
@@ -372,8 +365,7 @@
       "tag": "Google",
       "type": "selector",
       "outbounds": [],
-      "include": "🇺🇸|美国|(?<![A-Za-z])(?:USA?|United[ -]?States)(?![A-Za-z])",
-      "fallback": "Proxy"
+      "include": ".*"
     },
     {
       "tag": "GlobalEmby",
@@ -520,13 +512,6 @@
       },
       {
         "rule_set": [
-          "stream-tw"
-        ],
-        "action": "route",
-        "outbound": "TW"
-      },
-      {
-        "rule_set": [
           "stream"
         ],
         "action": "route",
@@ -560,6 +545,13 @@
         ],
         "action": "route",
         "outbound": "MSCDN"
+      },
+      {
+        "rule_set": [
+          "game-download"
+        ],
+        "action": "route",
+        "outbound": "GameDownload"
       },
       {
         "rule_set": [
@@ -707,10 +699,10 @@
         "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-jp.srs"
       },
       {
-        "tag": "stream-tw",
+        "tag": "game-download",
         "type": "remote",
         "format": "binary",
-        "url": "https://alexkris-rules.pages.dev/sing-box/non-ip/stream-tw.srs"
+        "url": "https://alexkris-rules.pages.dev/sing-box/domainset/game-download.srs"
       },
       {
         "tag": "download-domainset",

@@ -91,6 +91,9 @@ class GenerationTests(unittest.TestCase):
                     self.assertNotIn(field, encoded)
                 groups = {item["tag"]: item for item in config["outbounds"]}
                 self.assertEqual(groups["Proxy"]["outbounds"], NODES)
+                self.assertEqual(groups["Google"]["outbounds"], NODES)
+                self.assertEqual(groups["PayPal"]["outbounds"], ["Direct", *NODES])
+                self.assertEqual(groups["MSCDN"]["outbounds"], ["Direct", *NODES])
                 for group in config["outbounds"]:
                     for name in group.get("outbounds", []):
                         self.assertIn(name, groups)
@@ -146,20 +149,23 @@ class GenerationTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 config = generate(path, names)["config"]
                 groups = {item["tag"]: item for item in config["outbounds"]}
-                self.assertFalse({"SG", "DE"} & set(groups))
-                for region in ("HK", "TW", "JP", "US"):
+                self.assertFalse({"SG", "DE", "TW", "US"} & set(groups))
+                for region in ("HK", "JP"):
                     self.assertTrue(set(aliases[region]) <= set(groups[region]["outbounds"]), region)
                 self.assertEqual(groups["JP"]["outbounds"], ["JP SoftBank sample"] + aliases["JP"])
-                self.assertNotIn("Australia Edge", groups["US"]["outbounds"])
-                self.assertNotIn("USAGI sample", groups["US"]["outbounds"])
+                self.assertNotIn("Australia Edge", groups["AIGC"]["outbounds"])
+                self.assertNotIn("USAGI sample", groups["AIGC"]["outbounds"])
                 self.assertNotIn("US Seattle sample", groups["AIGC"]["outbounds"])
+                self.assertEqual(groups["Google"]["outbounds"], names)
                 for group, regions in {"Telegram": ["HK", "JP"], "GlobalMedia": ["HK", "TW", "SG"],
                                        "GlobalEmby": ["HK", "JP", "SG"], "RFCEmby": ["HK"],
-                                       "AIGC": ["TW", "JP", "US", "SG"], "Google": ["US"],
+                                       "AIGC": ["TW", "JP", "US", "SG"],
                                        "Speedtest": ["HK", "TW", "JP", "SG"],
+                                       "GameDownload": ["HK", "TW", "JP", "SG"],
                                        "Download": ["HK", "JP"]}.items():
                     expected = {name for region in regions for name in aliases[region]}
                     self.assertTrue(expected <= set(groups[group]["outbounds"]), group)
+                self.assertEqual(groups["GameDownload"]["outbounds"][0], "Direct")
 
     def test_chinese_names_and_taiwan_nodes_with_cn_flag(self):
         names = NODES + ["🇨🇳TW.Hinet", "香港 01", "台湾 Ucom 02", "日本 03", "新加坡 04",
@@ -168,14 +174,17 @@ class GenerationTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 groups = {item["tag"]: set(item.get("outbounds", []))
                           for item in generate(path, names)["config"]["outbounds"]}
-                for group, members in {"HK": ["香港 01"], "TW": ["🇨🇳TW.Hinet", "台湾 Ucom 02"],
-                                       "JP": ["日本 03"], "US": ["美国 05"],
+                for group, members in {"HK": ["香港 01"],
+                                       "JP": ["日本 03"],
                                        "GlobalMedia": ["🇨🇳TW.Hinet", "香港 01"],
-                                       "Speedtest": ["🇨🇳TW.Hinet", "日本 03"], "AIGC": ["台湾 Ucom 02"],
-                                       "Telegram": ["香港 01", "日本 03"], "Google": ["美国 05"]}.items():
+                                       "Speedtest": ["🇨🇳TW.Hinet", "日本 03"],
+                                       "GameDownload": ["Direct", "🇨🇳TW.Hinet", "日本 03"],
+                                       "AIGC": ["台湾 Ucom 02"],
+                                       "Telegram": ["香港 01", "日本 03"],
+                                       "Google": ["美国 05", "德国 06"]}.items():
                     self.assertTrue(set(members) <= groups[group], group)
                 self.assertNotIn("🇨🇳TW.Hinet", groups["AIGC"])
-                for group in ("TW", "GlobalMedia", "Speedtest", "AIGC", "HK"):
+                for group in ("GlobalMedia", "Speedtest", "GameDownload", "AIGC", "HK"):
                     self.assertNotIn("🇨🇳 Relay 07", groups[group], group)
 
     def test_api_secrets_required_in_both_template_sources(self):
@@ -224,10 +233,11 @@ class GenerationTests(unittest.TestCase):
 
     def test_empty_region_falls_back_to_proxy_not_direct(self):
         for path in TEMPLATES.values():
-            result = generate(path, ["HK RFC sample"])
+            result = generate(path, ["DE sample"])
             groups = {item["tag"]: item for item in result["config"]["outbounds"]}
-            self.assertEqual(groups["US"]["outbounds"], ["Proxy"])
+            self.assertEqual(groups["JP"]["outbounds"], ["Proxy"])
             self.assertEqual(groups["AIGC"]["outbounds"], ["Proxy"])
+            self.assertEqual(groups["GameDownload"]["outbounds"], ["Direct", "Proxy"])
             self.assertTrue(result["warnings"])
             core_check(result["config"])
 
@@ -239,8 +249,8 @@ class GenerationTests(unittest.TestCase):
 
     def test_unusable_fallback_fails(self):
         config = json.loads(TEMPLATES["realip"].read_text())
-        group = next(item for item in config["outbounds"] if item["tag"] == "US")
-        for fallback in (None, "US", "no-such-group"):
+        group = next(item for item in config["outbounds"] if item["tag"] == "JP")
+        for fallback in (None, "JP", "no-such-group"):
             with self.subTest(fallback=fallback), tempfile.TemporaryDirectory() as directory:
                 group["fallback"] = fallback
                 path = Path(directory) / "config.json"
@@ -328,6 +338,7 @@ def fixture_rules(config):
         "apple-proxy": ["mask.apple.cn.test"],
         "apple": ["apple.cn.test", "ai.cn.test"],
         "microsoft-cdn": ["cdn.microsoft.test"],
+        "game-download": ["cdn.game.test"],
         "stream": ["stream.cn.test", "tv.apple.cn.test"],
         "google": ["google.test", "stun.l.google.com"],
     }
@@ -449,6 +460,7 @@ class RuntimeTests(unittest.TestCase):
                         "tv.apple.cn.test": foreign, "mask.apple.cn.test": foreign,
                         "pt.direct.test": "dns_direct",
                         "cdn.microsoft.test": "fake" if profile == "fakeip" else "dns_direct",
+                        "cdn.game.test": "fake" if profile == "fakeip" else "dns_direct",
                         "stun.l.google.com": "dns_proxy", "stun.cn.test": "dns_direct",
                         "www.msftconnecttest.com": "dns_direct",
                         "router.lan.test": "dns_local", "lancache.steamcontent.com": "dns_local",
@@ -608,7 +620,7 @@ class RuntimeTests(unittest.TestCase):
         closed = port()
         for outbound in config["outbounds"]:
             if outbound["tag"] == "MSCDN":
-                outbound["default"] = "Proxy"
+                outbound["default"] = NODES[0]
             elif outbound["tag"] in NODES:
                 tag = outbound["tag"]
                 outbound.clear()

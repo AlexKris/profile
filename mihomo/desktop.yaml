@@ -116,7 +116,6 @@ dns:
     - "+.blzstatic.cn"
     - "+.steamserver.net"
     - "+.steampowered.com"
-    - "+.steamcontent.com"
     - "+.xboxlive.com"
     - stun.l.google.com
     - "+.mihoyo.com"
@@ -187,6 +186,7 @@ proxy-groups:
 
   - name: PayPal
     <<: *BaseSelect
+    proxies: [DIRECT]
     include-all: true
 
   - name: GlobalMedia
@@ -242,6 +242,8 @@ rules:
   - PROCESS-NAME,v2ray,DIRECT
   - PROCESS-NAME,ss-local,DIRECT
   - PROCESS-NAME,UUBooster,DIRECT
+  - PROCESS-NAME,uu.exe,DIRECT
+  - PROCESS-NAME,uuservice.exe,DIRECT
   - PROCESS-NAME,aria2c,DIRECT
   - PROCESS-NAME,fdm,DIRECT
   - PROCESS-NAME,Folx,DIRECT
@@ -275,8 +277,6 @@ rules:
   - RULE-SET,paypal_rule,PayPal
   # > 流媒体（JP）
   - RULE-SET,stream_jp,JP
-  # > 流媒体（TW）
-  - RULE-SET,stream_tw,GlobalMedia
   # > 流媒体（通用）
   - RULE-SET,stream,GlobalMedia
   - RULE-SET,stream_keyword,GlobalMedia
@@ -302,13 +302,14 @@ rules:
   - RULE-SET,cn_domain,DIRECT
   # ===== 域名规则 end =====
   # ===== IP 规则 start =====
-  # > LAN IP
-  - RULE-SET,lan_ip,DIRECT,no-resolve
   # > Apple 网段兜底（无域名的 QUIC 连接迁移路径，避免落到代理策略被阻断）
   - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
   # > Telegram IP
   - RULE-SET,telegram_ip,Telegram,no-resolve
   - PROCESS-NAME,Telegram,REJECT-DROP
+  - PROCESS-NAME,Telegram.exe,REJECT-DROP
+  # > LAN IP
+  - RULE-SET,lan_ip,DIRECT,no-resolve
   # > 中国大陆 IP
   - RULE-SET,china_ip,DIRECT,no-resolve
   # ===== IP 规则 end =====
@@ -336,9 +337,6 @@ rule-providers:
   stream_jp:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-jp.mrs'
-  stream_tw:
-    <<: *BehaviorMrsDN
-    url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream-tw.mrs'
   stream:
     <<: *BehaviorMrsDN
     url: 'https://alexkris-rules.pages.dev/mihomo/non-ip/stream.mrs'

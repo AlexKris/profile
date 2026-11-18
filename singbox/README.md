@@ -44,7 +44,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | FakeIP 模板把 `microsoft-cdn` 写死用阿里 DoH，MSCDN 切到 Proxy 后节点收到的仍是国内 CDN 的 IP，从境外绕回国内 | `microsoft-cdn` 的 A 查询改走 FakeIP，解析推迟到出口确定后 | 路由 `sniff` 不替换连接目标；与 mihomo 一致，Direct 拨号用阿里解析、Proxy 由节点解析。不用"DNS 经 MSCDN 出口问阿里"：阿里按来源网段应答，日本、新加坡网段实测多为 SERVFAIL。RealIP 不加 FakeIP，保持其真实地址语义 |
 | 第二个 API 监听 0.0.0.0:9091，所有订阅者共用模板里的同一个 secret | 删除 `api-lan`，只保留 127.0.0.1:9090 | PHP 原样下发模板，无法按用户派生密钥；同一局域网内的其他订阅者可用该 secret 订阅日志和连接、切换模式、断开连接 |
 | TUN 显式写 `mtu: 1400`、`stack: mixed` | 两项都删除，使用核心按平台的默认值 | MTU 默认 NetworkExtension 4064、安卓 9000、桌面 65535，官方示例不写；Apple 端开 Include All Networks 后 `mixed`/`system` 不可用，显式写会启动失败，不写则自动改 gvisor |
-| `SG`、`DE` 地区组没有任何规则引用 | 删除，其他客户端配置同步删除 | 只能手动选用，却要求有匹配节点或 fallback |
+| `SG`、`DE`、`TW`、`US` 地区组没有任何规则引用 | 删除，其他客户端配置同步删除 | 只能手动选用，却要求有匹配节点或 fallback |
 | FakeIP 应答沿用核心通用 TTL 600 | 走 `dns_fakeip` 的规则都加 `rewrite_ttl: 1` | 假地址只在核心运行时有意义；停用或切换模板后系统缓存里的 198.18.x.x 否则还要存活 10 分钟，期间网站打不开。mihomo 的 fake-ip 应答固定 TTL 1；重新查询只到本机 FakeIP 表，无额外开销 |
 | 普通 DNS 缓存到期后每次都等上游 | `dns.optimistic: true` | RFC 8767 serve-stale：到期先返回旧记录并后台刷新。直连域名的阿里 DoH 与 RealIP 下经节点的 Cloudflare DoH 在重复访问时不再等待；代价是到期后首个应答可能是 CDN 已轮换的地址，只影响这一次 |
 | DNS 缓存只在内存，重启或切换节点后全部重新解析 | `cache_file.store_dns: true` | 1.14.0 新增。缓存随 cache.db 持久化，配合 optimistic 重启后首批域名也先回旧记录、后台刷新 |
@@ -52,7 +52,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 
 专用组 fallback 到 Proxy 只在没有合适节点时发生，会记录服务端警告。此时不保证原来的地区/ISP 条件，但不自动直连。Proxy 本身没有可用节点时生成失败，不输出一份全直连的“成功”订阅。
 
-地区匹配保留国旗和中文地名（香港、台湾/台灣、日本、新加坡、美国），英文别名按完整词匹配且不区分大小写：HK/HKG/Hong Kong、TW/TWN/Taiwan、JP/JPN/Japan、US/USA/United States、SG/SGP/Singapore（只用于复合组）；AIGC 另支持 UK/GB/GBR/United Kingdom 和“英国”。🇨🇳 不作为任何地区条件：台湾节点按名字中的 TW 匹配（如 `🇨🇳TW.Hinet`），所以台湾节点名必须含 TW/TWN/Taiwan/台湾。地区组及复合服务组使用同样的别名，运营商条件不放宽。测试覆盖这些名字，但本轮未读取 XBoard 实际节点清单，部署前仍须检查真实生成结果，不能只看订阅是否成功。
+地区匹配保留国旗和中文地名（香港、台湾/台灣、日本、新加坡、美国），英文别名按完整词匹配且不区分大小写：HK/HKG/Hong Kong、JP/JPN/Japan，以及只用于复合组的 TW/TWN/Taiwan、US/USA/United States、SG/SGP/Singapore；AIGC 另支持 UK/GB/GBR/United Kingdom 和“英国”。🇨🇳 不作为任何地区条件：台湾节点按名字中的 TW 匹配（如 `🇨🇳TW.Hinet`），所以台湾节点名必须含 TW/TWN/Taiwan/台湾。地区组及复合服务组使用同样的别名，运营商条件不放宽。测试覆盖这些名字，但本轮未读取 XBoard 实际节点清单，部署前仍须检查真实生成结果，不能只看订阅是否成功。
 
 ## DNS 逻辑
 
@@ -62,7 +62,7 @@ JSON 是 XBoard 输入模板，含节点筛选扩展字段，不能直接当成 
 | 连通性检查、direct-extra | 阿里 DoH 直连 | 阿里 DoH 直连 |
 | AI、测速、PayPal、流媒体、Telegram、apple-proxy | Cloudflare DoH 经 Proxy | FakeIP，真实地址例外除外 |
 | Apple | 阿里 DoH 直连 | 阿里 DoH 直连 |
-| 微软 CDN（MSCDN 组） | 阿里 DoH 直连，只有 Direct 生效 | FakeIP：选 Direct 时拨号用阿里解析，选 Proxy 时域名交给节点解析 |
+| 微软 CDN（MSCDN 组）、游戏下载（GameDownload 组） | 阿里 DoH 直连，只有 Direct 生效 | FakeIP：选 Direct 时拨号用阿里解析，选节点时域名交给节点解析 |
 | Download、Google | Cloudflare DoH 经 Proxy | FakeIP，真实地址例外除外 |
 | direct、cn-domain | 阿里 DoH 直连 | 阿里 DoH 直连 |
 | 其余目标 | Cloudflare DoH 经 Proxy | FakeIP；真实地址例外使用 Cloudflare DoH |
@@ -99,7 +99,7 @@ DNS 处理不等于所有代理目标都在本机解析。域名提前命中代�
 ## 保留的明确取舍
 
 - HTTPS/SVCB 返回空结果是现有“优先确定性分流”策略的统一实现，不是 DNS 协议要求。会放弃这些记录提供的 ECH、地址提示及部分协议发现能力；普通 A/TLS 和通过其他机制发现的 HTTP/3 不因此被禁止。
-- RealIP 下 MSCDN 的 DNS 固定为阿里，只有 Direct 生效；要让 MSCDN 走 Proxy，用 FakeIP 模板。Final 也是路由选择，不是 DNS 选择。需要全局直连语义时应切 Direct 模式。
+- RealIP 下 MSCDN、GameDownload 的 DNS 固定为阿里，只有 Direct 生效；要让两者切换节点时解析也跟着切到远端，用 FakeIP 模板。Final 也是路由选择，不是 DNS 选择。需要全局直连语义时应切 Direct 模式。
 - 不为每个专用策略组创建单独 DoH 实例，避免传输、缓存和维护项膨胀。RealIP 的代理 DNS 出口可能与专用组出口不同，无法承诺每个 CDN 均获得该专用出口的最优地址。
 - 首次没有规则缓存时需要 Proxy 可用；有有效缓存后可先从缓存启动。没有改成国内网络可能无法访问的全直连下载，也没有去掉关键规则。
 - 应用自带 DoH、系统缓存未清理及平台 VPN 排除项不保证经过这里的 DNS 分流。RealIP 对域名的识别依赖反向映射和可嗅探内容，不可能在共享 IP、ECH 等所有场景都精确还原域名。

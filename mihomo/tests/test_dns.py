@@ -134,7 +134,8 @@ class DNSTests(unittest.TestCase):
                     process.wait(timeout=5)
 
     def test_local_dns_queries_and_direct_connections(self):
-        for path in sorted(ROOT.glob("*.yaml")):
+        for name in ("desktop.yaml", "mobile.yaml"):
+            path = ROOT / name
             with self.subTest(profile=path.name):
                 config = self.config(path)
                 with self.running(config):
