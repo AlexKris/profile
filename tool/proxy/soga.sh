@@ -12,6 +12,8 @@ DOCKER_COMPOSE_CMD="docker compose"
 # 实例级路径（参数解析完成后赋值）
 BASE_DIR=""
 CONFIG_DIR=""
+TMP_COMPOSE_FILE=""
+EXISTING_CONTAINER_MODE="none"
 
 # 默认参数值
 CONTAINER_NAME=""
@@ -56,11 +58,19 @@ check_privileges() {
     fi
 }
 
+cleanup_tmp_file() {
+    if [[ -n "${TMP_COMPOSE_FILE:-}" && -e "$TMP_COMPOSE_FILE" ]]; then
+        rm -f "$TMP_COMPOSE_FILE"
+    fi
+}
+
 cleanup() {
+    cleanup_tmp_file
     log "info" "脚本中断，退出..."
     exit 130
 }
 
+trap cleanup_tmp_file EXIT
 trap cleanup SIGINT SIGTERM
 
 in_set() {
@@ -78,18 +88,31 @@ has_control_char() {
     [[ "$s" == *$'\n'* || "$s" == *$'\r'* ]]
 }
 
-# 给 YAML 单引号字符串里的值做转义
+# 给 Docker Compose YAML 单引号字符串做转义（' -> ''，同时转义 Compose 变量插值符 $ -> $$）
 yaml_escape() {
     local s="$1"
-    printf '%s' "$s" | sed "s/'/''/g"
+    printf '%s\n' "$s" | sed -e "s/'/''/g" -e 's/\$/$$/g'
 }
 
-# 防止 --env / --dns-env 覆盖脚本显式管理的配置，避免 compose 出现重复 key
+# 防止 --env / --dns-env 覆盖脚本有显式选项（或固定）的配置，避免 compose 出现重复 key
 is_managed_env_key() {
     local key="$1"
     case "$key" in
-        TZ|type|server_type|node_id|soga_key|api|webapi_url|webapi_key|log_level|log_file_dir|\
+        type|server_type|node_id|soga_key|api|webapi_url|webapi_key|log_level|\
         cert_file|key_file|cert_mode|cert_domain|cert_key_length|dns_provider)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# 默认写入、允许通过 --env 覆盖的配置键（--dns-env 不可占用）
+is_default_env_key() {
+    local key="$1"
+    case "$key" in
+        TZ|log_file_dir|forbidden_bit_torrent|geo_update_enable)
             return 0
             ;;
         *)
@@ -139,7 +162,7 @@ update_system() {
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold"
         apt-get autoclean -y
-        apt-get autoremove -y
+        DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
     elif [ -f /etc/redhat-release ]; then
         log "info" "检测到 RHEL/CentOS 系统..."
         if command -v dnf &> /dev/null; then
@@ -170,7 +193,7 @@ ensure_docker() {
         fi
         if command -v systemctl &> /dev/null; then
             systemctl enable docker || true
-            systemctl start docker
+            systemctl start docker || true
         fi
         log "info" "Docker 安装完成。"
     else
@@ -222,12 +245,12 @@ validate_install_params() {
         exit 1
     fi
 
-    if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
-        log "error" "--image-tag 包含非法字符: ${IMAGE_TAG}"
+    if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+        log "error" "--image-tag 包含非法字符或首字符不合法: ${IMAGE_TAG}"
         exit 1
     fi
 
-    if [[ ! "$PANEL_URL" =~ ^https?://[^[:space:]]+$ ]]; then
+    if [[ ! "$PANEL_URL" =~ ^https?://[^/[:space:]]+[^[:space:]]*$ ]]; then
         log "error" "--panel-url 必须以 http:// 或 https:// 开头且不含空白字符"
         exit 1
     fi
@@ -274,8 +297,8 @@ validate_install_params() {
                 exit 1
             fi
             key="${item%%=*}"
-            if is_managed_env_key "$key" || [[ "$key" == "forbidden_bit_torrent" || "$key" == "geo_update_enable" ]]; then
-                log "error" "--dns-env 不允许覆盖内置配置键: ${key}"
+            if [[ ! "$key" =~ ^DNS_[A-Za-z0-9_]+$ ]]; then
+                log "error" "--dns-env 键名必须以 DNS_ 开头 (如 DNS_CF_Token=...)，Soga 仅识别 DNS_ 前缀的 acme.sh 凭据: ${key}"
                 exit 1
             fi
             if [[ ${seen_keys+x} && ${#seen_keys[@]} -gt 0 ]]; then
@@ -369,6 +392,14 @@ validate_install_params() {
                 log "error" "--cert-file 与 --key-file 必须为绝对路径"
                 exit 1
             fi
+            if [[ "$CERT_FILE" == */ || "$KEY_FILE" == */ ]]; then
+                log "error" "--cert-file 与 --key-file 不能为目录路径"
+                exit 1
+            fi
+            if [[ "$CERT_FILE" =~ (^|/)\.\.(/|$) || "$KEY_FILE" =~ (^|/)\.\.(/|$) ]]; then
+                log "error" "--cert-file 与 --key-file 路径不能包含 .."
+                exit 1
+            fi
             if [[ "$CERT_FILE" == *:* || "$KEY_FILE" == *:* ]]; then
                 log "error" "--cert-file 与 --key-file 路径不能包含冒号"
                 exit 1
@@ -387,7 +418,7 @@ validate_install_params() {
                 log "error" "--cert-domain 只需填写纯域名 (如 node.example.com)，不要包含协议头、端口或路径"
                 exit 1
             fi
-            if [[ "$CERT_DOMAIN" == \*.* ]]; then
+            if [[ "$CERT_DOMAIN" == *'*'* ]]; then
                 log "error" "通配符证书不能使用 http 验证，请改用 --cert-mode dns"
                 exit 1
             fi
@@ -429,12 +460,12 @@ validate_install_params() {
 validate_cert_files_on_host() {
     [[ "$CERT_MODE" == "file" ]] || return 0
 
-    # 若用户传入宿主机实例配置目录路径 (/etc/soga/<name>/xxx)，自动转换为容器内路径 (/etc/soga/xxx)
-    if [[ "$CERT_FILE" == "${CONFIG_DIR}/"* ]]; then
+    # 若用户传入宿主机实例配置目录路径 (/etc/soga/<name>/xxx)，且非容器内同名子目录文件，自动转换为容器内路径 (/etc/soga/xxx)
+    if [[ "$CERT_FILE" == "${CONFIG_DIR}/"* && ! -f "${CONFIG_DIR}/${CERT_FILE#/etc/soga/}" ]]; then
         CERT_FILE="/etc/soga/${CERT_FILE#"${CONFIG_DIR}/"}"
         log "info" "已将 --cert-file 映射为容器内路径: ${CERT_FILE}"
     fi
-    if [[ "$KEY_FILE" == "${CONFIG_DIR}/"* ]]; then
+    if [[ "$KEY_FILE" == "${CONFIG_DIR}/"* && ! -f "${CONFIG_DIR}/${KEY_FILE#/etc/soga/}" ]]; then
         KEY_FILE="/etc/soga/${KEY_FILE#"${CONFIG_DIR}/"}"
         log "info" "已将 --key-file 映射为容器内路径: ${KEY_FILE}"
     fi
@@ -443,7 +474,7 @@ validate_cert_files_on_host() {
     for path in "$CERT_FILE" "$KEY_FILE"; do
         if [[ "$path" == /etc/soga/* ]]; then
             host_rel="${path#/etc/soga/}"
-            if [[ -z "$host_rel" ]]; then
+            if [[ -z "$host_rel" || -d "${CONFIG_DIR}/${host_rel}" ]]; then
                 log "error" "证书路径不能为目录: ${path}"
                 exit 1
             fi
@@ -463,9 +494,39 @@ validate_cert_files_on_host() {
     done
 }
 
-# 检查并清理同名容器（仅当前实例）
-check_remove_container() {
+# 预先检查同名容器归属（不停止运行中容器，避免镜像拉取失败导致线上中断）
+inspect_existing_container() {
     log "info" "检查是否存在名为 ${CONTAINER_NAME} 的旧容器..."
+    EXISTING_CONTAINER_MODE="none"
+
+    local lower_name
+    lower_name=$(printf '%s' "$CONTAINER_NAME" | tr '[:upper:]' '[:lower:]')
+
+    local all_containers cname cname_lower
+    all_containers=$(docker ps -a --format '{{.Names}}' || true)
+    if [[ -n "$all_containers" ]]; then
+        while IFS= read -r cname; do
+            [[ -n "$cname" ]] || continue
+            cname_lower=$(printf '%s' "$cname" | tr '[:upper:]' '[:lower:]')
+            if [[ "$cname_lower" == "$lower_name" && "$cname" != "$CONTAINER_NAME" ]]; then
+                log "error" "已存在仅大小写不同的容器 ${cname}，与 ${CONTAINER_NAME} 存在 Docker Compose 项目名冲突"
+                exit 1
+            fi
+        done <<< "$all_containers"
+    fi
+
+    if [[ -d "$SOGA_ROOT" ]]; then
+        local entry entry_name entry_lower
+        for entry in "$SOGA_ROOT"/*; do
+            [[ -e "$entry" ]] || continue
+            entry_name="${entry##*/}"
+            entry_lower=$(printf '%s' "$entry_name" | tr '[:upper:]' '[:lower:]')
+            if [[ "$entry_lower" == "$lower_name" && "$entry_name" != "$CONTAINER_NAME" ]]; then
+                log "error" "已存在仅大小写不同的实例目录 ${entry}，与 ${CONTAINER_NAME} 存在冲突"
+                exit 1
+            fi
+        done
+    fi
 
     local matched
     matched=$(docker ps -a --filter "name=^/${CONTAINER_NAME}$" --format '{{.Names}}')
@@ -475,15 +536,13 @@ check_remove_container() {
     fi
 
     local compose_project compose_workdir
-    compose_project=$(docker inspect "${CONTAINER_NAME}" \
+    compose_project=$(docker container inspect "${CONTAINER_NAME}" \
         --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
-    compose_workdir=$(docker inspect "${CONTAINER_NAME}" \
+    compose_workdir=$(docker container inspect "${CONTAINER_NAME}" \
         --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
 
     if [[ -z "$compose_project" ]]; then
-        log "info" "发现 docker run 启动的 ${CONTAINER_NAME}，停止并删除..."
-        docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || log "warn" "停止容器 ${CONTAINER_NAME} 失败"
-        docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || log "warn" "删除容器 ${CONTAINER_NAME} 失败"
+        EXISTING_CONTAINER_MODE="docker_run"
         return 0
     fi
 
@@ -492,16 +551,49 @@ check_remove_container() {
         exit 1
     fi
 
-    if [[ -f "${BASE_DIR}/docker-compose.yml" ]]; then
-        log "info" "发现 compose 启动的 ${CONTAINER_NAME}，在 ${BASE_DIR} 执行 down"
-        (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down)
-    else
+    if [[ ! -f "${BASE_DIR}/docker-compose.yml" ]]; then
         log "error" "容器 ${CONTAINER_NAME} 由 compose 启动，但本地无对应 compose 文件: ${BASE_DIR}/docker-compose.yml"
         exit 1
     fi
+
+    EXISTING_CONTAINER_MODE="compose"
 }
 
-# 生成 docker-compose.yml（权限 600）
+# 拉取目标镜像（在停止旧容器和覆盖 compose 文件前完成）
+pull_soga_image() {
+    log "info" "正在拉取镜像 ${DOCKER_IMAGE}:${IMAGE_TAG}..."
+    if ! docker pull "${DOCKER_IMAGE}:${IMAGE_TAG}"; then
+        if docker image inspect "${DOCKER_IMAGE}:${IMAGE_TAG}" >/dev/null 2>&1; then
+            log "warn" "拉取最新镜像失败，回退使用本地缓存镜像 ${DOCKER_IMAGE}:${IMAGE_TAG}"
+        else
+            log "error" "拉取镜像 ${DOCKER_IMAGE}:${IMAGE_TAG} 失败且本地无缓存（现有实例未被修改）"
+            exit 1
+        fi
+    fi
+}
+
+# 清理同名旧容器（仅在镜像就绪后执行）
+remove_existing_container() {
+    case "$EXISTING_CONTAINER_MODE" in
+        none)
+            return 0
+            ;;
+        docker_run)
+            log "info" "发现 docker run 启动的 ${CONTAINER_NAME}，停止并删除..."
+            docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+            if ! docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1; then
+                log "error" "删除旧容器 ${CONTAINER_NAME} 失败"
+                exit 1
+            fi
+            ;;
+        compose)
+            log "info" "发现 compose 启动的 ${CONTAINER_NAME}，在 ${BASE_DIR} 执行 down"
+            (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down)
+            ;;
+    esac
+}
+
+# 原子生成 docker-compose.yml（权限 600）
 write_compose_file() {
     mkdir -p "$BASE_DIR"
     mkdir -p "$CONFIG_DIR"
@@ -513,10 +605,15 @@ write_compose_file() {
     esc_panel_type=$(yaml_escape "$PANEL_TYPE")
     esc_server_type=$(yaml_escape "$SERVER_TYPE")
 
+    local project_name
+    project_name="soga-$(printf '%s' "$CONTAINER_NAME" | tr '[:upper:]' '[:lower:]')"
+
+    TMP_COMPOSE_FILE="${BASE_DIR}/docker-compose.yml.tmp.$$"
     (
         umask 077
         {
             cat <<EOF
+name: '${project_name}'
 services:
   '${CONTAINER_NAME}':
     image: '${DOCKER_IMAGE}:${IMAGE_TAG}'
@@ -524,7 +621,12 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      TZ: Asia/Hong_Kong
+EOF
+            if ! has_extra_env_key "TZ"; then
+                echo "      TZ: Asia/Hong_Kong"
+            fi
+
+            cat <<EOF
       type: '${esc_panel_type}'
       server_type: '${esc_server_type}'
       node_id: '${NODE_ID}'
@@ -544,10 +646,10 @@ EOF
                 echo "      geo_update_enable: 'true'"
             fi
 
-            cat <<EOF
-      log_level: '${esc_log_level}'
-      log_file_dir: /etc/soga/
-EOF
+            printf "      log_level: '%s'\n" "$esc_log_level"
+            if ! has_extra_env_key "log_file_dir"; then
+                echo "      log_file_dir: /etc/soga/"
+            fi
 
             if [[ -n "$CERT_MODE" ]]; then
                 case "$CERT_MODE" in
@@ -602,9 +704,11 @@ EOF
                     printf "      - '%s:%s:ro'\n" "$(yaml_escape "$KEY_FILE")" "$(yaml_escape "$KEY_FILE")"
                 fi
             fi
-        } > "${BASE_DIR}/docker-compose.yml"
+        } > "$TMP_COMPOSE_FILE"
     )
-    chmod 600 "${BASE_DIR}/docker-compose.yml"
+    chmod 600 "$TMP_COMPOSE_FILE"
+    mv -f "$TMP_COMPOSE_FILE" "${BASE_DIR}/docker-compose.yml"
+    TMP_COMPOSE_FILE=""
 }
 
 # 安装摘要输出
@@ -627,22 +731,12 @@ print_install_summary() {
     log "info" "  config-dir     : ${CONFIG_DIR}"
 }
 
-# 配置、拉取镜像并启动
+# 写入配置并启动
 config_run_soga_compose() {
     log "info" "开始配置 soga..."
     log "info" "使用镜像: ${DOCKER_IMAGE}:${IMAGE_TAG}"
 
     write_compose_file
-
-    log "info" "正在拉取镜像 ${DOCKER_IMAGE}:${IMAGE_TAG}..."
-    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD pull); then
-        if docker image inspect "${DOCKER_IMAGE}:${IMAGE_TAG}" >/dev/null 2>&1; then
-            log "warn" "拉取最新镜像失败，回退使用本地缓存镜像 ${DOCKER_IMAGE}:${IMAGE_TAG}"
-        else
-            log "error" "拉取镜像 ${DOCKER_IMAGE}:${IMAGE_TAG} 失败且本地无缓存"
-            exit 1
-        fi
-    fi
 
     log "info" "正在启动 soga..."
     (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD up -d)
@@ -682,12 +776,14 @@ install_soga() {
         exit 1
     fi
 
+    inspect_existing_container
+    pull_soga_image
     print_install_summary
-    check_remove_container
+    remove_existing_container
     config_run_soga_compose
 }
 
-# 设置实例路径（用于 start/stop/restart/uninstall）
+# 校验并设置实例路径（用于 start/stop/restart/uninstall；先校验名称与 root 权限再探测 /root 路径）
 set_instance_paths() {
     if [[ -z "$CONTAINER_NAME" ]]; then
         log "error" "该操作必须指定 --container-name"
@@ -697,6 +793,7 @@ set_instance_paths() {
         log "error" "--container-name 必须以字母或数字开头，且只允许字母数字、下划线与连字符"
         exit 1
     fi
+    check_privileges
     BASE_DIR="${SOGA_ROOT}/${CONTAINER_NAME}"
     CONFIG_DIR="${CONFIG_ROOT}/${CONTAINER_NAME}"
     if [[ ! -f "${BASE_DIR}/docker-compose.yml" ]]; then
@@ -707,7 +804,6 @@ set_instance_paths() {
 
 start_soga() {
     set_instance_paths
-    check_privileges
     ensure_docker
     log "info" "正在启动 soga (${CONTAINER_NAME})..."
     if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD up -d); then
@@ -719,11 +815,10 @@ start_soga() {
 
 restart_soga() {
     set_instance_paths
-    check_privileges
     ensure_docker
     log "info" "正在重启 soga (${CONTAINER_NAME})..."
     local matched
-    matched=$(docker ps -a --filter "name=^/${CONTAINER_NAME}$" --format '{{.Names}}')
+    matched=$(cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD ps -a -q)
     if [[ -n "$matched" ]]; then
         if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD restart); then
             log "error" "重启 soga 失败"
@@ -740,7 +835,6 @@ restart_soga() {
 
 stop_soga() {
     set_instance_paths
-    check_privileges
     ensure_docker
     log "info" "正在停止 soga (${CONTAINER_NAME})..."
     if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD stop); then
@@ -752,7 +846,6 @@ stop_soga() {
 
 uninstall_soga() {
     set_instance_paths
-    check_privileges
     ensure_docker
     log "info" "正在卸载 soga 实例 (${CONTAINER_NAME})..."
     if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down); then
@@ -796,7 +889,7 @@ show_help() {
   --cert-domain DOMAIN       域名 (cert-mode=http/dns)
   --cert-key-length VALUE    证书算法: 留空=RSA, ec-256|ec-384 (可选, cert-mode=http/dns)
   --dns-provider NAME        DNS 服务商, 如 dns_cf (cert-mode=dns)
-  --dns-env KEY=VALUE        DNS 验证凭据, 可重复多次 (cert-mode=dns)
+  --dns-env DNS_KEY=VALUE    DNS 验证凭据 (必须以 DNS_ 开头), 可重复多次 (cert-mode=dns)
   --env KEY=VALUE            透传额外 Soga 配置项, 可重复 (如 sub_type=v2node)
 
 协议与证书说明:
@@ -868,6 +961,7 @@ parse_arguments() {
         exit 1
     fi
 
+    local val
     while [[ $# -gt 0 ]]; do
         case $1 in
             --update)    set_action "update"; shift ;;
@@ -914,9 +1008,9 @@ parse_arguments() {
             --dns-provider)
                 DNS_PROVIDER=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --dns-env)
-                DNS_ENVS+=("$(require_value "$1" "${2:-}")"); HAS_INSTALL_OPT="true"; shift 2 ;;
+                val=$(require_value "$1" "${2:-}"); DNS_ENVS+=("$val"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --env)
-                EXTRA_ENVS+=("$(require_value "$1" "${2:-}")"); HAS_INSTALL_OPT="true"; shift 2 ;;
+                val=$(require_value "$1" "${2:-}"); EXTRA_ENVS+=("$val"); HAS_INSTALL_OPT="true"; shift 2 ;;
             *)
                 log "error" "未知参数: $1"
                 show_help
