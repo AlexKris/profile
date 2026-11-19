@@ -52,20 +52,24 @@ fi
 
 echo ""
 echo "=== 系统时间信息 ==="
-echo "时区: $(timedatectl | grep "Time zone" | awk '{print $3}')"
-echo "NTP同步: $(timedatectl | grep "NTP synchronized" | awk '{print $3}')"
+echo "时区: $(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo '未知')"
+echo "NTP同步: $(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo '未知')"
 echo "系统时间: $(date)"
 
 echo ""
 echo "=== 建议 ==="
 active_count=0
-[ $(systemctl is-active systemd-timesyncd 2>/dev/null) = "active" ] && ((active_count++))
-[ $(systemctl is-active chrony 2>/dev/null) = "active" ] && ((active_count++))
-[ $(systemctl is-active chronyd 2>/dev/null) = "active" ] && ((active_count++))
+systemctl is-active --quiet systemd-timesyncd 2>/dev/null && active_count=$((active_count + 1))
+if systemctl is-active --quiet chrony 2>/dev/null || systemctl is-active --quiet chronyd 2>/dev/null; then
+    active_count=$((active_count + 1))
+fi
+if systemctl is-active --quiet ntp 2>/dev/null || systemctl is-active --quiet ntpd 2>/dev/null; then
+    active_count=$((active_count + 1))
+fi
 
-if [ $active_count -gt 1 ]; then
+if [ "$active_count" -gt 1 ]; then
     echo "⚠️  检测到多个NTP服务同时运行，建议只保留一个"
-elif [ $active_count -eq 0 ]; then
+elif [ "$active_count" -eq 0 ]; then
     echo "⚠️  未检测到活跃的NTP服务，建议启用一个"
 else
     echo "✓ NTP服务配置正常"

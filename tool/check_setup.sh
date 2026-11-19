@@ -77,7 +77,7 @@ info "Uptime: $(uptime -p 2>/dev/null || uptime)"
 # ===== 2. 基础软件包 =====
 section "基础软件包"
 
-required_cmds=("curl" "wget" "vim" "unzip" "zip" "mtr" "iperf3")
+required_cmds=("curl" "wget" "vim" "unzip" "zip" "mtr")
 for cmd in "${required_cmds[@]}"; do
     if command -v "$cmd" &>/dev/null; then
         ok "$cmd 已安装"
@@ -90,6 +90,12 @@ if command -v nc &>/dev/null || command -v ncat &>/dev/null; then
     ok "netcat 已安装"
 else
     bad "netcat 未安装"
+fi
+
+if command -v iperf3 &>/dev/null; then
+    ok "iperf3 已安装"
+else
+    info "iperf3 未安装（可选网络测试工具）"
 fi
 
 # ===== 3. 用户和鉴权 =====
@@ -152,32 +158,41 @@ fi
 # ===== 4. SSH 配置 =====
 section "SSH 配置"
 
-# 优先使用 sshd -T 读取实际生效配置，回退到手动 grep
+# 优先使用 sshd -T 读取实际生效配置，回退到手动解析
 # sshd -T -C 指定上下文，确保 Match 块正确解析（模拟 root 用户登录）
+SSHD_BIN=""
+if [ -x /usr/sbin/sshd ]; then
+    SSHD_BIN="/usr/sbin/sshd"
+elif command -v sshd &>/dev/null; then
+    SSHD_BIN=$(command -v sshd)
+fi
+
 SSHD_EFFECTIVE=""
-if command -v sshd &>/dev/null; then
-    SSHD_EFFECTIVE=$(sshd -T -C user=root,host=,addr= 2>/dev/null || sshd -T 2>/dev/null || true)
+if [ -n "$SSHD_BIN" ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+        SSHD_EFFECTIVE=$("$SSHD_BIN" -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null || "$SSHD_BIN" -T 2>/dev/null || true)
+    elif command -v sudo &>/dev/null; then
+        SSHD_EFFECTIVE=$(sudo -n "$SSHD_BIN" -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null || sudo -n "$SSHD_BIN" -T 2>/dev/null || true)
+    fi
 fi
 
 get_ssh_setting() {
     local key="$1"
     local value=""
-    # 优先从 sshd -T 的实际生效配置读取
     if [ -n "$SSHD_EFFECTIVE" ]; then
         value=$(echo "$SSHD_EFFECTIVE" | awk -v k="${key,,}" 'tolower($1) == k {print $2; exit}')
     fi
-    # 回退: 手动 grep 配置文件
     if [ -z "$value" ]; then
         local SSH_OVERRIDE="/etc/ssh/sshd_config.d/00-setup-security.conf"
         local SSH_LEGACY_OVERRIDE="/etc/ssh/sshd_config.d/99-security.conf"
         local SSH_CONFIG="/etc/ssh/sshd_config"
         if [ -f "$SSH_OVERRIDE" ]; then
-            value=$(grep -i "^${key}" "$SSH_OVERRIDE" 2>/dev/null | head -1 | awk '{print $2}')
+            value=$(awk -v k="${key,,}" 'tolower($1) == k {print $2; exit}' "$SSH_OVERRIDE" 2>/dev/null)
         elif [ -f "$SSH_LEGACY_OVERRIDE" ]; then
-            value=$(grep -i "^${key}" "$SSH_LEGACY_OVERRIDE" 2>/dev/null | head -1 | awk '{print $2}')
+            value=$(awk -v k="${key,,}" 'tolower($1) == k {print $2; exit}' "$SSH_LEGACY_OVERRIDE" 2>/dev/null)
         fi
         if [ -z "$value" ] && [ -f "$SSH_CONFIG" ]; then
-            value=$(grep -i "^${key}" "$SSH_CONFIG" 2>/dev/null | head -1 | awk '{print $2}')
+            value=$(awk -v k="${key,,}" 'tolower($1) == k {print $2; exit}' "$SSH_CONFIG" 2>/dev/null)
         fi
     fi
     echo "$value"
@@ -185,7 +200,7 @@ get_ssh_setting() {
 
 ssh_port=$(get_ssh_setting "Port")
 if [ -n "$ssh_port" ] && [ "$ssh_port" != "22" ]; then
-    ok "SSH 端口: $ssh_port（已修改）"
+    ok "SSH 端口: ${ssh_port}（已修改）"
 else
     warning "SSH 端口: ${ssh_port:-22}（默认端口，建议修改）"
 fi
@@ -214,7 +229,7 @@ for key_val in "X11Forwarding:no" "UseDNS:no" "PermitEmptyPasswords:no"; do
     if [ "${actual,,}" = "$expected" ]; then
         ok "$key = $actual"
     else
-        warning "$key = ${actual:-未设置}（建议 $expected）"
+        warning "$key = ${actual:-未设置}（建议 ${expected}）"
     fi
 done
 
@@ -234,17 +249,61 @@ else
     info "安全覆盖配置: 00-setup-security.conf 不存在"
 fi
 
-if [ -f /root/.ssh/authorized_keys ] && [ -s /root/.ssh/authorized_keys ]; then
-    key_count=$(awk '/^#/{next} /^$/{next} {for(i=1;i<=NF;i++) if($i~/^(ssh-(rsa|dss|ed25519)|ecdsa-sha2-|sk-(ssh|ecdsa)-)/) {n++; break}} END{print n+0}' /root/.ssh/authorized_keys 2>/dev/null)
-    ok "Root SSH 密钥: $key_count 个"
+count_usable_keys() {
+    local keyfile="$1"
+    local count="0"
+    local awk_prog='
+        /^[ \t]*#/ || /^[ \t]*$/ { next }
+        /command="[^"]*(Please login as|exit[ \t]+[0-9]+)/ { next }
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^(ssh-(rsa|dss|ed25519)|ecdsa-sha2-|sk-(ssh|ecdsa)-)/ && (i + 1) <= NF && $(i + 1) ~ /^[A-Za-z0-9+\/]+=*$/) {
+                    n++
+                    break
+                }
+            }
+        }
+        END { print n + 0 }
+    '
+    if [ "$(id -u)" -eq 0 ]; then
+        [ -f "$keyfile" ] || { echo 0; return; }
+        count=$(awk "$awk_prog" "$keyfile" 2>/dev/null || echo 0)
+    elif command -v sudo &>/dev/null && sudo -n test -f "$keyfile" 2>/dev/null; then
+        count=$(sudo -n awk "$awk_prog" "$keyfile" 2>/dev/null || echo 0)
+    elif [ -r "$keyfile" ]; then
+        count=$(awk "$awk_prog" "$keyfile" 2>/dev/null || echo 0)
+    fi
+    echo "${count:-0}"
+}
+
+root_key_count=$(count_usable_keys /root/.ssh/authorized_keys)
+if [ "$root_key_count" -gt 0 ]; then
+    ok "Root SSH 密钥: ${root_key_count} 个"
+elif [ "${root_login,,}" = "no" ]; then
+    info "Root SSH 密钥: 未配置（已禁用 Root 登录）"
+    sudo_keyed_users=""
+    for m in $(getent group sudo 2>/dev/null | cut -d: -f4 | tr ',' ' '); do
+        [ -z "$m" ] && continue
+        m_home=$(getent passwd "$m" 2>/dev/null | cut -d: -f6)
+        if [ -n "$m_home" ] && [ "$(count_usable_keys "$m_home/.ssh/authorized_keys")" -gt 0 ]; then
+            sudo_keyed_users="${sudo_keyed_users:+$sudo_keyed_users,}$m"
+        fi
+    done
+    if [ -n "$sudo_keyed_users" ]; then
+        ok "管理员 SSH 密钥: 已配置 ($sudo_keyed_users)"
+    else
+        bad "管理员 SSH 密钥: 未检测到配置可用公钥的 sudo 用户"
+    fi
 else
-    bad "Root SSH 密钥: 未配置"
+    bad "Root SSH 密钥: 未配置有效密钥"
 fi
 
 # SSH 服务状态
 if command -v systemctl &>/dev/null; then
     if systemctl is-active sshd &>/dev/null || systemctl is-active ssh &>/dev/null; then
         ok "SSH 服务: 运行中"
+    elif systemctl is-active ssh.socket &>/dev/null; then
+        ok "SSH 服务: 运行中（ssh.socket 监听模式）"
     else
         bad "SSH 服务: 未运行"
     fi
@@ -253,8 +312,8 @@ elif pgrep -x sshd &>/dev/null; then
 else
     bad "SSH 服务: 未运行"
 fi
-# 当前 SSH 连接数
-ssh_conns=$(ss -tnp 2>/dev/null | grep -c ":${ssh_port:-22} " || true)
+# 当前 SSH 入站连接数
+ssh_conns=$(ss -tn state established "( sport = :${ssh_port:-22} )" 2>/dev/null | awk 'NR > 1 {n++} END {print n + 0}')
 info "当前 SSH 连接数: $ssh_conns"
 
 # ===== 5. Fail2ban =====
@@ -295,12 +354,12 @@ current_tz=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezo
 if [ "$current_tz" = "Asia/Shanghai" ]; then
     ok "时区: $current_tz"
 else
-    warning "时区: $current_tz（setup.sh 默认设为 Asia/Shanghai）"
+    warning "时区: ${current_tz}（setup.sh 默认设为 Asia/Shanghai）"
 fi
 
 if command -v systemctl &>/dev/null; then
-    if systemctl is-active chronyd &>/dev/null; then
-        ok "NTP 服务: chronyd 运行中"
+    if systemctl is-active chrony &>/dev/null || systemctl is-active chronyd &>/dev/null; then
+        ok "NTP 服务: chrony 运行中"
         ntp_source=$(chronyc sources 2>/dev/null | grep '^\^\*' | awk '{print $2}')
         [ -n "$ntp_source" ] && info "NTP 同步源: $ntp_source"
     elif systemctl is-active systemd-timesyncd &>/dev/null; then
@@ -809,27 +868,7 @@ else
     info "Heki: Docker 未安装"
 fi
 
-# ===== 15. 安全审计（可选） =====
-section "安全审计（可选）"
-
-if command -v auditctl &>/dev/null; then
-    ok "auditd 已安装"
-    if (command -v systemctl &>/dev/null && systemctl is-active auditd &>/dev/null) || pgrep -x auditd &>/dev/null; then
-        ok "auditd 服务: 运行中"
-    else
-        warning "auditd 服务: 未运行"
-    fi
-else
-    info "auditd: 未安装（可选功能）"
-fi
-
-if command -v etckeeper &>/dev/null; then
-    ok "etckeeper 已安装"
-else
-    info "etckeeper: 未安装（可选功能）"
-fi
-
-# ===== 16. 其他 =====
+# ===== 15. 其他 =====
 section "其他"
 
 hostname_str=$(hostname)
@@ -839,14 +878,26 @@ else
     warning "hostname ($hostname_str) 不在 /etc/hosts 中"
 fi
 
-if grep -qr 'tcp_congestion_control' /etc/sysctl.conf /etc/sysctl.d/ 2>/dev/null; then
-    ok "sysctl: BBR 配置已持久化"
+if grep -qrE --include='*.conf' '^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr' /etc/sysctl.d/ 2>/dev/null; then
+    ok "sysctl: BBR 配置已持久化 (/etc/sysctl.d/)"
+elif grep -qE '^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr' /etc/sysctl.conf 2>/dev/null; then
+    if [ -L /etc/sysctl.d/99-sysctl.conf ]; then
+        ok "sysctl: BBR 配置已持久化 (/etc/sysctl.conf)"
+    else
+        warning "sysctl: BBR 仅写入 /etc/sysctl.conf（Debian 13+ 重启不会加载，建议迁移到 /etc/sysctl.d/）"
+    fi
 else
     warning "sysctl: BBR 未持久化（重启后可能丢失）"
 fi
 
-if grep -qr 'ip_forward' /etc/sysctl.conf /etc/sysctl.d/ 2>/dev/null; then
-    ok "sysctl: IP 转发已持久化"
+if grep -qrE --include='*.conf' '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*1' /etc/sysctl.d/ 2>/dev/null; then
+    ok "sysctl: IP 转发已持久化 (/etc/sysctl.d/)"
+elif grep -qE '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*1' /etc/sysctl.conf 2>/dev/null; then
+    if [ -L /etc/sysctl.d/99-sysctl.conf ]; then
+        ok "sysctl: IP 转发已持久化 (/etc/sysctl.conf)"
+    else
+        warning "sysctl: IP 转发仅写入 /etc/sysctl.conf（Debian 13+ 重启不会加载，建议迁移到 /etc/sysctl.d/）"
+    fi
 else
     warning "sysctl: IP 转发未持久化"
 fi

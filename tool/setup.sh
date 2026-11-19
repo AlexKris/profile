@@ -28,8 +28,9 @@ readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
 # OpenSSH 采用 First-Match-Wins，00 前缀确保排在 50-cloud-init.conf / 60-cloudimg-settings.conf 之前生效
 readonly SSH_SECURITY_CONF="$SSH_CONFIG_DIR/00-setup-security.conf"
 readonly SSH_LEGACY_SECURITY_CONF="$SSH_CONFIG_DIR/99-security.conf"
-# Debian 13+ systemd-sysctl 默认不再加载 /etc/sysctl.conf，统一写入 /etc/sysctl.d/
-readonly SYSCTL_CUSTOM_CONF="/etc/sysctl.d/99-setup.conf"
+# Debian 13+ systemd-sysctl 默认不再加载 /etc/sysctl.conf，统一写入 /etc/sysctl.d/；99-z- 前缀确保排在 99-sysctl.conf 之后加载
+readonly SYSCTL_CUSTOM_CONF="/etc/sysctl.d/99-z-setup.conf"
+readonly SYSCTL_LEGACY_CONF="/etc/sysctl.d/99-setup.conf"
 readonly APT_FALLBACK_TMP_DIR="/tmp/setup-apt-fallback-official"
 readonly APT_FALLBACK_LEGACY_SOURCE="/etc/apt/sources.list.d/00-setup-fallback-official.list"
 
@@ -50,12 +51,20 @@ OS_PRETTY=""
 
 # ==================== 清理与错误处理 ====================
 
+as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 cleanup() {
     if [ -e "$APT_FALLBACK_TMP_DIR" ]; then
-        sudo rm -rf "$APT_FALLBACK_TMP_DIR" 2>/dev/null || true
+        as_root rm -rf "$APT_FALLBACK_TMP_DIR" 2>/dev/null || true
     fi
     if [ -e "$APT_FALLBACK_LEGACY_SOURCE" ]; then
-        sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
+        as_root rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
     fi
     if [ "$LOG_ENABLED" = "true" ]; then
         log_message "INFO" "清理完成"
@@ -174,10 +183,10 @@ is_valid_ssh_pubkey() {
 # 检查 authorized_keys 是否包含真正可用的密钥（排除 cloud-init 禁止 root 登录的 forced-command 占位行）
 file_has_usable_ssh_key() {
     local keyfile="$1"
-    sudo test -f "$keyfile" || return 1
-    sudo awk '
-        /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-        /command="[^"]*(Please login as|exit[[:space:]]+[0-9]+)/ { next }
+    as_root test -f "$keyfile" || return 1
+    as_root awk '
+        /^[ \t]*#/ || /^[ \t]*$/ { next }
+        /command="[^"]*(Please login as|exit[ \t]+[0-9]+)/ { next }
         {
             for (i = 1; i <= NF; i++) {
                 if ($i ~ /^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)$/ &&
@@ -220,8 +229,8 @@ get_sshd_bin() {
 
 ensure_sshd_run_dir() {
     if [ ! -d /run/sshd ]; then
-        sudo mkdir -p /run/sshd
-        sudo chmod 0755 /run/sshd
+        as_root mkdir -p /run/sshd
+        as_root chmod 0755 /run/sshd
     fi
 }
 
@@ -230,8 +239,8 @@ read_sshd_effective() {
     sshd_bin=$(get_sshd_bin)
     [ -z "$sshd_bin" ] && return 0
     ensure_sshd_run_dir
-    sudo "$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null \
-        || sudo "$sshd_bin" -T 2>/dev/null \
+    as_root "$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null \
+        || as_root "$sshd_bin" -T 2>/dev/null \
         || true
 }
 
@@ -257,9 +266,9 @@ get_effective_ssh_port() {
 # 管道执行（stdin 非 TTY）时启用非交互防卡死，终端直连时保留原有交互能力
 run_apt_get() {
     if [ -t 0 ]; then
-        sudo apt-get "$@"
+        as_root apt-get "$@"
     else
-        sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
             "$@"
@@ -509,7 +518,7 @@ wait_for_apt_locks() {
         available_space=$(df -Pk /var/cache/apt/archives 2>/dev/null | awk 'NR==2 {print $4}')
         if [[ "${available_space:-0}" =~ ^[0-9]+$ ]] && [ "$available_space" -gt 0 ] && [ "$available_space" -lt 1000000 ]; then
             log_message "WARNING" "磁盘可用空间不足 1GB (${available_space}KB)，清理 apt 缓存..."
-            sudo apt-get clean 2>/dev/null || true
+            as_root apt-get clean 2>/dev/null || true
         fi
     fi
 
@@ -518,15 +527,15 @@ wait_for_apt_locks() {
         local lock_sources=()
 
         if command -v fuser >/dev/null 2>&1; then
-            if sudo fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+            if as_root fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
                 locked="true"
                 lock_sources+=("dpkg-lock")
             fi
-            if sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+            if as_root fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
                 locked="true"
                 lock_sources+=("apt-lists-lock")
             fi
-            if sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+            if as_root fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
                 locked="true"
                 lock_sources+=("apt-cache-lock")
             fi
@@ -573,9 +582,9 @@ wait_for_apt_locks() {
     fi
 
     # 锁释放后再检查 dpkg 状态，避免与正在运行的 apt/dpkg 并发冲突
-    if ! sudo dpkg --audit >/dev/null 2>&1; then
+    if ! as_root dpkg --audit >/dev/null 2>&1; then
         log_message "WARNING" "发现未完成配置的软件包，正在执行 dpkg --configure -a..."
-        sudo dpkg --configure -a || true
+        as_root dpkg --configure -a || true
     fi
 
     return 0
@@ -588,19 +597,14 @@ fix_sudo_and_hosts() {
             log_message "ERROR" "等待 apt 锁失败，无法安装 sudo"
             return 1
         fi
-        if [ -t 0 ]; then
-            apt-get update -y && apt-get install -y sudo
-        else
-            DEBIAN_FRONTEND=noninteractive apt-get update -y && \
-                DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
-        fi || return 1
+        run_apt_get update -y && run_apt_get install -y sudo || return 1
     fi
 
     local current_hostname
     current_hostname=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
     if [ -n "$current_hostname" ] && ! grep -wq "$current_hostname" /etc/hosts 2>/dev/null; then
         log_message "INFO" "将主机名 $current_hostname 添加到 /etc/hosts..."
-        echo "127.0.1.1   $current_hostname" | sudo tee -a /etc/hosts >/dev/null
+        echo "127.0.1.1   $current_hostname" | as_root tee -a /etc/hosts >/dev/null
     fi
     return 0
 }
@@ -634,7 +638,7 @@ apt_install_with_retry() {
         if [ "$retry_count" -lt "$max_retries" ]; then
             log_message "INFO" "等待 ${retry_delay} 秒后重试..."
             sleep "$retry_delay"
-            sudo dpkg --configure -a 2>/dev/null || true
+            as_root dpkg --configure -a 2>/dev/null || true
             run_apt_get -f install -y 2>/dev/null || true
         else
             log_message "ERROR" "软件包安装失败，已重试 $max_retries 次: $packages"
@@ -663,7 +667,8 @@ update_system_install_dependencies() {
     safe_execute -d "清理过期缓存包" run_apt_get autoclean -y || true
     safe_execute -d "移除无用依赖包" run_apt_get autoremove -y || true
 
-    local base_packages="wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd"
+    # Debian 12/13 的 defaults-debian.conf 默认使用 systemd 后端，显式安装 python3-systemd 防止精简镜像缺依赖启动失败
+    local base_packages="wget curl vim unzip zip fail2ban python3-systemd rsyslog iptables mtr netcat-openbsd"
     if ! apt_install_with_retry "$base_packages"; then
         log_message "ERROR" "基础软件包安装失败"
         return 1
@@ -704,20 +709,20 @@ configure_ssh_keys() {
     local ssh_dir="$target_home/.ssh"
     local auth_keys="$ssh_dir/authorized_keys"
 
-    sudo mkdir -p "$ssh_dir"
-    sudo chmod 700 "$ssh_dir"
-    sudo touch "$auth_keys"
-    sudo chmod 600 "$auth_keys"
-    sudo chown -R "$current_user:$current_group" "$ssh_dir"
+    as_root mkdir -p "$ssh_dir"
+    as_root chmod 700 "$ssh_dir"
+    as_root touch "$auth_keys"
+    as_root chmod 600 "$auth_keys"
+    as_root chown -R "$current_user:$current_group" "$ssh_dir"
 
     # 清理云镜像在 root authorized_keys 中注入的 forced-command 拦截行，避免同公钥被拦截为禁止登录
-    if [ "$current_user" = "root" ] && sudo grep -qE 'command="[^"]*(Please login as|exit[[:space:]]+[0-9]+)' "$auth_keys" 2>/dev/null; then
+    if [ "$current_user" = "root" ] && as_root grep -qE 'command="[^"]*(Please login as|exit[[:space:]]+[0-9]+)' "$auth_keys" 2>/dev/null; then
         log_message "INFO" "清理 root authorized_keys 中的云镜像登录限制占位行"
-        sudo sed -i '/command="[^"]*\(Please login as\|exit[[:space:]]\+[0-9]\+\)/d' "$auth_keys"
+        as_root sed -i -E '/command="[^"]*(Please login as|exit[[:space:]]+[0-9]+)/d' "$auth_keys"
     fi
 
-    if ! sudo grep -qxF "$SSH_KEY" "$auth_keys"; then
-        printf '%s\n' "$SSH_KEY" | sudo tee -a "$auth_keys" >/dev/null
+    if ! as_root grep -qxF "$SSH_KEY" "$auth_keys"; then
+        printf '%s\n' "$SSH_KEY" | as_root tee -a "$auth_keys" >/dev/null
         log_message "INFO" "SSH 公钥已添加到用户 $current_user ($auth_keys)"
     else
         log_message "INFO" "SSH 公钥已存在于用户 $current_user"
@@ -739,13 +744,13 @@ create_admin_user() {
     if id "$SUDO_USERNAME" &>/dev/null; then
         log_message "INFO" "用户 $SUDO_USERNAME 已存在，更新权限和密钥配置"
     else
-        if ! sudo adduser --disabled-password --gecos "Administrator" "$SUDO_USERNAME"; then
+        if ! as_root adduser --disabled-password --gecos "Administrator" "$SUDO_USERNAME"; then
             log_message "ERROR" "创建用户 $SUDO_USERNAME 失败"
             return 1
         fi
     fi
 
-    if ! sudo usermod -aG sudo "$SUDO_USERNAME"; then
+    if ! as_root usermod -aG sudo "$SUDO_USERNAME"; then
         log_message "ERROR" "将用户 $SUDO_USERNAME 加入 sudo 组失败"
         return 1
     fi
@@ -758,30 +763,34 @@ create_admin_user() {
     local user_ssh_dir="$user_home/.ssh"
     local user_auth_keys="$user_ssh_dir/authorized_keys"
 
-    sudo mkdir -p "$user_ssh_dir"
-    sudo touch "$user_auth_keys"
+    as_root mkdir -p "$user_ssh_dir"
+    as_root touch "$user_auth_keys"
 
-    if ! sudo grep -qxF "$SSH_KEY" "$user_auth_keys"; then
-        printf '%s\n' "$SSH_KEY" | sudo tee -a "$user_auth_keys" >/dev/null
+    if ! as_root grep -qxF "$SSH_KEY" "$user_auth_keys"; then
+        printf '%s\n' "$SSH_KEY" | as_root tee -a "$user_auth_keys" >/dev/null
     fi
 
-    sudo chown -R "$SUDO_USERNAME:$user_group" "$user_ssh_dir"
-    sudo chmod 700 "$user_ssh_dir"
-    sudo chmod 600 "$user_auth_keys"
+    as_root chown -R "$SUDO_USERNAME:$user_group" "$user_ssh_dir"
+    as_root chmod 700 "$user_ssh_dir"
+    as_root chmod 600 "$user_auth_keys"
 
     local sudoers_file="/etc/sudoers.d/$SUDO_USERNAME"
-    local sudoers_tmp="/tmp/sudoers.$SUDO_USERNAME.$$"
+    local sudoers_tmp
+    sudoers_tmp=$(mktemp /tmp/setup-sudoers.XXXXXX) || {
+        log_message "ERROR" "创建 sudoers 临时文件失败"
+        return 1
+    }
     printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$SUDO_USERNAME" > "$sudoers_tmp"
     chmod 440 "$sudoers_tmp"
 
-    if command -v visudo >/dev/null 2>&1 && ! sudo visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
+    if command -v visudo >/dev/null 2>&1 && ! as_root visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
         rm -f "$sudoers_tmp"
         log_message "ERROR" "sudoers 语法校验未通过"
         return 1
     fi
-    sudo mv "$sudoers_tmp" "$sudoers_file"
-    sudo chown root:root "$sudoers_file"
-    sudo chmod 440 "$sudoers_file"
+    as_root mv "$sudoers_tmp" "$sudoers_file"
+    as_root chown root:root "$sudoers_file"
+    as_root chmod 440 "$sudoers_file"
 
     if ! sudo -u "$SUDO_USERNAME" sudo -n true 2>/dev/null; then
         log_message "ERROR" "验证用户 $SUDO_USERNAME 免密 sudo 权限失败"
@@ -802,19 +811,19 @@ create_admin_user() {
 backup_ssh_config() {
     log_message "INFO" "备份当前 SSH 配置到 $CONFIG_BACKUP_DIR..."
 
-    sudo mkdir -p "$CONFIG_BACKUP_DIR"
-    sudo chmod 700 "$CONFIG_BACKUP_DIR"
+    as_root mkdir -p "$CONFIG_BACKUP_DIR"
+    as_root chmod 700 "$CONFIG_BACKUP_DIR"
 
     if [ -f "$SSH_CONFIG" ]; then
-        sudo cp -a "$SSH_CONFIG" "$CONFIG_BACKUP_DIR/sshd_config.bak"
+        as_root cp -a "$SSH_CONFIG" "$CONFIG_BACKUP_DIR/sshd_config.bak"
     fi
 
     if [ -d "$SSH_CONFIG_DIR" ]; then
-        sudo mkdir -p "$CONFIG_BACKUP_DIR/sshd_config.d"
-        sudo cp -a "$SSH_CONFIG_DIR"/. "$CONFIG_BACKUP_DIR/sshd_config.d/"
+        as_root mkdir -p "$CONFIG_BACKUP_DIR/sshd_config.d"
+        as_root cp -a "$SSH_CONFIG_DIR"/. "$CONFIG_BACKUP_DIR/sshd_config.d/"
     fi
 
-    sudo tee "$CONFIG_BACKUP_DIR/restore.sh" >/dev/null << EOF
+    as_root tee "$CONFIG_BACKUP_DIR/restore.sh" >/dev/null << EOF
 #!/bin/bash
 set -euo pipefail
 [ -f "$CONFIG_BACKUP_DIR/sshd_config.bak" ] && sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.bak" "$SSH_CONFIG"
@@ -823,16 +832,15 @@ if [ -d "$CONFIG_BACKUP_DIR/sshd_config.d" ]; then
     sudo find "$SSH_CONFIG_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.d"/. "$SSH_CONFIG_DIR/"
 fi
-sudo systemctl daemon-reload 2>/dev/null || true
 if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
-    sudo systemctl restart ssh.socket
-    sudo systemctl restart ssh 2>/dev/null || true
-else
-    sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
+    sudo systemctl disable --now ssh.socket 2>/dev/null || true
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl enable ssh 2>/dev/null || true
 fi
+sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
 echo "SSH 配置已从备份恢复"
 EOF
-    sudo chmod 700 "$CONFIG_BACKUP_DIR/restore.sh"
+    as_root chmod 700 "$CONFIG_BACKUP_DIR/restore.sh"
 }
 
 restore_ssh_config_from_backup() {
@@ -841,11 +849,11 @@ restore_ssh_config_from_backup() {
         return 1
     fi
 
-    sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.bak" "$SSH_CONFIG"
+    as_root cp -a "$CONFIG_BACKUP_DIR/sshd_config.bak" "$SSH_CONFIG"
     if [ -d "$CONFIG_BACKUP_DIR/sshd_config.d" ]; then
-        sudo mkdir -p "$SSH_CONFIG_DIR"
-        sudo find "$SSH_CONFIG_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-        sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.d"/. "$SSH_CONFIG_DIR/"
+        as_root mkdir -p "$SSH_CONFIG_DIR"
+        as_root find "$SSH_CONFIG_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        as_root cp -a "$CONFIG_BACKUP_DIR/sshd_config.d"/. "$SSH_CONFIG_DIR/"
     fi
     log_message "INFO" "已从备份恢复 SSH 配置文件"
     return 0
@@ -890,7 +898,7 @@ find_sudo_user_state() {
 comment_managed_directives_in_file() {
     local file="$1"
     [ -f "$file" ] || return 0
-    sudo sed -i -E \
+    as_root sed -i -E \
         's/^[[:space:]]*(Port|PasswordAuthentication|PermitRootLogin|PubkeyAuthentication|PermitEmptyPasswords|ChallengeResponseAuthentication|KbdInteractiveAuthentication|X11Forwarding|ClientAliveInterval|ClientAliveCountMax|UseDNS)[[:space:]=]/#&/I' \
         "$file"
 }
@@ -902,48 +910,35 @@ validate_and_restart_ssh() {
 
     ensure_sshd_run_dir
 
-    if ! sudo "$sshd_bin" -t; then
+    if ! as_root "$sshd_bin" -t; then
         log_message "ERROR" "sshd -t 配置语法校验失败"
         return 1
     fi
 
-    sudo systemctl daemon-reload 2>/dev/null || true
-
-    local using_socket="false"
+    # Ubuntu 22.10+/24.04 默认启用 ssh.socket，在线改端口时直接切换为标准 ssh.service 守护进程模式更可靠
     if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
-        using_socket="true"
-        log_message "INFO" "检测到 systemd ssh.socket，重新加载并重启 socket..."
-        if ! sudo systemctl restart ssh.socket; then
-            log_message "ERROR" "重启 ssh.socket 失败"
-            return 1
-        fi
-        sudo systemctl restart ssh 2>/dev/null || true
-    else
-        if ! (sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null); then
-            log_message "ERROR" "重启 SSH 服务失败"
-            return 1
-        fi
+        log_message "INFO" "检测到 systemd ssh.socket，切换为 ssh.service 直接监听端口 ${expected_port}..."
+        as_root systemctl disable --now ssh.socket 2>/dev/null || true
+        as_root systemctl daemon-reload 2>/dev/null || true
+        as_root systemctl enable ssh 2>/dev/null || true
+    fi
+
+    if ! (as_root systemctl restart ssh 2>/dev/null || as_root systemctl restart sshd 2>/dev/null); then
+        log_message "ERROR" "重启 SSH 服务失败"
+        return 1
     fi
 
     sleep 1
 
-    # Ubuntu 部分版本 ssh.socket 未跟随自定义端口时，切换为常规 ssh.service 守护进程模式
-    if ! sudo ss -tln | grep -qE "[:.]${expected_port}[[:space:]]"; then
-        if [ "$using_socket" = "true" ]; then
-            log_message "WARNING" "ssh.socket 未监听端口 ${expected_port}，切换为 ssh.service 直接监听..."
-            sudo systemctl stop ssh.socket 2>/dev/null || true
-            sudo systemctl disable ssh.socket 2>/dev/null || true
-            sudo systemctl enable --now ssh 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
-            sleep 1
-        fi
-    fi
-
-    if ! sudo ss -tln | grep -qE "[:.]${expected_port}[[:space:]]"; then
-        log_message "ERROR" "SSH 未能在端口 $expected_port 上监听"
+    if ! as_root ss -tlnp | awk -v port="$expected_port" '
+        $4 ~ ("(:|\\.)" port "$") && ($0 ~ /"sshd"/ || $0 ~ /"systemd"/) { found = 1; exit 0 }
+        END { exit(found ? 0 : 1) }
+    '; then
+        log_message "ERROR" "SSH 未能在端口 ${expected_port} 上正常监听"
         return 1
     fi
 
-    log_message "INFO" "SSH 服务已正常监听端口 $expected_port"
+    log_message "INFO" "SSH 服务已正常监听端口 ${expected_port}"
     return 0
 }
 
@@ -984,42 +979,53 @@ configure_ssh() {
     elif [ "$has_root_key" = "true" ]; then
         if [ "$DISABLE_SSH_PASSWD" = "true" ] && [ "$target_permit_root" != "no" ]; then
             target_permit_root="prohibit-password"
-        elif [ "$target_permit_root" = "no" ] && [ -n "$SSH_KEY" ] && [ "$CREATE_DEVOPS_USER" != "true" ]; then
+        elif [ "$target_permit_root" = "no" ] && [ "$(id -un)" = "root" ] && [ -n "$SSH_KEY" ] && [ "$CREATE_DEVOPS_USER" != "true" ]; then
             target_permit_root="prohibit-password"
         fi
     fi
 
-    # 2. 计算密码认证策略：禁用密码前必须确认可登录账户拥有可用公钥
+    # 2. 计算密码认证策略，并对最终状态做统一防锁死校验（覆盖原本已禁密码再单独传 --disable_root_login 的场景）
     if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
-        if [ "$target_permit_root" = "no" ]; then
-            if [ "$HAS_KEYED_SUDO_USER" != "true" ]; then
-                log_message "ERROR" "无法同时禁用 root 登录与密码登录：未检测到配置了可用 SSH 公钥的 sudo 用户"
-                return 1
-            fi
-        else
-            if [ "$has_root_key" != "true" ] && [ "$HAS_KEYED_SUDO_USER" != "true" ]; then
-                log_message "ERROR" "无法禁用密码登录：root 与 sudo 用户均未检测到可用 SSH 公钥"
-                return 1
-            fi
-        fi
         target_passwd_auth="no"
     fi
 
-    # 3. 确保 sshd_config 顶部包含 sshd_config.d，清理各文件冲突项并写入 00-setup-security.conf
-    sudo mkdir -p "$SSH_CONFIG_DIR"
-    if ! sudo grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$SSH_CONFIG" 2>/dev/null; then
+    if [ "$target_passwd_auth" = "no" ]; then
+        if [ "$target_permit_root" = "no" ]; then
+            if [ "$HAS_KEYED_SUDO_USER" != "true" ]; then
+                log_message "ERROR" "无法应用配置（PermitRootLogin no 且 PasswordAuthentication no）：未检测到配置了可用 SSH 公钥的 sudo 用户"
+                return 1
+            fi
+        elif [ "$has_root_key" != "true" ] && [ "$HAS_KEYED_SUDO_USER" != "true" ]; then
+            log_message "ERROR" "无法禁用密码登录：root 与 sudo 用户均未检测到可用 SSH 公钥"
+            return 1
+        fi
+    fi
+
+    # 3. 按当前 OpenSSH 版本选择键盘交互认证指令（8.7+ 用 KbdInteractiveAuthentication，8.2/8.4 用 ChallengeResponseAuthentication）
+    local kbd_auth_directive="ChallengeResponseAuthentication no"
+    if echo "$current_cfg" | grep -q '^kbdinteractiveauthentication '; then
+        kbd_auth_directive="KbdInteractiveAuthentication no"
+    fi
+
+    # 4. 确保 sshd_config 顶部包含 sshd_config.d，清理各文件冲突项并写入 00-setup-security.conf
+    as_root mkdir -p "$SSH_CONFIG_DIR"
+    if ! as_root grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$SSH_CONFIG" 2>/dev/null; then
         log_message "INFO" "在 $SSH_CONFIG 顶部补充 Include /etc/ssh/sshd_config.d/*.conf"
-        local tmp_sshd="/tmp/sshd_config.$$"
+        local tmp_sshd
+        tmp_sshd=$(mktemp /tmp/setup-sshd.XXXXXX) || {
+            log_message "ERROR" "创建 sshd_config 临时文件失败"
+            return 1
+        }
         {
             echo "Include /etc/ssh/sshd_config.d/*.conf"
-            sudo cat "$SSH_CONFIG"
+            as_root cat "$SSH_CONFIG"
         } > "$tmp_sshd"
-        sudo cp "$tmp_sshd" "$SSH_CONFIG"
-        sudo chmod 644 "$SSH_CONFIG"
+        as_root cp "$tmp_sshd" "$SSH_CONFIG"
+        as_root chmod 644 "$SSH_CONFIG"
         rm -f "$tmp_sshd"
     fi
 
-    [ -f "$SSH_LEGACY_SECURITY_CONF" ] && sudo rm -f "$SSH_LEGACY_SECURITY_CONF"
+    [ -f "$SSH_LEGACY_SECURITY_CONF" ] && as_root rm -f "$SSH_LEGACY_SECURITY_CONF"
 
     comment_managed_directives_in_file "$SSH_CONFIG"
     local dropin
@@ -1029,7 +1035,7 @@ configure_ssh() {
         comment_managed_directives_in_file "$dropin"
     done
 
-    sudo tee "$SSH_SECURITY_CONF" >/dev/null << EOF
+    as_root tee "$SSH_SECURITY_CONF" >/dev/null << EOF
 # Managed by setup.sh ($TIMESTAMP)
 # Loaded first via Include /etc/ssh/sshd_config.d/*.conf (OpenSSH first-match-wins)
 
@@ -1038,8 +1044,7 @@ Port $effective_port
 PubkeyAuthentication yes
 PasswordAuthentication $target_passwd_auth
 PermitEmptyPasswords no
-ChallengeResponseAuthentication no
-KbdInteractiveAuthentication no
+$kbd_auth_directive
 
 PermitRootLogin $target_permit_root
 
@@ -1049,21 +1054,22 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 UsePAM yes
 EOF
-    sudo chmod 644 "$SSH_SECURITY_CONF"
+    as_root chmod 644 "$SSH_SECURITY_CONF"
 
-    if [ -n "$SSH_PORT" ] && command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+    if [ -n "$SSH_PORT" ] && command -v ufw >/dev/null 2>&1 && as_root ufw status 2>/dev/null | grep -q "Status: active"; then
         log_message "INFO" "在 UFW 中放行 SSH 端口 $effective_port/tcp"
-        sudo ufw allow "$effective_port/tcp" comment 'SSH Port' >/dev/null 2>&1 || true
+        as_root ufw allow "$effective_port/tcp" comment 'SSH Port' >/dev/null 2>&1 || true
     fi
 
     if ! validate_and_restart_ssh "$effective_port"; then
         log_message "ERROR" "SSH 新配置验证或重启失败，正在自动回滚备份..."
         if restore_ssh_config_from_backup; then
-            sudo systemctl daemon-reload 2>/dev/null || true
             if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
-                sudo systemctl restart ssh.socket 2>/dev/null || true
+                as_root systemctl disable --now ssh.socket 2>/dev/null || true
+                as_root systemctl daemon-reload 2>/dev/null || true
+                as_root systemctl enable ssh 2>/dev/null || true
             fi
-            sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null || true
+            as_root systemctl restart ssh 2>/dev/null || as_root systemctl restart sshd 2>/dev/null || true
             log_message "WARNING" "已回滚到修改前的 SSH 配置"
         fi
         return 1
@@ -1080,26 +1086,26 @@ configure_fail2ban() {
 
     local ssh_log_path="/var/log/auth.log"
     if ! grep -rqE '^[[:space:]]*auth,authpriv\.\*[[:space:]]+.*auth\.log' /etc/rsyslog.conf /etc/rsyslog.d/ 2>/dev/null; then
-        sudo mkdir -p /etc/rsyslog.d
-        echo "auth,authpriv.*    /var/log/auth.log" | sudo tee /etc/rsyslog.d/50-setup-auth.conf >/dev/null
+        as_root mkdir -p /etc/rsyslog.d
+        echo "auth,authpriv.*    /var/log/auth.log" | as_root tee /etc/rsyslog.d/50-setup-auth.conf >/dev/null
     fi
 
     # rsyslog 在收到首条日志前可能尚未创建 auth.log，预先创建避免 fail2ban 因文件不存在而启动报错
     if [ ! -f "$ssh_log_path" ]; then
         local syslog_owner="root"
         id syslog &>/dev/null && syslog_owner="syslog"
-        sudo install -m 0640 -o "$syslog_owner" -g adm /dev/null "$ssh_log_path" 2>/dev/null \
-            || { sudo touch "$ssh_log_path" && sudo chmod 0640 "$ssh_log_path"; }
+        as_root install -m 0640 -o "$syslog_owner" -g adm /dev/null "$ssh_log_path" 2>/dev/null \
+            || { as_root touch "$ssh_log_path" && as_root chmod 0640 "$ssh_log_path"; }
     fi
 
-    sudo systemctl enable --now rsyslog >/dev/null 2>&1 || true
-    sudo systemctl restart rsyslog || log_message "WARNING" "rsyslog 重启失败"
+    as_root systemctl enable --now rsyslog >/dev/null 2>&1 || true
+    as_root systemctl restart rsyslog || log_message "WARNING" "rsyslog 重启失败"
 
     local ssh_port
     ssh_port=$(get_effective_ssh_port)
 
-    sudo mkdir -p /etc/fail2ban/jail.d
-    sudo tee /etc/fail2ban/jail.d/custom.conf >/dev/null << EOF
+    as_root mkdir -p /etc/fail2ban/jail.d
+    as_root tee /etc/fail2ban/jail.d/custom.conf >/dev/null << EOF
 [DEFAULT]
 bantime = 1800
 findtime = 600
@@ -1114,9 +1120,23 @@ maxretry = 3
 bantime = 3600
 EOF
 
-    sudo systemctl unmask fail2ban 2>/dev/null || true
-    if ! sudo systemctl enable fail2ban || ! sudo systemctl restart fail2ban; then
+    as_root systemctl unmask fail2ban 2>/dev/null || true
+    if ! as_root systemctl enable fail2ban || ! as_root systemctl restart fail2ban; then
         log_message "ERROR" "Fail2ban 启动失败"
+        return 1
+    fi
+
+    local f2b_ready="false"
+    local attempt
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if as_root systemctl is-active --quiet fail2ban && as_root fail2ban-client status sshd >/dev/null 2>&1; then
+            f2b_ready="true"
+            break
+        fi
+        sleep 1
+    done
+    if [ "$f2b_ready" != "true" ]; then
+        log_message "ERROR" "Fail2ban sshd jail 未正常运行，请检查 journalctl -u fail2ban"
         return 1
     fi
 
@@ -1168,14 +1188,14 @@ try_install_chrony_via_official_mirror() {
     local rc=1
 
     log_message "INFO" "尝试通过 deb.debian.org 隔离官方源安装 chrony..."
-    sudo rm -rf "$tmp_dir" 2>/dev/null || true
-    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
+    as_root rm -rf "$tmp_dir" 2>/dev/null || true
+    as_root rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
 
-    if ! sudo mkdir -p "$tmp_source_parts" "$tmp_lists/partial"; then
+    if ! as_root mkdir -p "$tmp_source_parts" "$tmp_lists/partial"; then
         return 1
     fi
 
-    sudo tee "$tmp_list" >/dev/null << EOF
+    as_root tee "$tmp_list" >/dev/null << EOF
 deb https://deb.debian.org/debian $codename main
 deb https://deb.debian.org/debian-security ${codename}-security main
 deb https://deb.debian.org/debian ${codename}-updates main
@@ -1192,14 +1212,14 @@ EOF
         rc=0
     fi
 
-    sudo rm -rf "$tmp_dir" 2>/dev/null || true
+    as_root rm -rf "$tmp_dir" 2>/dev/null || true
     return "$rc"
 }
 
 configure_timezone_ntp() {
     log_message "INFO" "配置时区与 NTP 时间同步..."
 
-    sudo timedatectl set-timezone Asia/Shanghai
+    as_root timedatectl set-timezone Asia/Shanghai
 
     local region="$SERVER_REGION"
     if [ "$region" = "auto" ]; then
@@ -1238,11 +1258,14 @@ configure_timezone_ntp() {
     fi
 
     if [ "$use_chrony" = "true" ]; then
-        sudo systemctl stop systemd-timesyncd 2>/dev/null || true
-        sudo systemctl disable systemd-timesyncd 2>/dev/null || true
+        as_root systemctl stop systemd-timesyncd 2>/dev/null || true
+        as_root systemctl disable systemd-timesyncd 2>/dev/null || true
 
-        sudo mkdir -p /var/log/chrony
-        sudo tee /etc/chrony/chrony.conf >/dev/null << EOF
+        as_root mkdir -p /var/log/chrony
+        if id _chrony &>/dev/null; then
+            as_root chown _chrony:_chrony /var/log/chrony 2>/dev/null || true
+        fi
+        as_root tee /etc/chrony/chrony.conf >/dev/null << EOF
 pool $ntp_server iburst
 keyfile /etc/chrony/chrony.keys
 driftfile /var/lib/chrony/chrony.drift
@@ -1251,8 +1274,8 @@ maxupdateskew 100.0
 rtcsync
 makestep 1 3
 EOF
-        sudo systemctl unmask chrony 2>/dev/null || true
-        if ! sudo systemctl enable chrony || ! sudo systemctl restart chrony; then
+        as_root systemctl unmask chrony 2>/dev/null || true
+        if ! as_root systemctl enable chrony || ! as_root systemctl restart chrony; then
             log_message "ERROR" "chrony 服务启用或启动失败"
             return 1
         fi
@@ -1268,19 +1291,19 @@ EOF
         fi
     fi
 
-    sudo systemctl stop chrony 2>/dev/null || true
-    sudo systemctl disable chrony 2>/dev/null || true
+    as_root systemctl stop chrony 2>/dev/null || true
+    as_root systemctl disable chrony 2>/dev/null || true
 
     local fallback_ntp="0.pool.ntp.org 1.pool.ntp.org"
     [ "$region" = "cn" ] && fallback_ntp="ntp.tencent.com cn.pool.ntp.org"
 
-    sudo tee /etc/systemd/timesyncd.conf >/dev/null << EOF
+    as_root tee /etc/systemd/timesyncd.conf >/dev/null << EOF
 [Time]
 NTP=$ntp_server
 FallbackNTP=$fallback_ntp
 EOF
-    sudo systemctl unmask systemd-timesyncd 2>/dev/null || true
-    if ! sudo systemctl enable systemd-timesyncd || ! sudo systemctl restart systemd-timesyncd; then
+    as_root systemctl unmask systemd-timesyncd 2>/dev/null || true
+    if ! as_root systemctl enable systemd-timesyncd || ! as_root systemctl restart systemd-timesyncd; then
         log_message "ERROR" "systemd-timesyncd 启动失败"
         return 1
     fi
@@ -1292,7 +1315,7 @@ EOF
 configure_system_optimization() {
     log_message "INFO" "配置内核网络优化（BBR 与 IPv4 转发）..."
 
-    sudo modprobe tcp_bbr 2>/dev/null || true
+    as_root modprobe tcp_bbr 2>/dev/null || true
 
     local bbr_available="false"
     if grep -qw "bbr" /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
@@ -1301,7 +1324,8 @@ configure_system_optimization() {
         log_message "WARNING" "当前内核或容器环境不支持 tcp_bbr，仅配置 IPv4 转发"
     fi
 
-    sudo mkdir -p /etc/sysctl.d
+    as_root mkdir -p /etc/sysctl.d
+    [ -f "$SYSCTL_LEGACY_CONF" ] && as_root rm -f "$SYSCTL_LEGACY_CONF"
     {
         echo "# Managed by setup.sh ($TIMESTAMP)"
         if [ "$bbr_available" = "true" ]; then
@@ -1309,15 +1333,15 @@ configure_system_optimization() {
             echo "net.ipv4.tcp_congestion_control = bbr"
         fi
         echo "net.ipv4.ip_forward = 1"
-    } | sudo tee "$SYSCTL_CUSTOM_CONF" >/dev/null
-    sudo chmod 644 "$SYSCTL_CUSTOM_CONF"
+    } | as_root tee "$SYSCTL_CUSTOM_CONF" >/dev/null
+    as_root chmod 644 "$SYSCTL_CUSTOM_CONF"
 
     # 避免旧 /etc/sysctl.conf 中显式的 ip_forward=0 造成混淆
     if [ -f /etc/sysctl.conf ] && grep -Eq '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*0' /etc/sysctl.conf; then
-        sudo sed -i -E 's/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=.*/net.ipv4.ip_forward = 1/' /etc/sysctl.conf
+        as_root sed -i -E 's/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=.*/net.ipv4.ip_forward = 1/' /etc/sysctl.conf
     fi
 
-    if ! sudo sysctl -p "$SYSCTL_CUSTOM_CONF" >/dev/null; then
+    if ! as_root sysctl -p "$SYSCTL_CUSTOM_CONF" >/dev/null; then
         log_message "ERROR" "加载 $SYSCTL_CUSTOM_CONF 失败"
         return 1
     fi
