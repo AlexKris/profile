@@ -96,8 +96,10 @@ if [ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]; then
     echo "  文件: /etc/ssh/sshd_config.d/50-cloud-init.conf"
     echo "  内容预览:"
     head -5 /etc/ssh/sshd_config.d/50-cloud-init.conf | sed 's/^/    /'
-    if [ -f /etc/ssh/sshd_config.d/99-security.conf ]; then
-        echo "✓ 但是99-security.conf会覆盖其设置"
+    if [ -f /etc/ssh/sshd_config.d/00-setup-security.conf ]; then
+        echo "✓ 00-setup-security.conf 按顺序优先于 cloud-init 生效"
+    elif [ -f /etc/ssh/sshd_config.d/99-security.conf ]; then
+        echo "⚠ 旧版 99-security.conf 排在 50-cloud-init.conf 之后，可能被覆盖"
     fi
 else
     echo "✓ 未检测到cloud-init SSH配置"
@@ -112,7 +114,9 @@ echo ""
 
 # 6. 建议
 echo "=== 建议 ==="
-if grep -q "^Port" /etc/ssh/sshd_config 2>/dev/null && [ -f /etc/ssh/sshd_config.d/99-security.conf ] && grep -q "^Port" /etc/ssh/sshd_config.d/99-security.conf 2>/dev/null; then
+SSH_SECURITY_CONF="/etc/ssh/sshd_config.d/00-setup-security.conf"
+[ ! -f "$SSH_SECURITY_CONF" ] && SSH_SECURITY_CONF="/etc/ssh/sshd_config.d/99-security.conf"
+if grep -q "^Port" /etc/ssh/sshd_config 2>/dev/null && [ -f "$SSH_SECURITY_CONF" ] && grep -q "^Port" "$SSH_SECURITY_CONF" 2>/dev/null; then
     echo "建议："
     echo "  发现Port在多个文件中定义，建议在主配置文件中注释掉Port设置"
     echo "  运行: sudo sed -i 's/^Port/#Port/' /etc/ssh/sshd_config"

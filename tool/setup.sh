@@ -1,123 +1,100 @@
 #!/bin/bash
 
-# 启用严格模式，显式错误处理（移除-e以避免不可预测行为）
+# VPS 系统初始化脚本（适用于 Debian 11+ / Ubuntu 20.04+）
+# 职责：系统更新与基础工具、用户与 SSH 加固、Fail2ban、时区与 Chrony、BBR 与 IP 转发
 set -uo pipefail
 
-# 脚本版本
-readonly SCRIPT_VERSION="2.2.0"
-
-# 已测试的Debian版本
-readonly TESTED_DEBIAN_VERSIONS="11 12 13"  # bullseye, bookworm, trixie
-
-# 脚本常量 - 集中配置
-readonly DEFAULT_SSH_PORT="22"
+readonly SCRIPT_VERSION="3.0.0"
+readonly TESTED_DEBIAN_VERSIONS="11 12 13"
 readonly MIN_PORT=1024
 readonly MAX_PORT=65535
-# 获取脚本所在目录（支持管道执行）
+
 if [ -n "${BASH_SOURCE[0]:-}" ] && [[ "${BASH_SOURCE[0]}" != /dev/fd/* ]] && [[ "${BASH_SOURCE[0]}" != /proc/self/fd/* ]]; then
-    # 正常文件执行
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 else
-    # 通过管道执行，使用用户家目录或/tmp
-    if [ -w "$HOME" ] && [ -d "$HOME" ]; then
+    if [ -w "${HOME:-}" ] && [ -d "${HOME:-}" ]; then
         SCRIPT_DIR="$HOME"
     else
         SCRIPT_DIR="/tmp"
     fi
 fi
-# 添加时间戳到配置备份目录名
+
 readonly TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 readonly CONFIG_BACKUP_DIR="$SCRIPT_DIR/ssh_backups_$TIMESTAMP"
+readonly LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
+
 readonly SSH_CONFIG="/etc/ssh/sshd_config"
 readonly SSH_CONFIG_DIR="/etc/ssh/sshd_config.d"
-# 固定日志文件路径
-readonly LOG_FILE="$SCRIPT_DIR/setup-script-$TIMESTAMP.log"
+# OpenSSH 采用 First-Match-Wins，00 前缀确保排在 50-cloud-init.conf / 60-cloudimg-settings.conf 之前生效
+readonly SSH_SECURITY_CONF="$SSH_CONFIG_DIR/00-setup-security.conf"
+readonly SSH_LEGACY_SECURITY_CONF="$SSH_CONFIG_DIR/99-security.conf"
+# Debian 13+ systemd-sysctl 默认不再加载 /etc/sysctl.conf，统一写入 /etc/sysctl.d/
+readonly SYSCTL_CUSTOM_CONF="/etc/sysctl.d/99-setup.conf"
 readonly APT_FALLBACK_TMP_DIR="/tmp/setup-apt-fallback-official"
 readonly APT_FALLBACK_LEGACY_SOURCE="/etc/apt/sources.list.d/00-setup-fallback-official.list"
 
-# 脚本参数变量
+LOG_ENABLED="false"
 DISABLE_SSH_PASSWD="false"
 SSH_PORT=""
 SSH_KEY=""
-TMP_FILES=""
-OS_TYPE=""
-OS_VERSION=""
-# 服务器地区参数，默认为asia
 SERVER_REGION="asia"
-# 创建管理员用户参数
 CREATE_DEVOPS_USER="false"
 SUDO_USERNAME=""
-# NTP服务选择（auto|timesyncd|chrony）
-NTP_SERVICE="auto"
-# 新增：安全审计参数（合并原来的三个审计相关参数）
-ENABLE_SECURITY_AUDIT="false"  # 默认禁用安全审计
-# Docker相关
-INSTALL_DOCKER="false"
-# 新增：控制是否禁用root登录
+NTP_SERVICE="chrony"
 DISABLE_ROOT_LOGIN="false"
-# SSH环境分析结果（analyze_ssh_environment填充）
-SSH_ENV_HAS_SUDO_USER="false"
-SSH_ENV_HAS_ROOT_KEY="false"
-SSH_ENV_CAN_DISABLE_ROOT="false"
 
-# 设置安全的临时文件处理
+OS_DISTRO=""
+OS_VERSION=""
+OS_CODENAME=""
+OS_PRETTY=""
+
+# ==================== 清理与错误处理 ====================
+
 cleanup() {
-    # 删除所有临时文件
-    if [ -n "$TMP_FILES" ]; then
-        # 使用引号保护变量，防止空格和特殊字符问题
-        rm -f "$TMP_FILES" >/dev/null 2>&1
+    if [ -e "$APT_FALLBACK_TMP_DIR" ]; then
+        sudo rm -rf "$APT_FALLBACK_TMP_DIR" 2>/dev/null || true
     fi
-    # 兜底清理可能残留的apt官方源fallback临时文件
-    sudo rm -rf "$APT_FALLBACK_TMP_DIR" 2>/dev/null || true
-    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
-    log_message "INFO" "脚本执行完成，清理临时文件"
+    if [ -e "$APT_FALLBACK_LEGACY_SOURCE" ]; then
+        sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
+    fi
+    if [ "$LOG_ENABLED" = "true" ]; then
+        log_message "INFO" "清理完成"
+    fi
 }
 
-# 注册EXIT信号处理
-trap cleanup EXIT INT TERM
+on_interrupt() {
+    log_message "WARNING" "收到中断信号，正在退出..."
+    exit 130
+}
 
-# ==================== 基础工具函数 ====================
-
-# ==================== 现代化错误处理函数 ====================
-
-# 致命错误处理函数 - 记录错误并退出
 die() {
     local msg="${1:-未知致命错误}"
     local exit_code="${2:-1}"
-    
+
     log_message "ERROR" "致命错误: $msg"
     log_message "ERROR" "脚本终止执行 (退出码: $exit_code)"
-    
-    # 清理资源
-    cleanup 2>/dev/null || true
     exit "$exit_code"
 }
 
-# 检查命令执行结果 - 非致命错误处理
 check_error() {
     local exit_code=$1
     local operation="${2:-操作}"
     local context="${3:-}"
-    
-    if [ $exit_code -ne 0 ]; then
+
+    if [ "$exit_code" -ne 0 ]; then
         local error_msg="$operation 失败 (错误码: $exit_code)"
         [ -n "$context" ] && error_msg="$error_msg - $context"
-        
         log_message "WARNING" "$error_msg"
         return 1
     fi
     return 0
 }
 
-# 安全执行命令 - 带错误检查的命令执行
-# 用法: safe_execute [-f] [-d 描述] 命令 [参数...]
-#   -d 描述    命令描述（默认 "执行命令"）
-#   -f         致命模式，失败时退出脚本
 safe_execute() {
     local description="执行命令"
     local fatal="false"
 
-    while [ $# -gt 0 ] && [ "${1:0:1}" = "-" ] 2>/dev/null; do
+    while [ $# -gt 0 ] && [ "${1:0:1}" = "-" ]; do
         case "$1" in
             -d) [ $# -lt 2 ] && { log_message "ERROR" "safe_execute: -d 需要参数"; return 1; }
                 description="$2"; shift 2 ;;
@@ -133,246 +110,235 @@ safe_execute() {
     fi
 
     log_message "DEBUG" "执行: $*"
-
-    local exit_code
     "$@"
-    exit_code=$?
+    local exit_code=$?
 
-    if [ $exit_code -ne 0 ]; then
+    if [ "$exit_code" -ne 0 ]; then
         if [ "$fatal" = "true" ]; then
             die "$description 失败" "$exit_code"
-        else
-            check_error "$exit_code" "$description"
-            return "$exit_code"
         fi
+        check_error "$exit_code" "$description"
+        return "$exit_code"
     fi
 
     log_message "DEBUG" "$description 成功"
     return 0
 }
 
-# 统一的日志函数（符合最佳实践）
 log_message() {
     local level="${1:-INFO}"
     local message="${2:-}"
-    local timestamp
-    
-    # 参数验证
-    [ -z "$message" ] && { echo "[错误] 消息内容不能为空" >&2; return 1; }
-    
-    # 安全：过滤敏感信息
-    if [[ "$message" =~ (ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+)[[:space:]]+[A-Za-z0-9+/]+=*|password.*=|token.*=|key.*= ]]; then
-        message="[敏感信息已过滤]"
+    [ -z "$message" ] && return 0
+
+    if [[ "$message" =~ (ssh-(ed25519|rsa)|ecdsa-sha2-nistp[0-9]+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)[[:space:]]+[A-Za-z0-9+/]+=* ]]; then
+        message="[SSH公钥内容已脱敏]"
     fi
-    
-    # 统一时间戳格式
+
+    local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # 级别标准化和输出
-    case "${level^^}" in
-        "ERROR"|"ERR")
-            echo "[错误] $message" >&2
-            ;;
-        "WARNING"|"WARN")
-            echo "[警告] $message"
-            ;;
-        "INFO")
-            echo "[信息] $message"
-            ;;
-        "DEBUG")
-            [ "${DEBUG:-}" = "1" ] && echo "[调试] $message"
-            ;;
-        "SUCCESS"|"OK")
-            echo "[成功] $message"
-            ;;
-        *)
-            echo "[日志] $message"
-            ;;
+
+    case "$level" in
+        ERROR|error|ERR|err)         level="ERROR";   echo "[错误] $message" >&2 ;;
+        WARNING|warning|WARN|warn)   level="WARNING"; echo "[警告] $message" ;;
+        INFO|info)                   level="INFO";    echo "[信息] $message" ;;
+        DEBUG|debug)                 level="DEBUG";   [ "${DEBUG:-}" = "1" ] && echo "[调试] $message" ;;
+        SUCCESS|success|OK|ok)       level="SUCCESS"; echo "[成功] $message" ;;
+        *)                                            echo "[日志] $message" ;;
     esac
-    
-    # 文件日志记录（如果定义了 LOG_FILE）
-    if [ -n "${LOG_FILE:-}" ]; then
-        # 安全创建日志目录
+
+    if [ "$LOG_ENABLED" = "true" ] && [ -n "${LOG_FILE:-}" ]; then
         local log_dir
         log_dir=$(dirname "$LOG_FILE")
         if [ ! -d "$log_dir" ]; then
             mkdir -p "$log_dir" 2>/dev/null || return 0
             chmod 750 "$log_dir" 2>/dev/null || true
         fi
-        
-        # 写入日志文件
         echo "[$timestamp][$level] $message" >> "$LOG_FILE" 2>/dev/null || true
         chmod 640 "$LOG_FILE" 2>/dev/null || true
-        
-        # 简单日志轮转（防止过大）
-        if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 10000 ]; then
-            tail -5000 "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "$LOG_FILE" 2>/dev/null
-        fi
-    fi
-    
-    # 系统日志记录（错误级别）
-    [ "${level^^}" = "ERROR" ] && command -v logger >/dev/null 2>&1 && logger -t "$(basename "$0" .sh)" -p user.err "$message" 2>/dev/null || true
-}
-
-# ==================== 系统检查函数 ====================
-
-# 检查系统兼容性
-check_compatibility() {
-    log_message "INFO" "检查系统兼容性..."
-    
-    # 检查操作系统类型
-    if [ -f /etc/debian_version ]; then
-        OS_TYPE="debian"
-        local raw_version=$(cat /etc/debian_version)
-
-        # 解析版本号：支持 "13.0", "trixie/sid", "bookworm/sid" 等格式
-        if [[ "$raw_version" =~ ^([0-9]+) ]]; then
-            OS_VERSION="${BASH_REMATCH[1]}"
-        elif [[ "$raw_version" =~ trixie ]]; then
-            OS_VERSION="13"
-        elif [[ "$raw_version" =~ bookworm ]]; then
-            OS_VERSION="12"
-        elif [[ "$raw_version" =~ bullseye ]]; then
-            OS_VERSION="11"
-        elif [[ "$raw_version" =~ buster ]]; then
-            OS_VERSION="10"
-        else
-            OS_VERSION="$raw_version"
-        fi
-
-        log_message "INFO" "检测到Debian/Ubuntu系统 (版本: $OS_VERSION, 原始: $raw_version)"
-
-        # 检查是否为已测试版本
-        if ! echo "$TESTED_DEBIAN_VERSIONS" | grep -qw "$OS_VERSION"; then
-            log_message "WARNING" "Debian $OS_VERSION 尚未经过完整测试，可能存在兼容性问题"
-        fi
-    elif [ -f /etc/redhat-release ]; then
-        OS_TYPE="redhat"
-        OS_VERSION=$(cat /etc/redhat-release)
-        log_message "INFO" "检测到RHEL/CentOS系统 (版本: $OS_VERSION)"
-    elif [ -f /etc/os-release ]; then
-        source /etc/os-release
-        OS_TYPE="$ID"
-        OS_VERSION="$VERSION_ID"
-        log_message "INFO" "检测到 $NAME 系统 (版本: $VERSION_ID)"
-    else
-        log_message "ERROR" "不支持的操作系统类型"
-        return 1
-    fi
-    
-    # 检查必要的命令是否存在
-    for cmd in ssh systemctl grep sed; do
-        if ! command -v $cmd &> /dev/null; then
-            log_message "ERROR" "缺少必要的命令: $cmd"
-            return 1
-        fi
-    done
-    
-    return 0
-}
-
-# ==================== 帮助和参数处理 ====================
-
-# 显示用法信息
-usage() {
-    echo "用法: $0 [选项]"
-    echo "选项:"
-    echo "  --help                    显示此帮助信息"
-    echo "  --disable_ssh_pwd         禁用SSH密码登录，仅允许SSH密钥认证"
-    echo "  --port PORT               设置SSH端口号 (例如: --port 2222)"
-    echo "  --ssh_key KEY             设置SSH公钥 (直接输入公钥文本)"
-    echo "  --region REGION           指定服务器所在地区，用于选择NTP服务器"
-    echo "                            (auto|cn|hk|tw|jp|kr|sg|us|eu|asia，默认: asia)"
-    echo "  --ntp_service SERVICE     指定NTP服务（auto|timesyncd|chrony，默认: auto）"
-    echo "  --version                 显示脚本版本"
-    echo "  --create_user USERNAME    创建管理员用户（必须提供SSH密钥）"
-    echo "  --enable_audit            启用安全审计（auditd和etckeeper）"
-    echo "  --install_docker          安装Docker并自动配置防火墙规则"
-    echo "  --disable_root_login      禁用root用户SSH登录（建议在创建管理员用户后使用）"
-    echo ""
-    echo "地区说明:"
-    echo "  auto - 自动检测地区（推荐）"
-    echo "  cn   - 中国大陆"
-    echo "  hk   - 香港"
-    echo "  tw   - 台湾"
-    echo "  jp   - 日本"
-    echo "  kr   - 韩国"
-    echo "  sg   - 新加坡"
-    echo "  us   - 美国"
-    echo "  eu   - 欧洲"
-    echo "  asia - 亚洲通用"
-    echo ""
-    echo "示例:"
-    echo "  $0 --disable_ssh_pwd --port 2222 --ssh_key \"ssh-rsa AAAA...\""
-    echo "  $0 --create_user devops --ssh_key \"ssh-rsa AAAA...\" --disable_ssh_pwd"
-    echo "  $0 --install_docker --region cn"
-    echo "  $0 --create_user admin --ssh_key \"ssh-rsa AAAA...\" --disable_root_login --disable_ssh_pwd"
-    echo ""
-    echo "支持的系统: Debian 11/12/13, Ubuntu 20.04+, RHEL/CentOS 7+"
-    echo "脚本版本: $SCRIPT_VERSION"
-}
-
-# 自动检测服务器地区
-detect_region() {
-    local country_code
-
-    # 尝试多个 API 以提高可靠性
-    country_code=$(curl -s --max-time 5 "http://ip-api.com/line/?fields=countryCode" 2>/dev/null)
-
-    # 如果第一个 API 失败，尝试备用
-    if [ -z "$country_code" ] || [ ${#country_code} -ne 2 ]; then
-        country_code=$(curl -s --max-time 5 "https://ifconfig.co/country-iso" 2>/dev/null)
     fi
 
-    # 映射国家代码到地区
-    case "$country_code" in
-        CN) echo "cn" ;;
-        HK) echo "hk" ;;
-        TW) echo "tw" ;;
-        JP) echo "jp" ;;
-        KR) echo "kr" ;;
-        SG) echo "sg" ;;
-        US) echo "us" ;;
-        GB|DE|FR|NL|IT|ES|PL|SE|NO|FI|DK|CH|AT|BE|IE|PT|CZ|RO|HU|GR)
-            echo "eu" ;;
-        *) echo "asia" ;;  # 默认 fallback
+    if [ "$level" = "ERROR" ] && command -v logger >/dev/null 2>&1; then
+        logger -t "setup" -p user.err "$message" 2>/dev/null || true
+    fi
+}
+
+# ==================== 校验与公共辅助函数 ====================
+
+is_valid_ssh_pubkey() {
+    local key="${1:-}"
+    [ -z "$key" ] && return 1
+    [[ "$key" == *$'\n'* ]] || [[ "$key" == *$'\r'* ]] && return 1
+    [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)[[:space:]]+[A-Za-z0-9+/]+={0,3}([[:space:]].*)?$ ]]
+}
+
+# 检查 authorized_keys 是否包含真正可用的密钥（排除 cloud-init 禁止 root 登录的 forced-command 占位行）
+file_has_usable_ssh_key() {
+    local keyfile="$1"
+    sudo test -f "$keyfile" || return 1
+    sudo awk '
+        /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+        /command="[^"]*(Please login as|exit[[:space:]]+[0-9]+)/ { next }
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)$/ &&
+                    (i + 1) <= NF && $(i + 1) ~ /^[A-Za-z0-9+\/]+=*$/) {
+                    found = 1
+                    exit 0
+                }
+            }
+        }
+        END { exit(found ? 0 : 1) }
+    ' "$keyfile" 2>/dev/null
+}
+
+is_reserved_username() {
+    local user="$1"
+    case "$user" in
+        root|daemon|bin|sys|sync|games|man|lp|mail|news|uucp|proxy|www-data|backup|list|irc|gnats|nobody|systemd-*|messagebus|sshd|_apt|chrony|syslog|uuidd|tcpdump|tss|landscape|pollinate|ubuntu-advantage)
+            return 0
+            ;;
     esac
+    if id "$user" &>/dev/null; then
+        local uid
+        uid=$(id -u "$user" 2>/dev/null || echo 0)
+        if [ "$uid" -lt 1000 ]; then
+            return 0
+        fi
+    fi
+    return 1
 }
 
-# 解析参数
+get_sshd_bin() {
+    if [ -x /usr/sbin/sshd ]; then
+        echo "/usr/sbin/sshd"
+    elif command -v sshd >/dev/null 2>&1; then
+        command -v sshd
+    else
+        echo ""
+    fi
+}
+
+ensure_sshd_run_dir() {
+    if [ ! -d /run/sshd ]; then
+        sudo mkdir -p /run/sshd
+        sudo chmod 0755 /run/sshd
+    fi
+}
+
+read_sshd_effective() {
+    local sshd_bin
+    sshd_bin=$(get_sshd_bin)
+    [ -z "$sshd_bin" ] && return 0
+    ensure_sshd_run_dir
+    sudo "$sshd_bin" -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null \
+        || sudo "$sshd_bin" -T 2>/dev/null \
+        || true
+}
+
+get_effective_ssh_port() {
+    if [ -n "$SSH_PORT" ]; then
+        echo "$SSH_PORT"
+        return 0
+    fi
+    local cfg port=""
+    cfg=$(read_sshd_effective)
+    if [ -n "$cfg" ]; then
+        port=$(echo "$cfg" | awk '/^port / {print $2; exit}')
+    fi
+    if [ -z "$port" ] && [ -f "$SSH_SECURITY_CONF" ]; then
+        port=$(awk 'tolower($1) == "port" {print $2; exit}' "$SSH_SECURITY_CONF" 2>/dev/null)
+    fi
+    if [ -z "$port" ] && [ -f "$SSH_CONFIG" ]; then
+        port=$(awk 'tolower($1) == "port" {print $2; exit}' "$SSH_CONFIG" 2>/dev/null)
+    fi
+    echo "${port:-22}"
+}
+
+# 管道执行（stdin 非 TTY）时启用非交互防卡死，终端直连时保留原有交互能力
+run_apt_get() {
+    if [ -t 0 ]; then
+        sudo apt-get "$@"
+    else
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold" \
+            "$@"
+    fi
+}
+
+# ==================== 帮助与参数解析 ====================
+
+usage() {
+    cat << EOF
+用法: $0 [选项]
+
+选项:
+  --help                    显示此帮助信息
+  --version                 显示脚本版本
+  --disable_ssh_pwd         禁用 SSH 密码登录，仅允许密钥认证
+  --port PORT               设置 SSH 端口号（22 或 ${MIN_PORT}-${MAX_PORT}）
+  --ssh_key KEY             设置 SSH 公钥（支持 ed25519 / rsa / ecdsa / sk-*）
+  --create_user USERNAME    创建具备免密 sudo 权限的管理员用户（必须提供 --ssh_key）
+  --disable_root_login      禁用 root 用户 SSH 登录（需存在或新建可用管理员用户）
+  --region REGION           服务器地区，用于选择 NTP 源
+                            (auto|cn|hk|tw|jp|kr|sg|us|eu|asia，默认: asia)
+  --ntp_service SERVICE     NTP 服务（chrony|timesyncd|auto，默认: chrony）
+
+示例:
+  $0 --disable_ssh_pwd --port 2222 --ssh_key "ssh-ed25519 AAAA..." --region hk
+  $0 --disable_ssh_pwd --ssh_key "ssh-ed25519 AAAA..." --region jp
+  $0 --disable_ssh_pwd --port 2222 --ssh_key "ssh-ed25519 AAAA..." --create_user devops --disable_root_login --region sg
+
+支持的系统: Debian 11/12/13, Ubuntu 20.04+
+脚本版本: $SCRIPT_VERSION
+EOF
+}
+
 parse_args() {
-    while [[ "$#" -gt 0 ]]; do
-        case $1 in
-            --help) usage; exit 0 ;;
-            --disable_ssh_pwd) DISABLE_SSH_PASSWD="true" ;;
-            --port) 
-                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            --version)
+                echo "脚本版本: $SCRIPT_VERSION"
+                exit 0
+                ;;
+            --disable_ssh_pwd)
+                DISABLE_SSH_PASSWD="true"
+                ;;
+            --port)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的端口号参数"
                     exit 1
                 fi
-                if ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -lt "$MIN_PORT" ] || [ "$2" -gt "$MAX_PORT" ]; then
-                    log_message "ERROR" "无效的端口号: $2. 端口号应在 $MIN_PORT-$MAX_PORT 范围内"
+                if ! [[ "$2" =~ ^[1-9][0-9]*$ ]] || { [ "$2" -ne 22 ] && { [ "$2" -lt "$MIN_PORT" ] || [ "$2" -gt "$MAX_PORT" ]; }; }; then
+                    log_message "ERROR" "无效的端口号: $2（允许 22 或 ${MIN_PORT}-${MAX_PORT}）"
                     exit 1
                 fi
-                SSH_PORT="$2"; 
-                shift ;;
-            --ssh_key) 
-                if [ -z "$2" ] || [[ "$2" == --* ]]; then
-                    log_message "ERROR" "选项 $1 需要一个有效的SSH公钥参数"
+                SSH_PORT="$2"
+                shift
+                ;;
+            --ssh_key)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ] || [[ "$2" == --* ]]; then
+                    log_message "ERROR" "选项 $1 需要一个有效的 SSH 公钥参数"
                     exit 1
                 fi
-                SSH_KEY="$2"; shift ;;
+                if ! is_valid_ssh_pubkey "$2"; then
+                    log_message "ERROR" "无效的 SSH 公钥格式（需为单行 ssh-ed25519 / ssh-rsa / ecdsa / sk-* 公钥）"
+                    exit 1
+                fi
+                SSH_KEY="$2"
+                shift
+                ;;
             --region)
-                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                if [ $# -lt 2 ] || [ -z "${2:-}" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的地区参数"
                     exit 1
                 fi
                 case "$2" in
-                    auto)
-                        SERVER_REGION=$(detect_region)
-                        log_message "INFO" "自动检测地区: $SERVER_REGION"
-                        ;;
-                    cn|hk|tw|jp|kr|sg|us|eu|asia)
+                    auto|cn|hk|tw|jp|kr|sg|us|eu|asia)
                         SERVER_REGION="$2"
                         ;;
                     *)
@@ -380,1078 +346,761 @@ parse_args() {
                         exit 1
                         ;;
                 esac
-                shift ;;
+                shift
+                ;;
             --ntp_service)
-                if [ -z "$2" ] || [[ "$2" == --* ]]; then
-                    log_message "ERROR" "选项 $1 需要一个有效的服务参数"
+                if [ $# -lt 2 ] || [ -z "${2:-}" ] || [[ "$2" == --* ]]; then
+                    log_message "ERROR" "选项 $1 需要一个有效的 NTP 服务参数"
                     exit 1
                 fi
                 case "$2" in
-                    auto|timesyncd|chrony)
-                        NTP_SERVICE="$2"
+                    auto|chrony)
+                        NTP_SERVICE="chrony"
+                        ;;
+                    timesyncd)
+                        NTP_SERVICE="timesyncd"
                         ;;
                     *)
-                        log_message "ERROR" "无效的NTP服务参数: $2"
+                        log_message "ERROR" "无效的 NTP 服务参数: $2（可选: chrony|timesyncd|auto）"
                         exit 1
                         ;;
                 esac
-                shift ;;
-            --version) echo "脚本版本: $SCRIPT_VERSION"; exit 0 ;;
+                shift
+                ;;
             --create_user)
-                if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                if [ $# -lt 2 ] || [ -z "${2:-}" ] || [[ "$2" == --* ]]; then
                     log_message "ERROR" "选项 $1 需要一个有效的用户名参数"
+                    exit 1
+                fi
+                if ! [[ "$2" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+                    log_message "ERROR" "无效的用户名格式: $2"
+                    exit 1
+                fi
+                if is_reserved_username "$2"; then
+                    log_message "ERROR" "禁止使用系统保留账户名: $2"
                     exit 1
                 fi
                 CREATE_DEVOPS_USER="true"
                 SUDO_USERNAME="$2"
-                if ! [[ "$2" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-                    log_message "ERROR" "无效的用户名: $2"
-                    exit 1
-                fi
-                shift ;;
-            --enable_audit)
-                ENABLE_SECURITY_AUDIT="true" ;;
-            --install_docker)
-                INSTALL_DOCKER="true" ;;
+                shift
+                ;;
             --disable_root_login)
-                DISABLE_ROOT_LOGIN="true" ;;
-            *) echo "未知选项: $1"; usage; exit 1 ;;
+                DISABLE_ROOT_LOGIN="true"
+                ;;
+            *)
+                log_message "ERROR" "未知选项: $1"
+                usage
+                exit 1
+                ;;
         esac
         shift
     done
-    
-    # 验证创建用户时必须提供SSH密钥
-    if [ "$CREATE_DEVOPS_USER" = "true" ]; then
-        if [ -z "$SSH_KEY" ]; then
-            log_message "ERROR" "创建管理员用户时必须提供SSH密钥"
-            exit 1
-        fi
+
+    if [ "$CREATE_DEVOPS_USER" = "true" ] && [ -z "$SSH_KEY" ]; then
+        log_message "ERROR" "创建管理员用户时必须通过 --ssh_key 提供 SSH 公钥"
+        exit 1
     fi
-    
-    log_message "INFO" "脚本开始执行，日志文件: $LOG_FILE"
 }
 
-# ==================== APT包管理函数 ====================
+# ==================== 系统检查与 APT 包管理 ====================
 
-# 检查软件包是否可用
-check_package_available() {
-    local package="$1"
-    apt-cache show "$package" >/dev/null 2>&1
-}
-
-# 获取兼容的软件包名（处理不同Debian版本的包名差异）
-get_compatible_package() {
-    local package="$1"
-    case "$package" in
-        netcat-openbsd)
-            # Debian 13 仍使用 netcat-openbsd，但添加备选
-            if check_package_available "netcat-openbsd"; then
-                echo "netcat-openbsd"
-            elif check_package_available "netcat"; then
-                echo "netcat"
-            else
-                log_message "WARNING" "netcat 相关包不可用"
-                echo ""
-            fi
-            ;;
-        *)
-            echo "$package"
-            ;;
-    esac
-}
-
-# 解析并获取兼容的软件包列表
-get_compatible_packages() {
-    local packages="$1"
-    local result=""
-    for pkg in $packages; do
-        local compatible_pkg=$(get_compatible_package "$pkg")
-        if [ -n "$compatible_pkg" ]; then
-            result="$result $compatible_pkg"
-        fi
-    done
-    echo "$result" | xargs  # 去除多余空格
-}
-
-# 带重试机制的apt安装函数
-apt_install_with_retry() {
-    local packages="$1"
-    local max_retries=${2:-3}
-    local retry_delay=${3:-30}
-    local retry_count=0
-    
-    [ "$OS_TYPE" != "debian" ] && return 0
-    
-    while [ $retry_count -lt $max_retries ]; do
-        # 等待apt锁释放
-        if ! wait_for_apt_locks; then
-            log_message "ERROR" "等待apt锁失败，重试 $((retry_count + 1))/$max_retries"
-            ((retry_count++))
-            if [ $retry_count -lt $max_retries ]; then
-                sleep $retry_delay
-                continue
-            else
-                return 1
-            fi
-        fi
-        
-        # 尝试安装包
-        log_message "INFO" "尝试安装包: $packages (第 $((retry_count + 1)) 次)"
-        if sudo apt-get install -y $packages; then
-            log_message "INFO" "包安装成功: $packages"
-            return 0
-        else
-            local exit_code=$?
-            log_message "WARNING" "包安装失败: $packages (错误码: $exit_code)"
-            ((retry_count++))
-            
-            if [ $retry_count -lt $max_retries ]; then
-                log_message "INFO" "等待 $retry_delay 秒后重试..."
-                sleep $retry_delay
-                
-                # 尝试修复损坏的包
-                log_message "INFO" "尝试修复包管理器状态..."
-                sudo dpkg --configure -a 2>/dev/null || true
-                sudo apt-get -f install -y 2>/dev/null || true
-            else
-                log_message "ERROR" "包安装失败，已重试 $max_retries 次: $packages"
-                return $exit_code
-            fi
-        fi
-    done
-    
-    return 1
-}
-
-
-
-# 通过隔离的Debian官方源安装chrony，避免主镜像CDN边缘节点pool同步延迟导致404
-try_install_chrony_via_official_mirror() {
-    local tmp_dir="$APT_FALLBACK_TMP_DIR"
-    local tmp_list="$tmp_dir/official.list"
-    local tmp_source_parts="$tmp_dir/sourceparts"
-    local tmp_lists="$tmp_dir/lists"
-    local codename=""
-    local rc=1
-
-    log_message "INFO" "通过 deb.debian.org 临时源安装 chrony..."
-
-    if command -v lsb_release &>/dev/null; then
-        codename=$(lsb_release -cs 2>/dev/null || true)
+check_privileges() {
+    if [ "$(id -u)" -eq 0 ]; then
+        return 0
     fi
-    if [ -z "$codename" ] && [ -f /etc/os-release ]; then
-        codename=$(awk -F= '/^VERSION_CODENAME=/{gsub(/"/,"",$2); print $2}' /etc/os-release)
-    fi
-    if [ -z "$codename" ]; then
-        log_message "WARNING" "无法检测Debian codename，跳过官方源fallback"
+    if ! command -v sudo >/dev/null 2>&1; then
+        log_message "ERROR" "当前非 root 用户且系统未安装 sudo，请以 root 身份运行"
         return 1
     fi
-
-    case "$codename" in
-        bullseye|bookworm|trixie)
-            ;;
-        *)
-            log_message "WARNING" "不支持的Debian codename: $codename，跳过官方源fallback"
-            return 1
-            ;;
-    esac
-
-    sudo rm -rf "$tmp_dir" 2>/dev/null || true
-    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
-    if ! sudo mkdir -p "$tmp_source_parts" "$tmp_lists/partial"; then
-        log_message "WARNING" "创建官方源fallback临时目录失败"
+    if ! sudo -v; then
+        log_message "ERROR" "当前用户无可用的 sudo 权限"
         return 1
     fi
-
-    sudo tee "$tmp_list" > /dev/null << EOF
-# Temporary fallback source added by setup.sh
-# Removed automatically after chrony installation completes
-deb https://deb.debian.org/debian $codename main
-deb https://deb.debian.org/debian-security ${codename}-security main
-deb https://deb.debian.org/debian ${codename}-updates main
-EOF
-
-    local apt_opts=(
-        -o "Dir::Etc::SourceList=$tmp_list"
-        -o "Dir::Etc::SourceParts=$tmp_source_parts"
-        -o "Dir::State::Lists=$tmp_lists"
-    )
-
-    if sudo apt-get "${apt_opts[@]}" update -y; then
-        if sudo apt-get "${apt_opts[@]}" install -y chrony; then
-            log_message "INFO" "通过官方源成功安装 chrony"
-            rc=0
-        else
-            log_message "WARNING" "通过官方源安装 chrony 仍失败"
-        fi
-    else
-        log_message "WARNING" "官方源索引刷新失败"
-    fi
-
-    sudo rm -rf "$tmp_dir" 2>/dev/null || true
-    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
-
-    return $rc
-}
-
-# 等待apt锁并处理特殊情况（合并版本）
-wait_for_apt_locks() {
-    [ "$OS_TYPE" != "debian" ] && return 0
-    
-    local max_wait=900  # 15分钟
-    local waited=0
-    local check_interval=5
-    local first_wait=true
-    
-    log_message "INFO" "检查包管理器状态..."
-    
-    # 检查磁盘空间
-    local available_space=$(df /var/cache/apt/archives | awk 'NR==2 {print $4}')
-    if [ "$available_space" -lt 1000000 ]; then  # 少于1GB
-        log_message "WARNING" "磁盘空间不足 (可用: ${available_space}KB)，清理apt缓存..."
-        sudo apt-get clean || true
-    fi
-    
-    # 检查包数据库完整性
-    if ! sudo dpkg --audit >/dev/null 2>&1; then
-        log_message "WARNING" "发现包数据库问题，尝试修复..."
-        sudo dpkg --configure -a || true
-    fi
-    
-    # 主锁等待循环
-    while true; do
-        local locked=false
-        local lock_sources=()
-        
-        # 检查所有锁文件
-        if fuser /var/lib/dpkg/lock* >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("dpkg-lock")
-        fi
-        
-        if fuser /var/lib/apt/lists/lock* >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("apt-lists-lock")
-        fi
-        
-        if fuser /var/cache/apt/archives/lock* >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("apt-cache-lock")
-        fi
-        
-        if [ -f /var/lib/dpkg/lock-frontend ] && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("dpkg-frontend-lock")
-        fi
-        
-        # 检查关键进程
-        if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("apt-processes")
-        fi
-        
-        # 特殊处理unattended-upgrades
-        if pgrep -f "/usr/bin/unattended-upgrade$" >/dev/null 2>&1 || pgrep -f "unattended-upgrade.*--dry-run" >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("unattended-upgrades")
-            
-            # 首次检测到时显示特殊信息
-            if [ "$first_wait" = "true" ]; then
-                log_message "INFO" "检测到unattended-upgrades正在运行，等待其完成..."
-            fi
-        fi
-        
-        # 检查cloud-init
-        if pgrep -f "cloud-init.*apt" >/dev/null 2>&1; then
-            locked=true
-            lock_sources+=("cloud-init-apt")
-        fi
-        
-        # 检查僵尸dpkg进程
-        if pgrep -x "dpkg" >/dev/null 2>&1; then
-            sleep 5  # 给进程一些时间自然结束
-            if pgrep -x "dpkg" >/dev/null 2>&1; then
-                log_message "WARNING" "发现可能的僵尸dpkg进程，尝试修复..."
-                sudo dpkg --configure -a 2>/dev/null || true
-                locked=true
-                lock_sources+=("zombie-dpkg")
-            fi
-        fi
-        
-        # 如果没有锁，退出循环
-        if [ "$locked" = "false" ]; then
-            break
-        fi
-        
-        # 第一次检测到锁时显示信息
-        if [ "$first_wait" = "true" ]; then
-            log_message "INFO" "检测到包管理器锁定源: ${lock_sources[*]}"
-            first_wait=false
-        fi
-        
-        # 超时检查
-        if [ $waited -ge $max_wait ]; then
-            log_message "ERROR" "等待apt锁超时 ($max_wait秒)，当前锁定源: ${lock_sources[*]}"
-            return 1
-        fi
-        
-        # 进度显示
-        if [ $((waited % 60)) -eq 0 ] || [ $waited -lt 60 ]; then
-            log_message "INFO" "等待apt锁释放... ($waited/$max_wait秒) - 锁定源: ${lock_sources[*]}"
-        fi
-        
-        sleep $check_interval
-        ((waited+=$check_interval))
-    done
-    
-    if [ $waited -gt 0 ]; then
-        log_message "INFO" "apt锁已释放，等待了 $waited 秒"
-        sleep 3  # 确保锁完全释放
-    fi
-    
     return 0
 }
 
-# ==================== 系统初始化函数 ====================
+check_compatibility() {
+    log_message "INFO" "检查系统兼容性..."
 
-# 等待cloud-init完成
-wait_for_cloud_init() {
-    if command -v cloud-init &> /dev/null; then
-        log_message "INFO" "等待cloud-init完成..."
-        cloud-init status --wait || true
+    if [ ! -f /etc/os-release ]; then
+        log_message "ERROR" "未找到 /etc/os-release，不支持的操作系统"
+        return 1
     fi
-}
 
-# 修复sudo问题
-fix_sudo_issue() {
-    # 确保sudo已安装
-    if ! command -v sudo &> /dev/null; then
-        log_message "INFO" "安装sudo..."
-        if [ "$OS_TYPE" = "debian" ]; then
-            if ! wait_for_apt_locks; then
-                log_message "ERROR" "等待apt锁失败，无法安装sudo"
+    local raw_version=""
+    eval "$(
+        . /etc/os-release
+        printf 'OS_DISTRO=%q\nraw_version=%q\nOS_CODENAME=%q\nOS_PRETTY=%q\n' \
+            "${ID:-}" "${VERSION_ID:-}" "${VERSION_CODENAME:-}" "${PRETTY_NAME:-}"
+    )"
+
+    case "$OS_DISTRO" in
+        debian)
+            if [[ "$raw_version" =~ ^([0-9]+) ]]; then
+                OS_VERSION="${BASH_REMATCH[1]}"
+            elif [ -f /etc/debian_version ]; then
+                local deb_ver
+                deb_ver=$(cat /etc/debian_version)
+                case "$deb_ver" in
+                    *trixie*)   OS_VERSION="13"; [ -z "$OS_CODENAME" ] && OS_CODENAME="trixie" ;;
+                    *bookworm*) OS_VERSION="12"; [ -z "$OS_CODENAME" ] && OS_CODENAME="bookworm" ;;
+                    *bullseye*) OS_VERSION="11"; [ -z "$OS_CODENAME" ] && OS_CODENAME="bullseye" ;;
+                    *buster*)   OS_VERSION="10" ;;
+                    *)          OS_VERSION="$deb_ver" ;;
+                esac
+            else
+                OS_VERSION="$raw_version"
+            fi
+
+            if [[ "$OS_VERSION" =~ ^[0-9]+$ ]] && [ "$OS_VERSION" -lt 11 ]; then
+                log_message "ERROR" "不支持 Debian ${OS_VERSION}（最低要求 Debian 11）"
                 return 1
             fi
-            apt-get update -y && apt-get install -y sudo
-        else
-            yum install -y sudo || dnf install -y sudo
+            log_message "INFO" "检测到 Debian 系统 (${OS_PRETTY:-Debian $OS_VERSION})"
+            if ! echo "$TESTED_DEBIAN_VERSIONS" | grep -qw "$OS_VERSION"; then
+                log_message "WARNING" "Debian $OS_VERSION 尚未在完整测试列表中，将继续执行"
+            fi
+            ;;
+        ubuntu)
+            OS_VERSION="$raw_version"
+            local ubuntu_major="${raw_version%%.*}"
+            if ! [[ "$ubuntu_major" =~ ^[0-9]+$ ]] || [ "$ubuntu_major" -lt 20 ]; then
+                log_message "ERROR" "不支持 Ubuntu ${raw_version}（最低要求 Ubuntu 20.04）"
+                return 1
+            fi
+            log_message "INFO" "检测到 Ubuntu 系统 (${OS_PRETTY:-Ubuntu $OS_VERSION})"
+            ;;
+        *)
+            log_message "ERROR" "不支持的发行版: ${OS_PRETTY:-$OS_DISTRO}（仅支持 Debian 11+ 和 Ubuntu 20.04+）"
+            return 1
+            ;;
+    esac
+
+    for cmd in systemctl grep sed awk ss; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            log_message "ERROR" "缺少必要的系统命令: $cmd"
+            return 1
         fi
+    done
+
+    if [ -z "$(get_sshd_bin)" ]; then
+        log_message "ERROR" "未检测到 OpenSSH 服务端 (sshd)"
+        return 1
     fi
-    
-    # 修复hostname解析问题
-    local current_hostname=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
-    if [ -n "$current_hostname" ] && ! grep -wq "$current_hostname" /etc/hosts; then
-        log_message "INFO" "将主机名 $current_hostname 添加到 /etc/hosts..."
-        echo "127.0.1.1   $current_hostname" >> /etc/hosts
+
+    return 0
+}
+
+wait_for_cloud_init() {
+    if command -v cloud-init >/dev/null 2>&1; then
+        log_message "INFO" "等待 cloud-init 完成..."
+        cloud-init status --wait >/dev/null 2>&1 || true
     fi
 }
 
-# 更新系统并安装基础软件（完整apt操作流程）
-update_system_install_dependencies() {
-    log_message "INFO" "更新系统并安装必要软件..."
-    
-    if [ "$OS_TYPE" = "debian" ]; then
-        # 阶段1：等待apt锁并确保环境就绪
-        log_message "DEBUG" "系统更新 - 准备阶段"
-        if ! wait_for_apt_locks; then
-            log_message "ERROR" "无法获取apt锁，系统可能正在进行其他安装操作"
-            return 1
-        fi
-        
-        # 阶段2：执行系统更新（允许部分失败但要记录）
-        log_message "DEBUG" "系统更新 - 执行系统更新"
-        
-        # 更新软件包列表（关键步骤）
-        if ! safe_execute -d "更新软件包列表" sudo apt-get update -y; then
-            log_message "ERROR" "软件包列表更新失败，可能影响后续安装"
-            return 1
-        fi
-        
-        # 系统升级（允许失败但记录）
-        safe_execute -d "系统升级" sudo apt-get upgrade -y || \
-            check_error $? "系统升级" "可能有包冲突或网络问题"
-        
-        safe_execute -d "完整系统升级" sudo apt-get full-upgrade -y || \
-            check_error $? "完整系统升级" "某些包可能需要手动处理"
-        
-        # 清理操作（失败不影响主流程）
-        safe_execute -d "清理软件包缓存" sudo apt-get autoclean -y || \
-            log_message "WARNING" "软件包缓存清理失败"
-        
-        safe_execute -d "移除不需要的软件包" sudo apt-get autoremove -y || \
-            log_message "WARNING" "自动移除软件包失败"
-        
-        # 阶段3：安装基础软件包（关键功能，失败则退出）
-        log_message "DEBUG" "系统更新 - 安装基础软件包"
-        log_message "INFO" "安装基础软件包..."
-        
-        if ! apt_install_with_retry "wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd"; then
-            log_message "ERROR" "基础软件包安装失败"
-            log_message "ERROR" "这些是系统运行的必要软件，无法继续"
-            return 1
-        fi
-        
-        # 阶段4：安装可选软件包（失败不影响主流程）
-        log_message "DEBUG" "系统更新 - 安装可选软件包"
-        log_message "INFO" "安装iperf3..."
+wait_for_apt_locks() {
+    local max_wait=900
+    local waited=0
+    local check_interval=5
+    local first_wait="true"
 
-        if ! apt_install_with_retry "iperf3"; then
-            check_error $? "iperf3安装" "网络测试工具，非必需"
-            log_message "WARNING" "iperf3安装失败，但不影响主要功能"
-        fi
-        
-    else
-        # RedHat系列处理（增强错误处理）
-        log_message "DEBUG" "系统更新 - RedHat系列系统"
-        
-        local pkg_manager="yum"
-        command -v dnf &> /dev/null && pkg_manager="dnf"
-        
-        log_message "INFO" "使用包管理器: $pkg_manager"
-        
-        # 系统更新
-        if ! safe_execute -d "RedHat系统更新" sudo "$pkg_manager" update -y; then
-            log_message "ERROR" "RedHat系统更新失败"
-            return 1
-        fi
-        
-        # 软件包安装
-        if ! safe_execute -d "安装基础软件包" sudo "$pkg_manager" install -y wget curl vim unzip zip fail2ban rsyslog iptables iperf3 mtr nc; then
-            log_message "ERROR" "RedHat基础软件包安装失败"
-            return 1
+    if [ -d /var/cache/apt/archives ]; then
+        local available_space
+        available_space=$(df -Pk /var/cache/apt/archives 2>/dev/null | awk 'NR==2 {print $4}')
+        if [[ "${available_space:-0}" =~ ^[0-9]+$ ]] && [ "$available_space" -gt 0 ] && [ "$available_space" -lt 1000000 ]; then
+            log_message "WARNING" "磁盘可用空间不足 1GB (${available_space}KB)，清理 apt 缓存..."
+            sudo apt-get clean 2>/dev/null || true
         fi
     fi
-    
-    # 验证关键软件包是否安装成功
-    log_message "DEBUG" "系统更新 - 验证安装结果"
+
+    while true; do
+        local locked="false"
+        local lock_sources=()
+
+        if command -v fuser >/dev/null 2>&1; then
+            if sudo fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+                locked="true"
+                lock_sources+=("dpkg-lock")
+            fi
+            if sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+                locked="true"
+                lock_sources+=("apt-lists-lock")
+            fi
+            if sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+                locked="true"
+                lock_sources+=("apt-cache-lock")
+            fi
+        fi
+
+        if pgrep -x "apt|apt-get|dpkg|aptitude" >/dev/null 2>&1; then
+            locked="true"
+            lock_sources+=("apt-processes")
+        fi
+
+        if pgrep -f "/usr/bin/unattended-upgrade" >/dev/null 2>&1; then
+            locked="true"
+            lock_sources+=("unattended-upgrades")
+        fi
+
+        if pgrep -f "cloud-init.*apt" >/dev/null 2>&1; then
+            locked="true"
+            lock_sources+=("cloud-init-apt")
+        fi
+
+        if [ "$locked" = "false" ]; then
+            break
+        fi
+
+        if [ "$first_wait" = "true" ]; then
+            log_message "INFO" "检测到包管理器正在被占用 (${lock_sources[*]})，等待释放..."
+            first_wait="false"
+        elif [ $((waited % 60)) -eq 0 ]; then
+            log_message "INFO" "继续等待 apt 锁释放... ($waited/${max_wait}秒) - 占用源: ${lock_sources[*]}"
+        fi
+
+        if [ "$waited" -ge "$max_wait" ]; then
+            log_message "ERROR" "等待 apt 锁超时 (${max_wait}秒)，当前占用源: ${lock_sources[*]}"
+            return 1
+        fi
+
+        sleep "$check_interval"
+        waited=$((waited + check_interval))
+    done
+
+    if [ "$waited" -gt 0 ]; then
+        log_message "INFO" "apt 锁已释放（等待 ${waited} 秒）"
+        sleep 2
+    fi
+
+    # 锁释放后再检查 dpkg 状态，避免与正在运行的 apt/dpkg 并发冲突
+    if ! sudo dpkg --audit >/dev/null 2>&1; then
+        log_message "WARNING" "发现未完成配置的软件包，正在执行 dpkg --configure -a..."
+        sudo dpkg --configure -a || true
+    fi
+
+    return 0
+}
+
+fix_sudo_and_hosts() {
+    if ! command -v sudo >/dev/null 2>&1; then
+        log_message "INFO" "安装 sudo..."
+        if ! wait_for_apt_locks; then
+            log_message "ERROR" "等待 apt 锁失败，无法安装 sudo"
+            return 1
+        fi
+        if [ -t 0 ]; then
+            apt-get update -y && apt-get install -y sudo
+        else
+            DEBIAN_FRONTEND=noninteractive apt-get update -y && \
+                DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+        fi || return 1
+    fi
+
+    local current_hostname
+    current_hostname=$(hostname | tr -d '\n' | sed 's/[^a-zA-Z0-9.-]//g')
+    if [ -n "$current_hostname" ] && ! grep -wq "$current_hostname" /etc/hosts 2>/dev/null; then
+        log_message "INFO" "将主机名 $current_hostname 添加到 /etc/hosts..."
+        echo "127.0.1.1   $current_hostname" | sudo tee -a /etc/hosts >/dev/null
+    fi
+    return 0
+}
+
+apt_install_with_retry() {
+    local packages="$1"
+    local max_retries="${2:-3}"
+    local retry_delay="${3:-15}"
+    local retry_count=0
+
+    while [ "$retry_count" -lt "$max_retries" ]; do
+        if ! wait_for_apt_locks; then
+            retry_count=$((retry_count + 1))
+            if [ "$retry_count" -lt "$max_retries" ]; then
+                sleep "$retry_delay"
+                continue
+            fi
+            return 1
+        fi
+
+        log_message "INFO" "安装软件包: $packages (尝试 $((retry_count + 1))/$max_retries)"
+        # shellcheck disable=SC2086
+        if run_apt_get install -y $packages; then
+            return 0
+        fi
+
+        local exit_code=$?
+        retry_count=$((retry_count + 1))
+        log_message "WARNING" "软件包安装失败 (退出码: $exit_code): $packages"
+
+        if [ "$retry_count" -lt "$max_retries" ]; then
+            log_message "INFO" "等待 ${retry_delay} 秒后重试..."
+            sleep "$retry_delay"
+            sudo dpkg --configure -a 2>/dev/null || true
+            run_apt_get -f install -y 2>/dev/null || true
+        else
+            log_message "ERROR" "软件包安装失败，已重试 $max_retries 次: $packages"
+            return "$exit_code"
+        fi
+    done
+
+    return 1
+}
+
+update_system_install_dependencies() {
+    log_message "INFO" "更新系统并安装基础软件..."
+
+    if ! wait_for_apt_locks; then
+        log_message "ERROR" "无法获取 apt 锁"
+        return 1
+    fi
+
+    if ! safe_execute -d "更新软件包索引" run_apt_get update -y; then
+        log_message "ERROR" "apt-get update 失败，无法继续安装基础软件"
+        return 1
+    fi
+
+    safe_execute -d "系统软件包升级" run_apt_get upgrade -y || true
+    safe_execute -d "系统完整升级" run_apt_get full-upgrade -y || true
+    safe_execute -d "清理过期缓存包" run_apt_get autoclean -y || true
+    safe_execute -d "移除无用依赖包" run_apt_get autoremove -y || true
+
+    local base_packages="wget curl vim unzip zip fail2ban rsyslog iptables mtr netcat-openbsd"
+    if ! apt_install_with_retry "$base_packages"; then
+        log_message "ERROR" "基础软件包安装失败"
+        return 1
+    fi
+
+    if ! apt_install_with_retry "iperf3" 2 10; then
+        log_message "WARNING" "可选工具 iperf3 安装失败，不影响核心功能"
+    fi
+
     local missing_packages=""
-    
-    # 检查有直接命令的软件包
     for pkg in wget curl vim; do
         if ! command -v "$pkg" >/dev/null 2>&1; then
             missing_packages="$missing_packages $pkg"
         fi
     done
-    
-    # 特殊检查fail2ban（它的命令是fail2ban-client）
-    if ! command -v fail2ban-client >/dev/null 2>&1 && ! systemctl is-enabled fail2ban >/dev/null 2>&1; then
+    if ! command -v fail2ban-client >/dev/null 2>&1; then
         missing_packages="$missing_packages fail2ban"
     fi
-    
     if [ -n "$missing_packages" ]; then
-        log_message "WARNING" "以下关键软件包可能安装失败:$missing_packages"
-        log_message "WARNING" "建议手动检查和安装这些软件包"
+        log_message "WARNING" "以下软件包未检测到可执行命令:$missing_packages"
     fi
-    
-    log_message "SUCCESS" "系统更新和软件安装完成"
+
+    log_message "SUCCESS" "系统更新和基础软件安装完成"
     return 0
 }
 
-# ==================== 用户管理函数 ====================
+# ==================== 用户与密钥配置 ====================
 
-# 配置SSH密钥
 configure_ssh_keys() {
     [ -z "$SSH_KEY" ] && return 0
-    
-    # 验证SSH公钥格式
-    if ! echo "$SSH_KEY" | grep -qE '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/]+=*'; then
-        log_message "ERROR" "无效的SSH公钥格式"
-        return 1
-    fi
-    
-    local ssh_dir="$HOME/.ssh"
+
+    local current_user current_group target_home
+    current_user=$(id -un)
+    current_group=$(id -gn)
+    target_home=$(getent passwd "$current_user" 2>/dev/null | cut -d: -f6)
+    target_home="${target_home:-$HOME}"
+
+    local ssh_dir="$target_home/.ssh"
     local auth_keys="$ssh_dir/authorized_keys"
-    
-    # 创建SSH目录
-    [ ! -d "$ssh_dir" ] && { mkdir -p "$ssh_dir" && chmod 700 "$ssh_dir"; }
-    [ ! -f "$auth_keys" ] && { touch "$auth_keys" && chmod 600 "$auth_keys"; }
-    
-    # 添加SSH公钥
-    if ! grep -qF "$SSH_KEY" "$auth_keys"; then
-        echo "$SSH_KEY" >> "$auth_keys"
-        log_message "INFO" "SSH公钥已添加到 $(whoami) 用户 ($auth_keys)"
-    else
-        log_message "INFO" "SSH公钥已存在于 $(whoami) 用户"
-    fi
-}
 
-# 创建管理员用户
-create_admin_user() {
-    [ "$CREATE_DEVOPS_USER" != "true" ] && return 0
-    
-    log_message "INFO" "创建管理员用户 $SUDO_USERNAME..."
-    
-    if id "$SUDO_USERNAME" &>/dev/null; then
-        log_message "WARNING" "用户 $SUDO_USERNAME 已存在"
+    sudo mkdir -p "$ssh_dir"
+    sudo chmod 700 "$ssh_dir"
+    sudo touch "$auth_keys"
+    sudo chmod 600 "$auth_keys"
+    sudo chown -R "$current_user:$current_group" "$ssh_dir"
+
+    # 清理云镜像在 root authorized_keys 中注入的 forced-command 拦截行，避免同公钥被拦截为禁止登录
+    if [ "$current_user" = "root" ] && sudo grep -qE 'command="[^"]*(Please login as|exit[[:space:]]+[0-9]+)' "$auth_keys" 2>/dev/null; then
+        log_message "INFO" "清理 root authorized_keys 中的云镜像登录限制占位行"
+        sudo sed -i '/command="[^"]*\(Please login as\|exit[[:space:]]\+[0-9]\+\)/d' "$auth_keys"
+    fi
+
+    if ! sudo grep -qxF "$SSH_KEY" "$auth_keys"; then
+        printf '%s\n' "$SSH_KEY" | sudo tee -a "$auth_keys" >/dev/null
+        log_message "INFO" "SSH 公钥已添加到用户 $current_user ($auth_keys)"
     else
-        if [ "$OS_TYPE" = "debian" ]; then
-            sudo adduser --disabled-password --gecos "Administrator" "$SUDO_USERNAME"
-            sudo usermod -aG sudo "$SUDO_USERNAME"
-        else
-            sudo useradd -m -s /bin/bash -c "Administrator" "$SUDO_USERNAME"
-            sudo usermod -aG wheel "$SUDO_USERNAME"
-        fi
+        log_message "INFO" "SSH 公钥已存在于用户 $current_user"
     fi
-    
-    # 配置用户SSH密钥
-    local user_ssh_dir="/home/$SUDO_USERNAME/.ssh"
-    local user_auth_keys="$user_ssh_dir/authorized_keys"
-    
-    sudo mkdir -p "$user_ssh_dir"
-    sudo touch "$user_auth_keys"
-    
-    # 检查密钥是否已存在
-    if ! sudo grep -qF "$SSH_KEY" "$user_auth_keys"; then
-        echo "$SSH_KEY" | sudo tee -a "$user_auth_keys" > /dev/null
-    fi
-    
-    sudo chown -R "$SUDO_USERNAME:$SUDO_USERNAME" "$user_ssh_dir"
-    sudo chmod 700 "$user_ssh_dir"
-    sudo chmod 600 "$user_auth_keys"
-    
-    # 配置sudo免密码
-    echo "$SUDO_USERNAME ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$SUDO_USERNAME > /dev/null
-    sudo chmod 440 /etc/sudoers.d/$SUDO_USERNAME
-    
-    # 验证用户创建和配置
-    log_message "INFO" "验证用户配置..."
-    
-    # 检查用户是否存在
-    if ! id "$SUDO_USERNAME" &>/dev/null; then
-        log_message "ERROR" "用户 $SUDO_USERNAME 创建失败"
+
+    if ! file_has_usable_ssh_key "$auth_keys"; then
+        log_message "ERROR" "验证 $auth_keys 中的可用公钥失败"
         return 1
     fi
-    
-    # 检查SSH目录权限
-    local dir_perms=$(sudo stat -c "%a" "$user_ssh_dir" 2>/dev/null)
-    if [ "$dir_perms" != "700" ]; then
-        log_message "WARNING" "SSH目录权限不正确: $dir_perms，正在修复..."
-        sudo chmod 700 "$user_ssh_dir"
-    fi
-    
-    # 检查authorized_keys权限
-    local file_perms=$(sudo stat -c "%a" "$user_auth_keys" 2>/dev/null)
-    if [ "$file_perms" != "600" ]; then
-        log_message "WARNING" "authorized_keys权限不正确: $file_perms，正在修复..."
-        sudo chmod 600 "$user_auth_keys"
-    fi
-    
-    # 检查sudo权限
-    if ! sudo -u "$SUDO_USERNAME" sudo -n true 2>/dev/null; then
-        log_message "ERROR" "用户 $SUDO_USERNAME sudo权限配置失败"
-        return 1
-    fi
-    
-    # 检查SSH密钥是否正确添加
-    if ! sudo grep -qF "$SSH_KEY" "$user_auth_keys"; then
-        log_message "ERROR" "SSH密钥未正确添加到用户 $SUDO_USERNAME"
-        return 1
-    fi
-    
-    log_message "INFO" "管理员用户创建完成，所有验证通过"
-    log_message "INFO" "可以使用以下命令测试登录: ssh $SUDO_USERNAME@<服务器IP>"
-}
 
-# 备份SSH配置
-backup_ssh_config() {
-    log_message "INFO" "备份SSH配置..."
-    
-    if [ -f "$SSH_CONFIG" ]; then
-        sudo cp "$SSH_CONFIG" "$CONFIG_BACKUP_DIR/sshd_config.$TIMESTAMP.bak"
-    fi
-    
-    if [ -d "$SSH_CONFIG_DIR" ]; then
-        sudo cp -r "$SSH_CONFIG_DIR" "$CONFIG_BACKUP_DIR/sshd_config.d.$TIMESTAMP"
-    fi
-    
-    # 创建还原脚本
-    sudo tee "$CONFIG_BACKUP_DIR/restore.sh" > /dev/null << EOF
-#!/bin/bash
-sudo cp "$CONFIG_BACKUP_DIR/sshd_config.$TIMESTAMP.bak" "$SSH_CONFIG"
-[ -d "$CONFIG_BACKUP_DIR/sshd_config.d.$TIMESTAMP" ] && sudo cp -r "$CONFIG_BACKUP_DIR/sshd_config.d.$TIMESTAMP"/* "$SSH_CONFIG_DIR/"
-sudo systemctl restart ssh || sudo systemctl restart sshd
-echo "SSH配置已还原"
-EOF
-    sudo chmod +x "$CONFIG_BACKUP_DIR/restore.sh"
-    
-    log_message "INFO" "SSH配置备份完成: $CONFIG_BACKUP_DIR"
-}
-
-# ==================== SSH配置函数群 ====================
-
-# 分析SSH环境状态
-analyze_ssh_environment() {
-    local has_sudo_user="false"
-    local current_user=$(whoami)
-    local has_root_ssh_key="false"
-    local can_disable_root="false"
-    
-    # 检查当前用户是否有sudo权限
-    if [ "$current_user" != "root" ] && sudo -n true 2>/dev/null; then
-        has_sudo_user="true"
-        log_message "INFO" "当前用户 $current_user 具有sudo权限"
-    fi
-    
-    # 检查是否创建了新的sudo用户
-    if [ "$CREATE_DEVOPS_USER" = "true" ] && id "$SUDO_USERNAME" &>/dev/null; then
-        has_sudo_user="true"
-        log_message "INFO" "已创建sudo用户 $SUDO_USERNAME"
-    fi
-    
-    # 检查是否有其他sudo用户
-    if [ "$has_sudo_user" = "false" ]; then
-        local priv_group
-        if [ "$OS_TYPE" = "debian" ]; then priv_group="sudo"; else priv_group="wheel"; fi
-        local members
-        members=$(getent group "$priv_group" 2>/dev/null | awk -F: '{print $4}')
-        if [ -n "$members" ]; then
-            has_sudo_user="true"
-            log_message "INFO" "系统中存在其他${priv_group}用户: $members"
-        fi
-    fi
-    
-    # 检查root SSH密钥
-    if [ "$current_user" = "root" ] && [ -f "/root/.ssh/authorized_keys" ] && [ -s "/root/.ssh/authorized_keys" ]; then
-        has_root_ssh_key="true"
-        log_message "INFO" "root用户已配置SSH密钥"
-    fi
-    
-    # 决定是否可以完全禁用root登录（仅当有其他sudo用户时才安全）
-    if [ "$has_sudo_user" = "true" ]; then
-        can_disable_root="true"
-    fi
-    
-    # 返回状态信息（使用全局变量）
-    SSH_ENV_HAS_SUDO_USER="$has_sudo_user"
-    SSH_ENV_HAS_ROOT_KEY="$has_root_ssh_key"
-    SSH_ENV_CAN_DISABLE_ROOT="$can_disable_root"
-}
-
-# 配置SSH认证设置
-configure_ssh_authentication() {
-    # 启用公钥认证
-    sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSH_CONFIG"
-    grep -q "^PubkeyAuthentication" "$SSH_CONFIG" || echo "PubkeyAuthentication yes" | sudo tee -a "$SSH_CONFIG"
-    
-    # 处理root登录设置
-    if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
-        # 用户明确要求禁用root登录（必须有其他用户能登录）
-        if [ "$SSH_ENV_HAS_SUDO_USER" = "true" ] || [ "$CREATE_DEVOPS_USER" = "true" ]; then
-            log_message "INFO" "根据用户要求禁用root登录"
-            sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
-            grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
-        else
-            log_message "ERROR" "无法禁用root登录：未检测到其他管理员账户"
-            log_message "ERROR" "请先创建具有sudo权限的用户或配置SSH密钥"
-            return 1
-        fi
-    elif [ "$SSH_ENV_CAN_DISABLE_ROOT" = "true" ]; then
-        # 自动逻辑：安全禁用root登录
-        log_message "INFO" "检测到其他管理员账户，可以安全禁用root登录"
-        sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' "$SSH_CONFIG"
-        grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin no" | sudo tee -a "$SSH_CONFIG"
-    else
-        log_message "WARNING" "未检测到其他管理员账户，保持root登录权限"
-        if [ "$DISABLE_SSH_PASSWD" = "true" ] && [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ]; then
-            sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' "$SSH_CONFIG"
-            grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin prohibit-password" | sudo tee -a "$SSH_CONFIG"
-            log_message "INFO" "设置root仅允许密钥登录"
-        else
-            sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' "$SSH_CONFIG"
-            grep -q "^PermitRootLogin" "$SSH_CONFIG" || echo "PermitRootLogin yes" | sudo tee -a "$SSH_CONFIG"
-            log_message "WARNING" "保持root密码登录开启，建议创建sudo用户后再禁用"
-        fi
-    fi
-    
-    # 禁用密码登录前的安全检查
-    if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
-        local can_disable_password="false"
-        
-        # 检查是否有SSH密钥配置（必须确认有用户能通过密钥登录）
-        if [ -n "$SSH_KEY" ] || [ "$SSH_ENV_HAS_ROOT_KEY" = "true" ]; then
-            # 本次运行提供了密钥 或 root已有密钥
-            can_disable_password="true"
-        elif [ "$SSH_ENV_HAS_SUDO_USER" = "true" ]; then
-            # 有sudo用户，但需验证至少有一个用户配置了SSH密钥
-            local has_key_user="false"
-            for keyfile in /home/*/.ssh/authorized_keys; do
-                if [ -f "$keyfile" ] && [ -s "$keyfile" ]; then
-                    has_key_user="true"
-                    break
-                fi
-            done
-            if [ "$has_key_user" = "true" ]; then
-                can_disable_password="true"
-            else
-                log_message "WARNING" "存在sudo用户但未检测到SSH密钥，无法安全禁用密码登录"
-            fi
-        fi
-        
-        if [ "$can_disable_password" = "true" ]; then
-            log_message "INFO" "检测到SSH密钥配置，可以安全禁用密码登录"
-            local password_configs=(
-                "PasswordAuthentication no"
-                "ChallengeResponseAuthentication no"
-                "KbdInteractiveAuthentication no"
-                "PermitEmptyPasswords no"
-            )
-            
-            for config in "${password_configs[@]}"; do
-                local key="${config%% *}"
-                sudo sed -i "s/^#*$key.*/$config/" "$SSH_CONFIG"
-                grep -q "^$key" "$SSH_CONFIG" || echo "$config" | sudo tee -a "$SSH_CONFIG"
-            done
-        else
-            log_message "ERROR" "未检测到SSH密钥配置，无法禁用密码登录"
-            log_message "ERROR" "请先配置SSH密钥或创建具有SSH密钥的管理员用户"
-            return 1
-        fi
-    fi
-    
     return 0
 }
 
-# 配置SSH安全设置
-configure_ssh_security() {
-    local security_configs=(
-        "X11Forwarding no"
-        "ClientAliveInterval 300"
-        "ClientAliveCountMax 2"
-        "Protocol 2"
-        "UseDNS no"
-    )
-    
-    for config in "${security_configs[@]}"; do
-        local key="${config%% *}"
-        sudo sed -i "s/^#*$key.*/$config/" "$SSH_CONFIG"
-        grep -q "^$key" "$SSH_CONFIG" || echo "$config" | sudo tee -a "$SSH_CONFIG"
+create_admin_user() {
+    [ "$CREATE_DEVOPS_USER" != "true" ] && return 0
+
+    log_message "INFO" "配置管理员用户 $SUDO_USERNAME..."
+
+    if id "$SUDO_USERNAME" &>/dev/null; then
+        log_message "INFO" "用户 $SUDO_USERNAME 已存在，更新权限和密钥配置"
+    else
+        if ! sudo adduser --disabled-password --gecos "Administrator" "$SUDO_USERNAME"; then
+            log_message "ERROR" "创建用户 $SUDO_USERNAME 失败"
+            return 1
+        fi
+    fi
+
+    if ! sudo usermod -aG sudo "$SUDO_USERNAME"; then
+        log_message "ERROR" "将用户 $SUDO_USERNAME 加入 sudo 组失败"
+        return 1
+    fi
+
+    local user_home user_group
+    user_home=$(getent passwd "$SUDO_USERNAME" 2>/dev/null | cut -d: -f6)
+    user_home="${user_home:-/home/$SUDO_USERNAME}"
+    user_group=$(id -gn "$SUDO_USERNAME")
+
+    local user_ssh_dir="$user_home/.ssh"
+    local user_auth_keys="$user_ssh_dir/authorized_keys"
+
+    sudo mkdir -p "$user_ssh_dir"
+    sudo touch "$user_auth_keys"
+
+    if ! sudo grep -qxF "$SSH_KEY" "$user_auth_keys"; then
+        printf '%s\n' "$SSH_KEY" | sudo tee -a "$user_auth_keys" >/dev/null
+    fi
+
+    sudo chown -R "$SUDO_USERNAME:$user_group" "$user_ssh_dir"
+    sudo chmod 700 "$user_ssh_dir"
+    sudo chmod 600 "$user_auth_keys"
+
+    local sudoers_file="/etc/sudoers.d/$SUDO_USERNAME"
+    local sudoers_tmp="/tmp/sudoers.$SUDO_USERNAME.$$"
+    printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$SUDO_USERNAME" > "$sudoers_tmp"
+    chmod 440 "$sudoers_tmp"
+
+    if command -v visudo >/dev/null 2>&1 && ! sudo visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
+        rm -f "$sudoers_tmp"
+        log_message "ERROR" "sudoers 语法校验未通过"
+        return 1
+    fi
+    sudo mv "$sudoers_tmp" "$sudoers_file"
+    sudo chown root:root "$sudoers_file"
+    sudo chmod 440 "$sudoers_file"
+
+    if ! sudo -u "$SUDO_USERNAME" sudo -n true 2>/dev/null; then
+        log_message "ERROR" "验证用户 $SUDO_USERNAME 免密 sudo 权限失败"
+        return 1
+    fi
+
+    if ! file_has_usable_ssh_key "$user_auth_keys"; then
+        log_message "ERROR" "验证用户 $SUDO_USERNAME 的 SSH 公钥失败"
+        return 1
+    fi
+
+    log_message "SUCCESS" "管理员用户 $SUDO_USERNAME 配置完成"
+    return 0
+}
+
+# ==================== SSH 安全加固 ====================
+
+backup_ssh_config() {
+    log_message "INFO" "备份当前 SSH 配置到 $CONFIG_BACKUP_DIR..."
+
+    sudo mkdir -p "$CONFIG_BACKUP_DIR"
+    sudo chmod 700 "$CONFIG_BACKUP_DIR"
+
+    if [ -f "$SSH_CONFIG" ]; then
+        sudo cp -a "$SSH_CONFIG" "$CONFIG_BACKUP_DIR/sshd_config.bak"
+    fi
+
+    if [ -d "$SSH_CONFIG_DIR" ]; then
+        sudo mkdir -p "$CONFIG_BACKUP_DIR/sshd_config.d"
+        sudo cp -a "$SSH_CONFIG_DIR"/. "$CONFIG_BACKUP_DIR/sshd_config.d/"
+    fi
+
+    sudo tee "$CONFIG_BACKUP_DIR/restore.sh" >/dev/null << EOF
+#!/bin/bash
+set -euo pipefail
+[ -f "$CONFIG_BACKUP_DIR/sshd_config.bak" ] && sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.bak" "$SSH_CONFIG"
+if [ -d "$CONFIG_BACKUP_DIR/sshd_config.d" ]; then
+    sudo mkdir -p "$SSH_CONFIG_DIR"
+    sudo find "$SSH_CONFIG_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.d"/. "$SSH_CONFIG_DIR/"
+fi
+sudo systemctl daemon-reload 2>/dev/null || true
+if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+    sudo systemctl restart ssh.socket
+    sudo systemctl restart ssh 2>/dev/null || true
+else
+    sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
+fi
+echo "SSH 配置已从备份恢复"
+EOF
+    sudo chmod 700 "$CONFIG_BACKUP_DIR/restore.sh"
+}
+
+restore_ssh_config_from_backup() {
+    if [ ! -f "$CONFIG_BACKUP_DIR/sshd_config.bak" ]; then
+        log_message "ERROR" "未找到 SSH 备份文件: $CONFIG_BACKUP_DIR/sshd_config.bak"
+        return 1
+    fi
+
+    sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.bak" "$SSH_CONFIG"
+    if [ -d "$CONFIG_BACKUP_DIR/sshd_config.d" ]; then
+        sudo mkdir -p "$SSH_CONFIG_DIR"
+        sudo find "$SSH_CONFIG_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        sudo cp -a "$CONFIG_BACKUP_DIR/sshd_config.d"/. "$SSH_CONFIG_DIR/"
+    fi
+    log_message "INFO" "已从备份恢复 SSH 配置文件"
+    return 0
+}
+
+# 检查是否存在至少一个非 root 的 sudo 用户，以及是否具备可用 SSH 公钥
+find_sudo_user_state() {
+    HAS_NONROOT_SUDO_USER="false"
+    HAS_KEYED_SUDO_USER="false"
+
+    local candidates=()
+    if [ "$CREATE_DEVOPS_USER" = "true" ] && [ -n "$SUDO_USERNAME" ]; then
+        candidates+=("$SUDO_USERNAME")
+    fi
+
+    local current_user
+    current_user=$(id -un)
+    if [ "$current_user" != "root" ] && sudo -n true 2>/dev/null; then
+        candidates+=("$current_user")
+    fi
+
+    local group_members
+    group_members=$(getent group sudo 2>/dev/null | awk -F: '{print $4}' | tr ',' ' ')
+    local member
+    for member in $group_members; do
+        [ "$member" != "root" ] && candidates+=("$member")
+    done
+
+    local user user_home
+    for user in ${candidates[@]+"${candidates[@]}"}; do
+        [ -z "$user" ] && continue
+        id "$user" &>/dev/null || continue
+        HAS_NONROOT_SUDO_USER="true"
+        user_home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+        if [ -n "$user_home" ] && file_has_usable_ssh_key "$user_home/.ssh/authorized_keys"; then
+            HAS_KEYED_SUDO_USER="true"
+            break
+        fi
     done
 }
 
-# 配置SSH端口
-configure_ssh_port() {
-    if [ -n "$SSH_PORT" ]; then
-        log_message "INFO" "修改SSH端口为 $SSH_PORT..."
-        sudo sed -i "s/^#*Port.*/Port $SSH_PORT/" "$SSH_CONFIG"
-        grep -q "^Port" "$SSH_CONFIG" || echo "Port $SSH_PORT" | sudo tee -a "$SSH_CONFIG"
-        
-        # 配置防火墙
-        if command -v ufw &> /dev/null && sudo ufw status | grep -q "active"; then
-            sudo ufw allow "$SSH_PORT/tcp" comment 'SSH Port'
-        fi
-    fi
+comment_managed_directives_in_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    sudo sed -i -E \
+        's/^[[:space:]]*(Port|PasswordAuthentication|PermitRootLogin|PubkeyAuthentication|PermitEmptyPasswords|ChallengeResponseAuthentication|KbdInteractiveAuthentication|X11Forwarding|ClientAliveInterval|ClientAliveCountMax|UseDNS)[[:space:]=]/#&/I' \
+        "$file"
 }
 
-# 处理sshd_config.d目录配置
-handle_ssh_config_dir() {
-    # 处理sshd_config.d目录 - 与cloud-init和谐共存
-        if [ -d "$SSH_CONFIG_DIR" ]; then
-        # 创建99-security.conf以确保我们的配置优先级最高
-        log_message "INFO" "创建SSH安全配置覆盖文件"
-        
-        # 先捕获当前生效的值（优先 sshd -T，回退 grep）
-        local _sshd_cfg=""
-        if command -v sshd &>/dev/null; then
-            _sshd_cfg=$(sshd -T 2>/dev/null || true)
-        fi
+validate_and_restart_ssh() {
+    local expected_port="$1"
+    local sshd_bin
+    sshd_bin=$(get_sshd_bin)
 
-        local effective_port="$SSH_PORT"
-        if [ -z "$effective_port" ]; then
-            if [ -n "$_sshd_cfg" ]; then
-                effective_port=$(echo "$_sshd_cfg" | awk '/^port / {print $2}')
-            else
-                effective_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
+    ensure_sshd_run_dir
+
+    if ! sudo "$sshd_bin" -t; then
+        log_message "ERROR" "sshd -t 配置语法校验失败"
+        return 1
+    fi
+
+    sudo systemctl daemon-reload 2>/dev/null || true
+
+    local using_socket="false"
+    if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+        using_socket="true"
+        log_message "INFO" "检测到 systemd ssh.socket，重新加载并重启 socket..."
+        if ! sudo systemctl restart ssh.socket; then
+            log_message "ERROR" "重启 ssh.socket 失败"
+            return 1
+        fi
+        sudo systemctl restart ssh 2>/dev/null || true
+    else
+        if ! (sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null); then
+            log_message "ERROR" "重启 SSH 服务失败"
+            return 1
+        fi
+    fi
+
+    sleep 1
+
+    # Ubuntu 部分版本 ssh.socket 未跟随自定义端口时，切换为常规 ssh.service 守护进程模式
+    if ! sudo ss -tln | grep -qE "[:.]${expected_port}[[:space:]]"; then
+        if [ "$using_socket" = "true" ]; then
+            log_message "WARNING" "ssh.socket 未监听端口 ${expected_port}，切换为 ssh.service 直接监听..."
+            sudo systemctl stop ssh.socket 2>/dev/null || true
+            sudo systemctl disable ssh.socket 2>/dev/null || true
+            sudo systemctl enable --now ssh 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+
+    if ! sudo ss -tln | grep -qE "[:.]${expected_port}[[:space:]]"; then
+        log_message "ERROR" "SSH 未能在端口 $expected_port 上监听"
+        return 1
+    fi
+
+    log_message "INFO" "SSH 服务已正常监听端口 $expected_port"
+    return 0
+}
+
+configure_ssh() {
+    log_message "INFO" "配置 SSH 安全策略..."
+
+    backup_ssh_config || {
+        log_message "ERROR" "SSH 配置备份失败，中止修改以免发生风险"
+        return 1
+    }
+
+    local current_cfg current_port current_passwd_auth current_permit_root
+    current_cfg=$(read_sshd_effective)
+    current_port=$(echo "$current_cfg" | awk '/^port / {print $2; exit}')
+    current_passwd_auth=$(echo "$current_cfg" | awk '/^passwordauthentication / {print $2; exit}')
+    current_permit_root=$(echo "$current_cfg" | awk '/^permitrootlogin / {print $2; exit}')
+
+    local effective_port="${SSH_PORT:-${current_port:-22}}"
+    local target_passwd_auth="${current_passwd_auth:-yes}"
+    local target_permit_root="${current_permit_root:-yes}"
+
+    local has_root_key="false"
+    if file_has_usable_ssh_key "/root/.ssh/authorized_keys"; then
+        has_root_key="true"
+    fi
+
+    HAS_NONROOT_SUDO_USER="false"
+    HAS_KEYED_SUDO_USER="false"
+    find_sudo_user_state
+
+    # 1. 计算 Root 登录策略：仅当显式传入 --disable_root_login 时才设为 no，绝不因系统预置普通用户而自动禁 root
+    if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
+        if [ "$HAS_NONROOT_SUDO_USER" != "true" ]; then
+            log_message "ERROR" "无法禁用 root 登录：未检测到其他具备 sudo 权限的管理员用户"
+            return 1
+        fi
+        target_permit_root="no"
+    elif [ "$has_root_key" = "true" ]; then
+        if [ "$DISABLE_SSH_PASSWD" = "true" ] && [ "$target_permit_root" != "no" ]; then
+            target_permit_root="prohibit-password"
+        elif [ "$target_permit_root" = "no" ] && [ -n "$SSH_KEY" ] && [ "$CREATE_DEVOPS_USER" != "true" ]; then
+            target_permit_root="prohibit-password"
+        fi
+    fi
+
+    # 2. 计算密码认证策略：禁用密码前必须确认可登录账户拥有可用公钥
+    if [ "$DISABLE_SSH_PASSWD" = "true" ]; then
+        if [ "$target_permit_root" = "no" ]; then
+            if [ "$HAS_KEYED_SUDO_USER" != "true" ]; then
+                log_message "ERROR" "无法同时禁用 root 登录与密码登录：未检测到配置了可用 SSH 公钥的 sudo 用户"
+                return 1
+            fi
+        else
+            if [ "$has_root_key" != "true" ] && [ "$HAS_KEYED_SUDO_USER" != "true" ]; then
+                log_message "ERROR" "无法禁用密码登录：root 与 sudo 用户均未检测到可用 SSH 公钥"
+                return 1
             fi
         fi
-        effective_port="${effective_port:-22}"
+        target_passwd_auth="no"
+    fi
 
-        local current_permit_root
-        if [ -n "$_sshd_cfg" ]; then
-            current_permit_root=$(echo "$_sshd_cfg" | awk '/^permitrootlogin / {print $2}')
-        else
-            current_permit_root=$(grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}')
-        fi
-        current_permit_root="${current_permit_root:-yes}"
+    # 3. 确保 sshd_config 顶部包含 sshd_config.d，清理各文件冲突项并写入 00-setup-security.conf
+    sudo mkdir -p "$SSH_CONFIG_DIR"
+    if ! sudo grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$SSH_CONFIG" 2>/dev/null; then
+        log_message "INFO" "在 $SSH_CONFIG 顶部补充 Include /etc/ssh/sshd_config.d/*.conf"
+        local tmp_sshd="/tmp/sshd_config.$$"
+        {
+            echo "Include /etc/ssh/sshd_config.d/*.conf"
+            sudo cat "$SSH_CONFIG"
+        } > "$tmp_sshd"
+        sudo cp "$tmp_sshd" "$SSH_CONFIG"
+        sudo chmod 644 "$SSH_CONFIG"
+        rm -f "$tmp_sshd"
+    fi
 
-        # 如果用户明确设置了--disable_root_login，确保覆盖
-        if [ "$DISABLE_ROOT_LOGIN" = "true" ]; then
-            current_permit_root="no"
-        fi
+    [ -f "$SSH_LEGACY_SECURITY_CONF" ] && sudo rm -f "$SSH_LEGACY_SECURITY_CONF"
 
-        # 从主配置文件中移除我们要管理的配置项，避免冲突
-        if [ -n "$SSH_PORT" ] || [ "$DISABLE_SSH_PASSWD" = "true" ]; then
-            log_message "INFO" "清理主配置文件中的冲突设置"
-            # 注释掉主配置中的这些设置，让sshd_config.d中的配置生效
-            sudo sed -i 's/^Port/#Port/' "$SSH_CONFIG"
-            sudo sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' "$SSH_CONFIG"
-            sudo sed -i 's/^PermitRootLogin/#PermitRootLogin/' "$SSH_CONFIG"
-            sudo sed -i 's/^PubkeyAuthentication/#PubkeyAuthentication/' "$SSH_CONFIG"
-            sudo sed -i 's/^ChallengeResponseAuthentication/#ChallengeResponseAuthentication/' "$SSH_CONFIG"
-            sudo sed -i 's/^KbdInteractiveAuthentication/#KbdInteractiveAuthentication/' "$SSH_CONFIG"
-            sudo sed -i 's/^X11Forwarding/#X11Forwarding/' "$SSH_CONFIG"
-            sudo sed -i 's/^ClientAliveInterval/#ClientAliveInterval/' "$SSH_CONFIG"
-            sudo sed -i 's/^ClientAliveCountMax/#ClientAliveCountMax/' "$SSH_CONFIG"
-            sudo sed -i 's/^UseDNS/#UseDNS/' "$SSH_CONFIG"
-            sudo sed -i 's/^Protocol/#Protocol/' "$SSH_CONFIG"
-        fi
-        
-        sudo tee "$SSH_CONFIG_DIR/99-security.conf" > /dev/null << EOF
-# Security configuration by setup.sh
-# This file overrides any previous configurations
+    comment_managed_directives_in_file "$SSH_CONFIG"
+    local dropin
+    for dropin in "$SSH_CONFIG_DIR"/*.conf; do
+        [ -f "$dropin" ] || continue
+        [ "$dropin" = "$SSH_SECURITY_CONF" ] && continue
+        comment_managed_directives_in_file "$dropin"
+    done
 
-# 基本设置
+    sudo tee "$SSH_SECURITY_CONF" >/dev/null << EOF
+# Managed by setup.sh ($TIMESTAMP)
+# Loaded first via Include /etc/ssh/sshd_config.d/*.conf (OpenSSH first-match-wins)
+
 Port $effective_port
-Protocol 2
 
-# 认证设置
 PubkeyAuthentication yes
-PasswordAuthentication $([ "$DISABLE_SSH_PASSWD" = "true" ] && echo "no" || echo "yes")
+PasswordAuthentication $target_passwd_auth
 PermitEmptyPasswords no
 ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 
-# Root登录设置
-PermitRootLogin $current_permit_root
+PermitRootLogin $target_permit_root
 
-# 安全设置
 X11Forwarding no
 UseDNS no
 ClientAliveInterval 300
 ClientAliveCountMax 2
-
-# PAM设置
 UsePAM yes
 EOF
-        
-        # 如果存在cloud-init配置，记录信息
-        if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf" ]; then
-            log_message "INFO" "检测到cloud-init SSH配置，我们的99-security.conf将覆盖其设置"
-            log_message "INFO" "cloud-init配置内容："
-            cat "$SSH_CONFIG_DIR/50-cloud-init.conf" | sed 's/^/  /' >> "$LOG_FILE" 2>/dev/null || true
-            
-            # 强制确保cloud-init的设置不会生效
-            # 方法1：直接修改50-cloud-init.conf，注释掉冲突的设置
-            if grep -q "^PasswordAuthentication" "$SSH_CONFIG_DIR/50-cloud-init.conf"; then
-                log_message "INFO" "注释掉cloud-init中的PasswordAuthentication设置"
-                sudo sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' "$SSH_CONFIG_DIR/50-cloud-init.conf"
-            fi
-        fi
-    fi
-}
+    sudo chmod 644 "$SSH_SECURITY_CONF"
 
-# 从备份恢复SSH配置（包括sshd_config.d目录）
-restore_ssh_config_from_backup() {
-    local backup_file="$CONFIG_BACKUP_DIR/sshd_config.$TIMESTAMP.bak"
-    local backup_dir="$CONFIG_BACKUP_DIR/sshd_config.d.$TIMESTAMP"
-    if [ -f "$backup_file" ]; then
-        sudo cp "$backup_file" "$SSH_CONFIG"
-        # 恢复sshd_config.d目录
-        if [ -d "$backup_dir" ]; then
-            sudo cp -r "$backup_dir"/* "$SSH_CONFIG_DIR/" 2>/dev/null || true
-        fi
-        # 如果备份中没有99-security.conf但当前存在，则删除（说明是本次创建的）
-        if [ ! -f "$backup_dir/99-security.conf" ] && [ -f "$SSH_CONFIG_DIR/99-security.conf" ]; then
-            sudo rm -f "$SSH_CONFIG_DIR/99-security.conf"
-        fi
-        log_message "INFO" "已从备份恢复SSH配置: $backup_file"
-        return 0
-    else
-        log_message "ERROR" "未找到SSH配置备份文件: $backup_file"
-        return 1
-    fi
-}
-
-# 验证并重启SSH服务
-validate_and_restart_ssh() {
-    # 确保sshd特权分离目录存在（某些云镜像或容器中可能缺失）
-    if [ ! -d /run/sshd ]; then
-        log_message "INFO" "创建SSH特权分离目录 /run/sshd"
-        sudo mkdir -p /run/sshd
-        sudo chmod 0755 /run/sshd
+    if [ -n "$SSH_PORT" ] && command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+        log_message "INFO" "在 UFW 中放行 SSH 端口 $effective_port/tcp"
+        sudo ufw allow "$effective_port/tcp" comment 'SSH Port' >/dev/null 2>&1 || true
     fi
 
-    # 测试SSH配置
-    if ! sudo sshd -t; then
-        log_message "ERROR" "SSH配置测试失败"
-        return 1
-    fi
-    
-    # 重启SSH服务
-    if sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null; then
-        log_message "INFO" "SSH服务重启成功"
-    else
-        log_message "ERROR" "SSH服务重启失败"
-        return 1
-    fi
-    
-    # 等待SSH服务启动
-    sleep 2
-    
-    # 验证SSH服务状态（优先 sshd -T 读取生效端口）
-    local ssh_port=""
-    if command -v sshd &>/dev/null; then
-        ssh_port=$(sshd -T 2>/dev/null | awk '/^port / {print $2}')
-    fi
-    if [ -z "$ssh_port" ]; then
-        ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
-            || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
-            || ssh_port="22"
-    fi
-    ssh_port="${ssh_port:-22}"
-    if sudo ss -tlnp | grep -qE "[:.]${ssh_port}[[:space:]]"; then
-        log_message "INFO" "SSH服务正在监听端口 $ssh_port"
-    else
-        log_message "ERROR" "SSH服务未能在端口 $ssh_port 上启动"
-        return 1
-    fi
-    
-    return 0
-}
-
-# 显示SSH配置状态
-display_ssh_status() {
-    log_message "INFO" "SSH配置完成"
-    log_message "INFO" "当前SSH配置状态："
-    local ssh_port=""
-    if command -v sshd &>/dev/null; then
-        ssh_port=$(sshd -T 2>/dev/null | awk '/^port / {print $2}')
-    fi
-    if [ -z "$ssh_port" ]; then
-        ssh_port=$(grep "^Port" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
-            || ssh_port=$(grep "^Port" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
-            || ssh_port="22"
-    fi
-    ssh_port="${ssh_port:-22}"
-    log_message "INFO" "  端口: $ssh_port"
-    # 优先使用 sshd -T 读取实际生效配置
-    local sshd_effective=""
-    if command -v sshd &>/dev/null; then
-        sshd_effective=$(sshd -T 2>/dev/null || true)
-    fi
-    if [ -n "$sshd_effective" ]; then
-        log_message "INFO" "  密码认证: $(echo "$sshd_effective" | awk '/^passwordauthentication/ {print $2}')"
-        log_message "INFO" "  公钥认证: $(echo "$sshd_effective" | awk '/^pubkeyauthentication/ {print $2}')"
-        log_message "INFO" "  Root登录: $(echo "$sshd_effective" | awk '/^permitrootlogin/ {print $2}')"
-    else
-        log_message "INFO" "  密码认证: $(grep "^PasswordAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PasswordAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
-        log_message "INFO" "  公钥认证: $(grep "^PubkeyAuthentication" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PubkeyAuthentication" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
-        log_message "INFO" "  Root登录: $(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null || grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null || echo "yes")"
-    fi
-    
-    # 检查authorized_keys文件
-    if [ -n "$SSH_KEY" ]; then
-        log_message "INFO" "SSH密钥已配置的用户："
-        if [ -f "/root/.ssh/authorized_keys" ] && grep -qF "${SSH_KEY%% *}" "/root/.ssh/authorized_keys"; then
-            log_message "INFO" "  - root用户"
-        fi
-        if [ "$CREATE_DEVOPS_USER" = "true" ] && [ -f "/home/$SUDO_USERNAME/.ssh/authorized_keys" ]; then
-            if sudo grep -qF "${SSH_KEY%% *}" "/home/$SUDO_USERNAME/.ssh/authorized_keys"; then
-                log_message "INFO" "  - $SUDO_USERNAME用户"
-            fi
-        fi
-    fi
-}
-
-# 配置SSH（重构后的主函数）
-configure_ssh() {
-    log_message "INFO" "配置SSH..."
-    
-    # 1. 准备阶段（关键步骤）
-    log_message "DEBUG" "SSH配置 - 准备阶段"
-    backup_ssh_config || {
-        log_message "WARNING" "SSH配置备份失败，继续配置但存在风险"
-    }
-    
-    analyze_ssh_environment || {
-        check_error $? "分析SSH环境"
-        log_message "WARNING" "SSH环境分析失败，使用默认配置继续"
-    }
-    
-    # 2. 应用配置阶段（每个步骤独立处理错误）
-    log_message "DEBUG" "SSH配置 - 应用配置阶段"
-    
-    # SSH认证配置是关键步骤，失败则需要特别关注
-    if ! configure_ssh_authentication; then
-        log_message "ERROR" "SSH认证配置失败，这可能导致无法远程连接"
-        log_message "WARNING" "建议检查SSH配置文件和密钥设置"
-        return 1
-    fi
-    
-    # 安全配置失败不应该阻断流程，但需要记录
-    configure_ssh_security || {
-        check_error $? "SSH安全配置"
-        log_message "WARNING" "SSH安全配置失败，安全性可能受影响"
-    }
-    
-    # 端口配置失败记录警告
-    configure_ssh_port || {
-        check_error $? "SSH端口配置"
-        log_message "WARNING" "SSH端口配置失败，可能使用默认端口22"
-    }
-    
-    # 配置目录处理
-    handle_ssh_config_dir || {
-        check_error $? "SSH配置目录处理"
-        log_message "WARNING" "SSH配置目录处理失败"
-    }
-    
-    # 3. 验证和重启阶段（最关键步骤）
-    log_message "DEBUG" "SSH配置 - 验证和重启阶段"
-    
-    # SSH服务验证和重启是最关键的步骤
-    if ! validate_and_restart_ssh; then
-        log_message "ERROR" "SSH服务验证或重启失败"
-        log_message "ERROR" "这是严重问题，可能导致远程连接中断"
-        log_message "INFO" "尝试恢复SSH配置..."
-        
-        # 尝试恢复备份配置
+    if ! validate_and_restart_ssh "$effective_port"; then
+        log_message "ERROR" "SSH 新配置验证或重启失败，正在自动回滚备份..."
         if restore_ssh_config_from_backup; then
-            if sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null; then
-                log_message "SUCCESS" "SSH配置已恢复到备份状态"
-            else
-                log_message "ERROR" "SSH配置恢复失败，需要手动检查"
+            sudo systemctl daemon-reload 2>/dev/null || true
+            if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+                sudo systemctl restart ssh.socket 2>/dev/null || true
             fi
+            sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null || true
+            log_message "WARNING" "已回滚到修改前的 SSH 配置"
         fi
-        
         return 1
     fi
-    
-    # 显示状态（失败不影响主流程）
-    display_ssh_status || {
-        check_error $? "显示SSH状态"
-        log_message "DEBUG" "显示SSH状态信息失败"
-    }
-    
-    log_message "SUCCESS" "SSH配置完成"
+
+    log_message "SUCCESS" "SSH 配置完成（端口: ${effective_port}, 密码登录: ${target_passwd_auth}, Root登录: ${target_permit_root}）"
     return 0
 }
 
-# ==================== 系统服务配置 ====================
+# ==================== 系统服务与内核优化 ====================
 
-# 配置fail2ban
 configure_fail2ban() {
-    log_message "INFO" "配置fail2ban..."
-    
-    # 确定SSH日志路径
+    log_message "INFO" "配置 Fail2ban..."
+
     local ssh_log_path="/var/log/auth.log"
-    if [ "$OS_TYPE" = "redhat" ]; then
-        ssh_log_path="/var/log/secure"
-    fi
-    
-    # 确保日志文件存在
-    if [ ! -f "$ssh_log_path" ]; then
-        if [ "$OS_TYPE" = "debian" ]; then
-        sudo sed -i '/^auth,authpriv.\*/d' /etc/rsyslog.conf
-        echo "auth,authpriv.*          /var/log/auth.log" | sudo tee -a /etc/rsyslog.conf
-        fi
-        sudo systemctl restart rsyslog
+    if ! grep -rqE '^[[:space:]]*auth,authpriv\.\*[[:space:]]+.*auth\.log' /etc/rsyslog.conf /etc/rsyslog.d/ 2>/dev/null; then
+        sudo mkdir -p /etc/rsyslog.d
+        echo "auth,authpriv.*    /var/log/auth.log" | sudo tee /etc/rsyslog.d/50-setup-auth.conf >/dev/null
     fi
 
-    # 配置fail2ban
-    local ssh_port="${SSH_PORT:-22}"
-    sudo tee /etc/fail2ban/jail.d/custom.conf > /dev/null << EOF
+    # rsyslog 在收到首条日志前可能尚未创建 auth.log，预先创建避免 fail2ban 因文件不存在而启动报错
+    if [ ! -f "$ssh_log_path" ]; then
+        local syslog_owner="root"
+        id syslog &>/dev/null && syslog_owner="syslog"
+        sudo install -m 0640 -o "$syslog_owner" -g adm /dev/null "$ssh_log_path" 2>/dev/null \
+            || { sudo touch "$ssh_log_path" && sudo chmod 0640 "$ssh_log_path"; }
+    fi
+
+    sudo systemctl enable --now rsyslog >/dev/null 2>&1 || true
+    sudo systemctl restart rsyslog || log_message "WARNING" "rsyslog 重启失败"
+
+    local ssh_port
+    ssh_port=$(get_effective_ssh_port)
+
+    sudo mkdir -p /etc/fail2ban/jail.d
+    sudo tee /etc/fail2ban/jail.d/custom.conf >/dev/null << EOF
 [DEFAULT]
-allowipv6 = auto
 bantime = 1800
 findtime = 600
 maxretry = 5
@@ -1465,26 +1114,103 @@ maxretry = 3
 bantime = 3600
 EOF
 
-    sudo systemctl enable fail2ban
-    sudo systemctl restart fail2ban
-    
-    log_message "INFO" "fail2ban配置完成"
+    sudo systemctl unmask fail2ban 2>/dev/null || true
+    if ! sudo systemctl enable fail2ban || ! sudo systemctl restart fail2ban; then
+        log_message "ERROR" "Fail2ban 启动失败"
+        return 1
+    fi
+
+    log_message "SUCCESS" "Fail2ban 配置完成（监控端口: ${ssh_port}）"
+    return 0
 }
 
-# 配置时区和NTP
+detect_region() {
+    local country_code=""
+    country_code=$(curl -fsSL --max-time 5 "https://ifconfig.co/country-iso" 2>/dev/null | tr -d '[:space:]' || true)
+    if ! [[ "$country_code" =~ ^[A-Z]{2}$ ]]; then
+        country_code=$(curl -fsSL --max-time 5 "http://ip-api.com/line/?fields=countryCode" 2>/dev/null | tr -d '[:space:]' || true)
+    fi
+
+    case "$country_code" in
+        CN) echo "cn" ;;
+        HK) echo "hk" ;;
+        TW) echo "tw" ;;
+        JP) echo "jp" ;;
+        KR) echo "kr" ;;
+        SG) echo "sg" ;;
+        US) echo "us" ;;
+        GB|DE|FR|NL|IT|ES|PL|SE|NO|FI|DK|CH|AT|BE|IE|PT|CZ|RO|HU|GR) echo "eu" ;;
+        *)  echo "asia" ;;
+    esac
+}
+
+# 仅在原生 Debian 上通过隔离的 deb.debian.org 官方源兜底安装 chrony（应对镜像站 pool 同步延迟 404）
+try_install_chrony_via_official_mirror() {
+    [ "$OS_DISTRO" != "debian" ] && return 1
+
+    local codename="$OS_CODENAME"
+    if [ -z "$codename" ] && command -v lsb_release >/dev/null 2>&1; then
+        codename=$(lsb_release -cs 2>/dev/null || true)
+    fi
+
+    case "$codename" in
+        bullseye|bookworm|trixie) ;;
+        *)
+            log_message "WARNING" "Debian codename ($codename) 不在官方源兜底列表中，跳过"
+            return 1
+            ;;
+    esac
+
+    local tmp_dir="$APT_FALLBACK_TMP_DIR"
+    local tmp_list="$tmp_dir/official.list"
+    local tmp_source_parts="$tmp_dir/sourceparts"
+    local tmp_lists="$tmp_dir/lists"
+    local rc=1
+
+    log_message "INFO" "尝试通过 deb.debian.org 隔离官方源安装 chrony..."
+    sudo rm -rf "$tmp_dir" 2>/dev/null || true
+    sudo rm -f "$APT_FALLBACK_LEGACY_SOURCE" 2>/dev/null || true
+
+    if ! sudo mkdir -p "$tmp_source_parts" "$tmp_lists/partial"; then
+        return 1
+    fi
+
+    sudo tee "$tmp_list" >/dev/null << EOF
+deb https://deb.debian.org/debian $codename main
+deb https://deb.debian.org/debian-security ${codename}-security main
+deb https://deb.debian.org/debian ${codename}-updates main
+EOF
+
+    local apt_opts=(
+        -o "Dir::Etc::SourceList=$tmp_list"
+        -o "Dir::Etc::SourceParts=$tmp_source_parts"
+        -o "Dir::State::Lists=$tmp_lists"
+    )
+
+    if run_apt_get "${apt_opts[@]}" update -y && run_apt_get "${apt_opts[@]}" install -y chrony; then
+        log_message "INFO" "通过 deb.debian.org 成功安装 chrony"
+        rc=0
+    fi
+
+    sudo rm -rf "$tmp_dir" 2>/dev/null || true
+    return "$rc"
+}
+
 configure_timezone_ntp() {
-    log_message "INFO" "配置时区和NTP..."
-    
-    # 设置时区为东八区
+    log_message "INFO" "配置时区与 NTP 时间同步..."
+
     sudo timedatectl set-timezone Asia/Shanghai
-    
-    # 使用用户指定的地区
+
     local region="$SERVER_REGION"
-    
-    # 选择NTP服务器
+    if [ "$region" = "auto" ]; then
+        region=$(detect_region)
+        SERVER_REGION="$region"
+        log_message "INFO" "自动检测服务器地区: $region"
+    fi
+
     local ntp_server
     case "$region" in
-        cn) ntp_server="cn.pool.ntp.org" ;;
+        cn) ntp_server="ntp.aliyun.com" ;;
         hk) ntp_server="hk.pool.ntp.org" ;;
         tw) ntp_server="tw.pool.ntp.org" ;;
         jp) ntp_server="jp.pool.ntp.org" ;;
@@ -1492,42 +1218,31 @@ configure_timezone_ntp() {
         sg) ntp_server="sg.pool.ntp.org" ;;
         us) ntp_server="us.pool.ntp.org" ;;
         eu) ntp_server="europe.pool.ntp.org" ;;
-        *) ntp_server="asia.pool.ntp.org" ;;
+        *)  ntp_server="asia.pool.ntp.org" ;;
     esac
-    
-    log_message "INFO" "使用NTP服务器: $ntp_server"
-    
-    # 配置NTP服务
-    if [ "$OS_TYPE" = "debian" ]; then
-        local use_chrony="false"
-        if [ "$NTP_SERVICE" = "chrony" ] || ([ "$NTP_SERVICE" = "auto" ] && command -v chronyd &> /dev/null); then
-            use_chrony="true"
-        fi
+    log_message "INFO" "使用 NTP 服务器: $ntp_server"
 
-        if [ "$use_chrony" = "true" ]; then
-            local need_official_fallback="false"
-            if ! wait_for_apt_locks; then
-                log_message "WARNING" "等待apt锁失败，尝试官方源fallback"
-                need_official_fallback="true"
-            elif ! apt_install_with_retry "chrony" 2 5; then
-                log_message "WARNING" "主镜像chrony安装失败（CDN边缘节点pool可能未同步），尝试官方源fallback"
-                need_official_fallback="true"
-            fi
+    local use_chrony="true"
+    [ "$NTP_SERVICE" = "timesyncd" ] && use_chrony="false"
 
-            if [ "$need_official_fallback" = "true" ] && ! try_install_chrony_via_official_mirror; then
-                log_message "WARNING" "官方源fallback也失败，回退到systemd-timesyncd"
-                use_chrony="false"
+    if [ "$use_chrony" = "true" ]; then
+        if ! command -v chronyd >/dev/null 2>&1; then
+            if ! apt_install_with_retry "chrony" 2 5; then
+                log_message "WARNING" "默认源安装 chrony 失败，尝试备用方案..."
+                if ! try_install_chrony_via_official_mirror; then
+                    log_message "WARNING" "chrony 安装失败，回退到 systemd-timesyncd"
+                    use_chrony="false"
+                fi
             fi
         fi
+    fi
 
-        if [ "$use_chrony" = "true" ]; then
-            sudo systemctl stop systemd-timesyncd 2>/dev/null || true
-            sudo systemctl disable systemd-timesyncd 2>/dev/null || true
+    if [ "$use_chrony" = "true" ]; then
+        sudo systemctl stop systemd-timesyncd 2>/dev/null || true
+        sudo systemctl disable systemd-timesyncd 2>/dev/null || true
 
-            # 确保chrony日志目录存在
-            sudo mkdir -p /var/log/chrony
-
-            sudo tee /etc/chrony/chrony.conf > /dev/null << EOF
+        sudo mkdir -p /var/log/chrony
+        sudo tee /etc/chrony/chrony.conf >/dev/null << EOF
 pool $ntp_server iburst
 keyfile /etc/chrony/chrony.keys
 driftfile /var/lib/chrony/chrony.drift
@@ -1536,472 +1251,185 @@ maxupdateskew 100.0
 rtcsync
 makestep 1 3
 EOF
-            # 某些云服务商镜像会预先mask chrony服务，需要先unmask
-            sudo systemctl unmask chrony 2>/dev/null || true
-            sudo systemctl enable chrony || log_message "WARNING" "chrony enable失败，可能仍处于masked状态"
-            sudo systemctl restart chrony || log_message "ERROR" "chrony启动失败"
+        sudo systemctl unmask chrony 2>/dev/null || true
+        if ! sudo systemctl enable chrony || ! sudo systemctl restart chrony; then
+            log_message "ERROR" "chrony 服务启用或启动失败"
+            return 1
         fi
-
-        if [ "$use_chrony" != "true" ]; then
-            # 使用systemd-timesyncd
-            sudo systemctl stop chrony 2>/dev/null || true
-            sudo systemctl disable chrony 2>/dev/null || true
-            
-            sudo tee /etc/systemd/timesyncd.conf > /dev/null << EOF
-[Time]
-NTP=$ntp_server
-FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org
-EOF
-            sudo systemctl restart systemd-timesyncd || log_message "WARNING" "systemd-timesyncd启动失败"
-            sudo systemctl enable systemd-timesyncd 2>/dev/null || true
-        fi
-    else
-        # RHEL/CentOS使用chrony
-        sudo yum install -y chrony || sudo dnf install -y chrony
-        sudo tee /etc/chrony.conf > /dev/null << EOF
-server $ntp_server iburst
-driftfile /var/lib/chrony/drift
-makestep 1.0 3
-rtcsync
-logdir /var/log/chrony
-EOF
-        sudo systemctl restart chronyd
-        sudo systemctl enable chronyd
-    fi
-    
-    log_message "INFO" "时区和NTP配置完成"
-}
-
-
-# 配置系统优化
-configure_system_optimization() {
-    log_message "INFO" "配置系统优化..."
-    
-    # 启用BBR
-    if dpkg --compare-versions "$(uname -r | cut -d- -f1)" "ge" "4.9"; then
-        log_message "INFO" "启用BBR..."
-        sudo modprobe tcp_bbr
-        
-        # 检查并添加sysctl配置
-        if ! grep -q "net.core.default_qdisc = fq" /etc/sysctl.conf 2>/dev/null; then
-            echo "net.core.default_qdisc = fq" | sudo tee -a /etc/sysctl.conf
-        fi
-        if ! grep -q "net.ipv4.tcp_congestion_control = bbr" /etc/sysctl.conf 2>/dev/null; then
-            echo "net.ipv4.tcp_congestion_control = bbr" | sudo tee -a /etc/sysctl.conf
-        fi
-    fi
-    
-    # 启用IP转发
-    if ! grep -q "net.ipv4.ip_forward = 1" /etc/sysctl.conf 2>/dev/null; then
-        echo "net.ipv4.ip_forward = 1" | sudo tee -a /etc/sysctl.conf
-    fi
-    
-    # 应用sysctl设置
-    sudo sysctl -p
-    
-    log_message "INFO" "系统优化配置完成"
-}
-
-# 配置安全审计（合并后的功能）
-configure_security_audit() {
-    [ "$ENABLE_SECURITY_AUDIT" != "true" ] && return 0
-    
-    log_message "INFO" "配置安全审计工具..."
-    
-    # 安装auditd（带重试机制）
-    local install_success=false
-    local retry_count=0
-    local max_retries=3
-    
-    while [ $retry_count -lt $max_retries ] && [ "$install_success" = "false" ]; do
-        if [ "$OS_TYPE" = "debian" ]; then
-            # 等待apt锁释放
-            if ! wait_for_apt_locks; then
-                log_message "ERROR" "等待apt锁失败，跳过安全审计工具安装"
-                return 1
-            fi
-            
-            # 尝试安装auditd
-            if apt_install_with_retry "auditd" 2 45; then
-                install_success=true
-                log_message "INFO" "auditd安装成功"
-                break
-            else
-                ((retry_count++))
-                if [ $retry_count -lt $max_retries ]; then
-                    log_message "WARNING" "auditd安装失败，将在下次循环重试 ($retry_count/$max_retries)"
-                else
-                    log_message "ERROR" "auditd安装失败，已重试 $max_retries 次"
-                fi
-            fi
-        else
-            if sudo yum install -y audit || sudo dnf install -y audit; then
-                install_success=true
-            else
-                ((retry_count++))
-                if [ $retry_count -lt $max_retries ]; then
-                    log_message "WARNING" "audit安装失败，等待30秒后重试 ($retry_count/$max_retries)"
-                    sleep 30
-                fi
-            fi
-        fi
-    done
-    
-    # 只有在安装成功后才配置auditd
-    if [ "$install_success" = "true" ]; then
-        # 配置auditd规则
-        sudo tee /etc/audit/rules.d/audit.rules > /dev/null << 'EOF'
--D
--b 8192
--w /usr/bin/sudo -p x -k sudo_usage
--w /etc/sudoers -p rw -k sudoers_change
--w /etc/passwd -p rw -k passwd_change
--w /etc/shadow -p rw -k shadow_change
--w /etc/ssh/sshd_config -p rw -k sshd_config_change
--w /var/log -p rwa -k log_directory
-EOF
-        
-        # 重启auditd服务
-        if sudo systemctl restart auditd 2>/dev/null; then
-            sudo systemctl enable auditd
-            log_message "INFO" "auditd服务配置完成"
-        else
-            # 某些系统可能需要使用service命令重启auditd
-            if sudo service auditd restart 2>/dev/null; then
-                log_message "INFO" "auditd服务配置完成（使用service命令）"
-            else
-                log_message "WARNING" "auditd服务重启失败，可能需要手动重启"
-            fi
-        fi
-    else
-        log_message "ERROR" "auditd安装失败，跳过auditd配置"
-    fi
-    
-    # 安装etckeeper（带重试机制）
-    install_success=false
-    retry_count=0
-    
-    # 在两个apt操作之间添加延迟
-    log_message "INFO" "等待5秒后继续安装etckeeper..."
-    sleep 5
-    
-    while [ $retry_count -lt $max_retries ] && [ "$install_success" = "false" ]; do
-        if [ "$OS_TYPE" = "debian" ]; then
-            # 等待apt锁释放
-            if ! wait_for_apt_locks; then
-                log_message "ERROR" "等待apt锁失败，跳过etckeeper安装"
-                break
-            fi
-            
-            # 尝试安装etckeeper和git
-            if apt_install_with_retry "etckeeper git" 2 45; then
-                install_success=true
-                log_message "INFO" "etckeeper和git安装成功"
-                break
-            else
-                ((retry_count++))
-                if [ $retry_count -lt $max_retries ]; then
-                    log_message "WARNING" "etckeeper安装失败，将在下次循环重试 ($retry_count/$max_retries)"
-                else
-                    log_message "ERROR" "etckeeper安装失败，已重试 $max_retries 次"
-                fi
-            fi
-        else
-            if sudo yum install -y etckeeper git || sudo dnf install -y etckeeper git; then
-                install_success=true
-            else
-                ((retry_count++))
-                if [ $retry_count -lt $max_retries ]; then
-                    log_message "WARNING" "etckeeper安装失败，等待30秒后重试 ($retry_count/$max_retries)"
-                    sleep 30
-                fi
-            fi
-        fi
-    done
-    
-    # 只有在安装成功后才配置etckeeper
-    if [ "$install_success" = "true" ]; then
-        # 初始化etckeeper
-        if [ ! -d /etc/.git ]; then
-            if sudo etckeeper init; then
-                sudo etckeeper commit "Initial commit - system setup" || true
-                log_message "INFO" "etckeeper初始化完成"
-            else
-                log_message "WARNING" "etckeeper初始化失败"
-            fi
-        else
-            log_message "INFO" "etckeeper已经初始化"
-        fi
-    else
-        log_message "ERROR" "etckeeper安装失败，跳过etckeeper配置"
-    fi
-    
-    # 总结安装结果
-    if command -v auditctl &>/dev/null && command -v etckeeper &>/dev/null; then
-        log_message "INFO" "安全审计配置完成（auditd + etckeeper）"
-    elif command -v auditctl &>/dev/null; then
-        log_message "WARNING" "安全审计部分完成（仅auditd）"
-    elif command -v etckeeper &>/dev/null; then
-        log_message "WARNING" "安全审计部分完成（仅etckeeper）"
-    else
-        log_message "ERROR" "安全审计工具安装失败，建议手动安装"
-        log_message "INFO" "可以稍后手动执行以下命令安装："
-        log_message "INFO" "  sudo apt update && sudo apt install -y auditd etckeeper git"
-    fi
-}
-
-# ==================== Docker安装 ====================
-
-# 安装Docker
-install_docker() {
-    [ "$INSTALL_DOCKER" != "true" ] && return 0
-    
-    log_message "INFO" "安装Docker..."
-    
-    if command -v docker &> /dev/null; then
-        log_message "INFO" "Docker已安装"
+        log_message "SUCCESS" "时区与 Chrony 配置完成"
         return 0
     fi
-    
-    # 使用 Docker 官方安装脚本 (get.docker.com)
-    local docker_script="/tmp/get-docker.sh"
 
-    log_message "INFO" "下载Docker官方安装脚本..."
-    if ! curl -fsSL https://get.docker.com -o "$docker_script"; then
-        log_message "ERROR" "下载Docker安装脚本失败"
-        return 1
-    fi
-
-    # 验证脚本大小（防止下载不完整）
-    local script_size
-    script_size=$(stat -c%s "$docker_script" 2>/dev/null || stat -f%z "$docker_script" 2>/dev/null || echo 0)
-    if [ "$script_size" -lt 1000 ]; then
-        log_message "ERROR" "Docker安装脚本可能不完整"
-        rm -f "$docker_script"
-        return 1
-    fi
-
-    chmod 700 "$docker_script"
-
-    if sudo bash "$docker_script"; then
-        rm -f "$docker_script"
-        sudo systemctl start docker
-        sudo systemctl enable docker
-        
-        # 添加当前用户到docker组
-        [ "$(id -u)" != "0" ] && [ -n "${SUDO_USER:-}" ] && sudo usermod -aG docker "$SUDO_USER"
-        
-        # 配置Docker镜像加速（中国地区）
-        local region="$SERVER_REGION"
-        
-        if [ "$region" = "cn" ]; then
-    sudo mkdir -p /etc/docker
-            sudo tee /etc/docker/daemon.json > /dev/null << EOF
-{
-  "registry-mirrors": [
-    "https://mirror.ccs.tencentyun.com",
-    "https://docker.mirrors.ustc.edu.cn",
-    "https://hub-mirror.c.163.com"
-  ],
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "10m",
-    "max-file": "3"
-  }
-}
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
+    # systemd-timesyncd 分支（显式指定或 chrony 安装失败回退）
+    if [ ! -x /lib/systemd/systemd-timesyncd ] && [ ! -x /usr/lib/systemd/systemd-timesyncd ]; then
+        if ! apt_install_with_retry "systemd-timesyncd" 2 5; then
+            log_message "ERROR" "systemd-timesyncd 安装失败"
+            return 1
         fi
-        
-        log_message "INFO" "Docker安装完成"
-    else
-        log_message "ERROR" "Docker安装失败"
-        rm -f "$docker_script"
-                return 1
     fi
-}
-    
-# ==================== 配置总结和主流程 ====================
 
-# 显示配置总结
+    sudo systemctl stop chrony 2>/dev/null || true
+    sudo systemctl disable chrony 2>/dev/null || true
+
+    local fallback_ntp="0.pool.ntp.org 1.pool.ntp.org"
+    [ "$region" = "cn" ] && fallback_ntp="ntp.tencent.com cn.pool.ntp.org"
+
+    sudo tee /etc/systemd/timesyncd.conf >/dev/null << EOF
+[Time]
+NTP=$ntp_server
+FallbackNTP=$fallback_ntp
+EOF
+    sudo systemctl unmask systemd-timesyncd 2>/dev/null || true
+    if ! sudo systemctl enable systemd-timesyncd || ! sudo systemctl restart systemd-timesyncd; then
+        log_message "ERROR" "systemd-timesyncd 启动失败"
+        return 1
+    fi
+
+    log_message "SUCCESS" "时区与 systemd-timesyncd 配置完成"
+    return 0
+}
+
+configure_system_optimization() {
+    log_message "INFO" "配置内核网络优化（BBR 与 IPv4 转发）..."
+
+    sudo modprobe tcp_bbr 2>/dev/null || true
+
+    local bbr_available="false"
+    if grep -qw "bbr" /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+        bbr_available="true"
+    else
+        log_message "WARNING" "当前内核或容器环境不支持 tcp_bbr，仅配置 IPv4 转发"
+    fi
+
+    sudo mkdir -p /etc/sysctl.d
+    {
+        echo "# Managed by setup.sh ($TIMESTAMP)"
+        if [ "$bbr_available" = "true" ]; then
+            echo "net.core.default_qdisc = fq"
+            echo "net.ipv4.tcp_congestion_control = bbr"
+        fi
+        echo "net.ipv4.ip_forward = 1"
+    } | sudo tee "$SYSCTL_CUSTOM_CONF" >/dev/null
+    sudo chmod 644 "$SYSCTL_CUSTOM_CONF"
+
+    # 避免旧 /etc/sysctl.conf 中显式的 ip_forward=0 造成混淆
+    if [ -f /etc/sysctl.conf ] && grep -Eq '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*0' /etc/sysctl.conf; then
+        sudo sed -i -E 's/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=.*/net.ipv4.ip_forward = 1/' /etc/sysctl.conf
+    fi
+
+    if ! sudo sysctl -p "$SYSCTL_CUSTOM_CONF" >/dev/null; then
+        log_message "ERROR" "加载 $SYSCTL_CUSTOM_CONF 失败"
+        return 1
+    fi
+
+    log_message "SUCCESS" "内核网络优化配置完成"
+    return 0
+}
+
+# ==================== 配置总结与主流程 ====================
+
 show_summary() {
-    local ssh_port="${SSH_PORT:-22}"
-    [ -z "$SSH_PORT" ] && ssh_port=$(sudo ss -tlnp | grep sshd | head -1 | sed 's/.*:\([0-9]\+\) .*/\1/' || echo "22")
-    
-    log_message "INFO" "========== 配置完成 =========="
+    local current_cfg ssh_port passwd_auth pubkey_auth root_login
+    current_cfg=$(read_sshd_effective)
+    ssh_port=$(echo "$current_cfg" | awk '/^port / {print $2; exit}')
+    ssh_port="${ssh_port:-$(get_effective_ssh_port)}"
+    passwd_auth=$(echo "$current_cfg" | awk '/^passwordauthentication / {print $2; exit}')
+    pubkey_auth=$(echo "$current_cfg" | awk '/^pubkeyauthentication / {print $2; exit}')
+    root_login=$(echo "$current_cfg" | awk '/^permitrootlogin / {print $2; exit}')
+
+    local tz ntp_state="未运行"
+    tz=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "未知")
+    if systemctl is-active --quiet chrony 2>/dev/null || systemctl is-active --quiet chronyd 2>/dev/null; then
+        ntp_state="chrony (运行中)"
+    elif systemctl is-active --quiet systemd-timesyncd 2>/dev/null; then
+        ntp_state="systemd-timesyncd (运行中)"
+    fi
+
     echo "--------------------------------------------------"
     echo "系统信息:"
-    echo "  OS: $OS_TYPE $OS_VERSION"
-    echo "  时区: $(timedatectl | grep "Time zone" | awk '{print $3}')"
+    echo "  OS: ${OS_PRETTY:-$OS_DISTRO $OS_VERSION}"
+    echo "  时区: $tz"
+    echo "  NTP: $ntp_state"
     echo ""
-    echo "SSH配置:"
+    echo "SSH 实际生效状态:"
     echo "  端口: $ssh_port"
-    echo "  密码登录: $([ "$DISABLE_SSH_PASSWD" = "true" ] && echo "已禁用" || echo "已启用")"
-    echo "  公钥认证: 已启用"
-    echo "  SSH密钥: $([ -n "$SSH_KEY" ] && echo "已添加" || echo "未添加")"
+    echo "  公钥认证: ${pubkey_auth:-未知}"
+    echo "  密码认证: ${passwd_auth:-未知}"
+    echo "  Root 登录: ${root_login:-未知}"
     echo ""
-    echo "安全配置:"
-    echo "  fail2ban: $(systemctl is-active fail2ban 2>/dev/null || echo '未运行')"
-    echo "  安全审计: $([ "$ENABLE_SECURITY_AUDIT" = "true" ] && echo "已启用 (auditd + etckeeper)" || echo "已禁用")"
-    echo ""
-    echo "系统优化:"
-    echo "  BBR: $(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo '未启用')"
-    echo "  IP转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo '未启用')"
-    echo ""
-    
-    if command -v docker &> /dev/null; then
-        echo "Docker:"
-        echo "  版本: $(docker --version | awk '{print $3}' | sed 's/,$//')"
-        echo "  状态: $(systemctl is-active docker)"
+    echo "安全与内核优化:"
+    echo "  Fail2ban: $(systemctl is-active fail2ban 2>/dev/null || echo '未运行')"
+    echo "  BBR: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未知') (qdisc: $(sysctl -n net.core.default_qdisc 2>/dev/null || echo '未知'))"
+    echo "  IPv4 转发: $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo '未知')"
+
+    if [ "$CREATE_DEVOPS_USER" = "true" ] && id "$SUDO_USERNAME" &>/dev/null; then
+        echo ""
+        echo "管理员用户: $SUDO_USERNAME"
     fi
-    
-    [ "$CREATE_DEVOPS_USER" = "true" ] && echo -e "\n管理员用户: $SUDO_USERNAME (已创建)"
-    
+
     echo "--------------------------------------------------"
     echo "日志文件: $LOG_FILE"
-    echo "配置备份: $CONFIG_BACKUP_DIR"
+    echo "SSH 备份: $CONFIG_BACKUP_DIR"
     echo "--------------------------------------------------"
-    echo "SSH登录命令:"
-    if [ "$CREATE_DEVOPS_USER" = "true" ]; then
-        echo "  ssh -p $ssh_port $SUDO_USERNAME@服务器IP"
+    echo "SSH 登录测试命令（请先新开终端验证连接正常，再关闭当前会话）:"
+    if [ "$CREATE_DEVOPS_USER" = "true" ] && id "$SUDO_USERNAME" &>/dev/null; then
+        echo "  ssh -p $ssh_port $SUDO_USERNAME@<服务器IP>"
     fi
-    if [ -f "/root/.ssh/authorized_keys" ] && [ -s "/root/.ssh/authorized_keys" ]; then
-        local root_login=""
-        if command -v sshd &>/dev/null; then
-            root_login=$(sshd -T 2>/dev/null | awk '/^permitrootlogin/ {print $2}')
-        fi
-        if [ -z "$root_login" ]; then
-            root_login=$(grep "^PermitRootLogin" "$SSH_CONFIG_DIR/99-security.conf" 2>/dev/null | awk '{print $2}') \
-                || root_login=$(grep "^PermitRootLogin" "$SSH_CONFIG" 2>/dev/null | awk '{print $2}') \
-                || root_login="yes"
-        fi
-        if [ "$root_login" != "no" ]; then
-            echo "  ssh -p $ssh_port root@服务器IP"
-        fi
+    if [ "${root_login:-yes}" != "no" ] && file_has_usable_ssh_key "/root/.ssh/authorized_keys"; then
+        echo "  ssh -p $ssh_port root@<服务器IP>"
     fi
-    echo ""
-    
-    # 诊断信息
-    if [ -f "$SSH_CONFIG_DIR/50-cloud-init.conf.disabled" ]; then
-        echo "注意: cloud-init SSH配置已禁用"
-    fi
-    
-    [ "$DISABLE_SSH_PASSWD" = "true" ] && echo "警告: 密码登录已禁用，请确保已保存SSH密钥！"
+    echo "--------------------------------------------------"
 }
 
-# 主脚本的主函数
 main() {
-    # 阶段0：参数解析（致命错误会自动退出）
-    parse_args "$@" || die "命令行参数解析失败"
-    
-    log_message "INFO" "开始系统初始化和配置过程"
-    
-    # 阶段1：系统检查和基础初始化（关键阶段，失败则退出）
-    log_message "INFO" "=== 阶段1：系统检查和基础初始化 ==="
-    check_compatibility || die "系统兼容性检查失败，无法继续"
-    
-    wait_for_cloud_init || {
-        check_error $? "等待cloud-init完成"
-        log_message "WARNING" "cloud-init可能未完全完成，继续执行"
-    }
-    
-    fix_sudo_issue || {
-        check_error $? "修复sudo问题"
-        log_message "WARNING" "sudo问题修复失败，可能影响后续操作"
-    }
+    parse_args "$@"
 
-    # 确保备份目录存在并设置安全权限（在权限检查之后）
-    if [ ! -d "$CONFIG_BACKUP_DIR" ]; then
-        sudo mkdir -p "$CONFIG_BACKUP_DIR"
-        sudo chmod 700 "$CONFIG_BACKUP_DIR"
+    LOG_ENABLED="true"
+    trap cleanup EXIT
+    trap on_interrupt INT TERM
+
+    log_message "INFO" "开始系统初始化 (版本: $SCRIPT_VERSION)，日志: $LOG_FILE"
+
+    log_message "INFO" "=== 阶段 1/4：系统与权限检查 ==="
+    check_privileges || die "权限检查未通过"
+    check_compatibility || die "系统兼容性检查未通过"
+    wait_for_cloud_init
+    fix_sudo_and_hosts || die "修复 sudo 或 /etc/hosts 失败"
+
+    local has_failures=0
+
+    log_message "INFO" "=== 阶段 2/4：系统更新与基础软件安装 ==="
+    if ! update_system_install_dependencies; then
+        has_failures=1
+        log_message "ERROR" "系统更新或基础软件安装存在失败项"
     fi
 
-    # 阶段2：系统更新和软件安装（重要但允许部分失败）
-    log_message "INFO" "=== 阶段2：系统更新和软件安装 ==="
-    update_system_install_dependencies || {
-        check_error $? "系统更新和依赖安装"
-        log_message "WARNING" "系统更新出现问题，继续后续配置"
-    }
-    
-    # 阶段3：SSH和用户配置（安全关键，需要特别处理）
-    log_message "INFO" "=== 阶段3：SSH和用户配置 ==="
-    configure_ssh_keys || {
-        check_error $? "SSH密钥配置"
-        log_message "WARNING" "SSH密钥配置失败，可能影响安全性"
-    }
-    
-    create_admin_user || {
-        check_error $? "创建管理员用户"
-        log_message "WARNING" "管理员用户创建失败"
-    }
-    
-    configure_ssh || {
-        local ssh_exit=$?
-        if [ $ssh_exit -ne 0 ]; then
-            log_message "ERROR" "SSH配置失败，这可能导致无法远程连接"
-            log_message "WARNING" "请检查SSH配置，确保可以正常连接"
-            # SSH配置失败不应该导致脚本退出，但需要特别关注
-        fi
-    }
-    
-    # 阶段4：系统服务配置（增强功能，允许失败）
-    log_message "INFO" "=== 阶段4：系统服务配置 ==="
-    configure_fail2ban || check_error $? "fail2ban配置"
-    configure_timezone_ntp || check_error $? "时区和NTP配置"
-    configure_system_optimization || check_error $? "系统优化配置"
-    
-    # 安全审计配置（可选功能）
-    if [ "$ENABLE_SECURITY_AUDIT" = "true" ]; then
-        configure_security_audit || check_error $? "安全审计配置"
+    log_message "INFO" "=== 阶段 3/4：用户与 SSH 安全配置 ==="
+    # 密钥或管理员用户配置失败时必须中止 SSH 锁定操作，防止锁死服务器
+    configure_ssh_keys || die "SSH 公钥写入或校验失败，已中止 SSH 配置修改"
+    create_admin_user || die "管理员用户创建或校验失败，已中止 SSH 配置修改"
+
+    if ! configure_ssh; then
+        has_failures=1
+        log_message "ERROR" "SSH 配置未能应用，请检查日志与当前连接状态"
     fi
-    
-    # 阶段5：Docker安装（可选功能）
-    if [ "$INSTALL_DOCKER" = "true" ]; then
-        log_message "INFO" "=== 阶段5：Docker安装 ==="
-        install_docker || check_error $? "Docker安装"
+
+    log_message "INFO" "=== 阶段 4/4：Fail2ban、NTP 与内核网络优化 ==="
+    configure_fail2ban || { check_error $? "Fail2ban 配置"; has_failures=1; }
+    configure_timezone_ntp || { check_error $? "时区与 NTP 配置"; has_failures=1; }
+    configure_system_optimization || { check_error $? "内核网络优化"; has_failures=1; }
+
+    show_summary || log_message "WARNING" "输出配置摘要时出现异常"
+
+    if [ "$has_failures" -ne 0 ]; then
+        log_message "WARNING" "初始化完成，但部分步骤存在错误，请查看日志: $LOG_FILE"
+        return 1
     fi
-    
-    # 阶段6：总结和完成
-    log_message "INFO" "=== 配置完成总结 ==="
-    show_summary || log_message "WARNING" "显示配置总结时出现问题"
-    
-    log_message "SUCCESS" "系统初始化和配置过程完成"
+
+    log_message "SUCCESS" "VPS 初始化全部完成"
+    return 0
 }
 
-# ==================== 脚本执行入口 ====================
-
-# 脚本执行处理逻辑（现代化错误处理）
-execute_script() {
-    local exit_code=0
-    
-    # 捕获所有可能的错误
-    if main "$@"; then
-        log_message "SUCCESS" "脚本执行完成，所有配置均已成功应用"
-        log_message "INFO" "日志文件已保存到: $LOG_FILE"
-    else
-        exit_code=$?
-        log_message "ERROR" "脚本执行过程中遇到错误 (退出码: $exit_code)"
-        log_message "INFO" "请查看日志文件获取详细信息: $LOG_FILE"
-        
-        # 提供故障排除建议
-        echo ""
-        echo "==================== 故障排除建议 ===================="
-        echo "1. 检查系统兼容性: 确保在支持的Linux发行版上运行"
-        echo "2. 检查网络连接: 确保可以访问软件包仓库"
-        echo "3. 检查权限: 确保有sudo权限"
-        echo "4. 检查磁盘空间: 确保有足够的磁盘空间"
-        echo "5. 查看详细日志: cat $LOG_FILE"
-        echo "======================================================"
-    fi
-    
-    return $exit_code
-}
-
-# 主入口：执行脚本并处理退出状态
-execute_script "$@"
-exit_code=$?
-if [ $exit_code -ne 0 ]; then
-    log_message "ERROR" "脚本执行失败，退出码: $exit_code"
-    exit $exit_code
+if ! main "$@"; then
+    exit 1
 fi

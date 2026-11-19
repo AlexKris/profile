@@ -168,13 +168,16 @@ get_ssh_setting() {
     fi
     # 回退: 手动 grep 配置文件
     if [ -z "$value" ]; then
-        local SSH_OVERRIDE="/etc/ssh/sshd_config.d/99-security.conf"
+        local SSH_OVERRIDE="/etc/ssh/sshd_config.d/00-setup-security.conf"
+        local SSH_LEGACY_OVERRIDE="/etc/ssh/sshd_config.d/99-security.conf"
         local SSH_CONFIG="/etc/ssh/sshd_config"
         if [ -f "$SSH_OVERRIDE" ]; then
-            value=$(grep -i "^${key}" "$SSH_OVERRIDE" 2>/dev/null | tail -1 | awk '{print $2}')
+            value=$(grep -i "^${key}" "$SSH_OVERRIDE" 2>/dev/null | head -1 | awk '{print $2}')
+        elif [ -f "$SSH_LEGACY_OVERRIDE" ]; then
+            value=$(grep -i "^${key}" "$SSH_LEGACY_OVERRIDE" 2>/dev/null | head -1 | awk '{print $2}')
         fi
         if [ -z "$value" ] && [ -f "$SSH_CONFIG" ]; then
-            value=$(grep -i "^${key}" "$SSH_CONFIG" 2>/dev/null | tail -1 | awk '{print $2}')
+            value=$(grep -i "^${key}" "$SSH_CONFIG" 2>/dev/null | head -1 | awk '{print $2}')
         fi
     fi
     echo "$value"
@@ -223,10 +226,12 @@ else
     warning "ClientAlive: 未配置"
 fi
 
-if [ -f /etc/ssh/sshd_config.d/99-security.conf ]; then
-    ok "安全覆盖配置: 99-security.conf 存在"
+if [ -f /etc/ssh/sshd_config.d/00-setup-security.conf ]; then
+    ok "安全覆盖配置: 00-setup-security.conf 存在"
+elif [ -f /etc/ssh/sshd_config.d/99-security.conf ]; then
+    warning "安全覆盖配置: 仍为旧版 99-security.conf（优先级低于 50-cloud-init.conf）"
 else
-    info "安全覆盖配置: 99-security.conf 不存在"
+    info "安全覆盖配置: 00-setup-security.conf 不存在"
 fi
 
 if [ -f /root/.ssh/authorized_keys ] && [ -s /root/.ssh/authorized_keys ]; then
