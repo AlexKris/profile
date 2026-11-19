@@ -730,34 +730,38 @@ fi
 section "Soga"
 
 if command -v docker &>/dev/null; then
-    soga_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -i soga | head -1)
-    if [ -n "$soga_container" ]; then
-        ok "Soga 容器: $soga_container 运行中"
-        soga_image=$(docker inspect "$soga_container" --format '{{.Config.Image}}' 2>/dev/null)
-        info "镜像: $soga_image"
-        soga_uptime=$(docker inspect "$soga_container" --format '{{.State.StartedAt}}' 2>/dev/null | cut -dT -f1)
-        info "启动时间: $soga_uptime"
+    soga_all=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -i soga || true)
+    if [ -n "$soga_all" ]; then
+        while IFS= read -r soga_container; do
+            [ -n "$soga_container" ] || continue
+            soga_running=$(docker inspect "$soga_container" --format '{{.State.Running}}' 2>/dev/null || echo "false")
+            if [ "$soga_running" = "true" ]; then
+                ok "Soga 容器: $soga_container 运行中"
+                soga_image=$(docker inspect "$soga_container" --format '{{.Config.Image}}' 2>/dev/null || true)
+                info "镜像: $soga_image"
+                soga_uptime=$(docker inspect "$soga_container" --format '{{.State.StartedAt}}' 2>/dev/null | cut -dT -f1 || true)
+                info "启动时间: $soga_uptime"
 
-        # docker-compose 配置
-        if [ -f /root/soga/docker-compose.yml ]; then
-            ok "docker-compose 配置: /root/soga/docker-compose.yml 存在"
-            # 检查 network_mode
-            if grep -q 'network_mode.*host' /root/soga/docker-compose.yml 2>/dev/null; then
-                info "网络模式: host"
+                # docker-compose 配置（按容器名隔离的目录）
+                soga_compose="/root/soga/${soga_container}/docker-compose.yml"
+                if [ -f "$soga_compose" ]; then
+                    ok "docker-compose 配置: $soga_compose 存在"
+                    if grep -q 'network_mode.*host' "$soga_compose" 2>/dev/null; then
+                        info "网络模式: host"
+                    fi
+                    node_id=$(awk '/^[ \t]*node_id[ \t]*:/ {sub(/^[^:]*:/, ""); gsub(/["\047 \t]/, ""); print; exit}' "$soga_compose" 2>/dev/null || true)
+                    [ -n "$node_id" ] && info "Node ID: $node_id"
+                fi
+
+                # 最近日志
+                info "最近日志:"
+                docker logs --tail 3 "$soga_container" 2>&1 | while IFS= read -r line; do
+                    detail "$line"
+                done
+            else
+                bad "Soga 容器: $soga_container 已停止"
             fi
-            # 提取 node_id
-            node_id=$(grep -i 'node_id' /root/soga/docker-compose.yml 2>/dev/null | head -1 | awk -F: '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}' || true)
-            [ -n "$node_id" ] && info "Node ID: $node_id"
-        fi
-
-        # 最近日志
-        info "最近日志:"
-        docker logs --tail 3 "$soga_container" 2>&1 | while IFS= read -r line; do
-            detail "$line"
-        done
-    elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi soga; then
-        soga_stopped=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -i soga | head -1)
-        bad "Soga 容器: $soga_stopped 已停止"
+        done <<< "$soga_all"
     else
         info "Soga: 未部署"
     fi

@@ -17,9 +17,11 @@ CONFIG_DIR=""
 CONTAINER_NAME=""
 PANEL_URL=""
 PANEL_KEY=""
+SOGA_KEY=""
 NODE_ID=""
 LOG_LEVEL="info"
 ACTION=""
+HAS_INSTALL_OPT="false"
 
 PANEL_TYPE="xboard"
 SERVER_TYPE="ss"
@@ -30,39 +32,37 @@ CERT_DOMAIN=""
 CERT_KEY_LENGTH=""
 DNS_PROVIDER=""
 DNS_ENVS=()
+EXTRA_ENVS=()
 
-ALLOWED_SERVER_TYPES="ss trojan hysteria anytls"
+ALLOWED_SERVER_TYPES="v2ray vless ss ssr trojan hysteria anytls mieru"
 ALLOWED_PANEL_TYPES="sspanel-uim xboard v2board xiaov2board whmcs proxypanel ppanel v2raysocks soga-v1"
 ALLOWED_CERT_MODES="file http dns"
+ALLOWED_CERT_KEY_LENGTHS="ec-256 ec-384"
 
-# Function for logging
 log() {
     local level="$1"
     local message="$2"
     case "$level" in
         "info")  echo "[INFO] $message" ;;
         "warn")  echo "[WARN] $message" ;;
-        "error") echo "[ERROR] $message" ;;
+        "error") echo "[ERROR] $message" >&2 ;;
     esac
 }
 
-# Check if running as root or with sudo
 check_privileges() {
     if [ "$(id -u)" -ne 0 ]; then
-        log "error" "This script must be run as root or with sudo"
+        log "error" "请使用 root 用户或 sudo 运行此脚本"
         exit 1
     fi
 }
 
-# Handle cleanup on script interruption
 cleanup() {
-    log "info" "Script interrupted, cleaning up..."
-    exit 1
+    log "info" "脚本中断，退出..."
+    exit 130
 }
 
 trap cleanup SIGINT SIGTERM
 
-# 在允许的枚举集中检查值
 in_set() {
     local needle="$1"
     local haystack="$2"
@@ -73,22 +73,75 @@ in_set() {
     return 1
 }
 
+has_control_char() {
+    local s="$1"
+    [[ "$s" == *$'\n'* || "$s" == *$'\r'* ]]
+}
+
 # 给 YAML 单引号字符串里的值做转义
 yaml_escape() {
     local s="$1"
-    # 单引号在 YAML 单引号字符串中用两个连续单引号表示
     printf '%s' "$s" | sed "s/'/''/g"
+}
+
+# 防止 --env / --dns-env 覆盖脚本显式管理的配置，避免 compose 出现重复 key
+is_managed_env_key() {
+    local key="$1"
+    case "$key" in
+        TZ|type|server_type|node_id|soga_key|api|webapi_url|webapi_key|log_level|log_file_dir|\
+        cert_file|key_file|cert_mode|cert_domain|cert_key_length|dns_provider)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# 查询 EXTRA_ENVS 中是否存在指定 key
+has_extra_env_key() {
+    local target="$1"
+    local item
+    if [[ ${EXTRA_ENVS+x} && ${#EXTRA_ENVS[@]} -gt 0 ]]; then
+        for item in "${EXTRA_ENVS[@]}"; do
+            [[ "${item%%=*}" == "$target" ]] && return 0
+        done
+    fi
+    return 1
+}
+
+# 查询 EXTRA_ENVS 中指定布尔项是否为 true
+is_extra_env_true() {
+    local target="$1"
+    local item val
+    if [[ ${EXTRA_ENVS+x} && ${#EXTRA_ENVS[@]} -gt 0 ]]; then
+        for item in "${EXTRA_ENVS[@]}"; do
+            if [[ "${item%%=*}" == "$target" ]]; then
+                val="${item#*=}"
+                case "$val" in
+                    true|TRUE|True|1) return 0 ;;
+                esac
+            fi
+        done
+    fi
+    return 1
 }
 
 # 更新系统包
 update_system() {
     if [ -f /etc/debian_version ]; then
         log "info" "检测到 Debian/Ubuntu 系统..."
-        apt update && apt upgrade -y && apt full-upgrade -y && apt autoclean -y && apt autoremove -y
+        DEBIAN_FRONTEND=noninteractive apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"
+        DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold"
+        apt-get autoclean -y
+        apt-get autoremove -y
     elif [ -f /etc/redhat-release ]; then
         log "info" "检测到 RHEL/CentOS 系统..."
-
-        # 检查是否有 dnf（CentOS/RHEL 8+）
         if command -v dnf &> /dev/null; then
             log "info" "使用 dnf 包管理器进行更新..."
             dnf update -y
@@ -97,136 +150,107 @@ update_system() {
             yum update -y
         fi
     else
-        log "error" "不支持的操作系统，只支持Debian/Ubuntu和CentOS/RHEL。"
+        log "error" "不支持的操作系统，只支持 Debian/Ubuntu 和 CentOS/RHEL。"
         exit 1
     fi
     log "info" "系统更新完成。"
 }
 
-# 安装 Docker
-install_docker() {
-    if command -v docker &> /dev/null; then
-        log "info" "Docker 已经安装，跳过安装步骤..."
+# 确保 Docker 守护进程与 docker compose 可用
+ensure_docker() {
+    if ! command -v docker &> /dev/null; then
+        log "info" "正在安装 Docker..."
+        if ! command -v curl &> /dev/null; then
+            log "error" "未找到 curl 命令，请先安装 curl"
+            exit 1
+        fi
+        if ! curl -fsSL https://get.docker.com | bash; then
+            log "error" "安装 Docker 失败，请检查网络连接。"
+            exit 1
+        fi
+        if command -v systemctl &> /dev/null; then
+            systemctl enable docker || true
+            systemctl start docker
+        fi
+        log "info" "Docker 安装完成。"
+    else
+        local docker_version
         docker_version=$(docker --version | cut -d ' ' -f3 | cut -d ',' -f1)
-        log "info" "当前 Docker 版本: $docker_version"
-        return
+        log "info" "检测到已安装 Docker (版本: ${docker_version})"
     fi
 
-    log "info" "正在安装 Docker..."
-    if ! command -v curl &> /dev/null; then
-        log "error" "未找到 curl 命令，请先安装 curl"
+    if ! docker info &> /dev/null; then
+        if command -v systemctl &> /dev/null; then
+            log "info" "Docker 守护进程未就绪，尝试启动服务..."
+            systemctl start docker || true
+        fi
+        if ! docker info &> /dev/null; then
+            log "error" "无法连接 Docker 守护进程，请检查 Docker 服务状态"
+            exit 1
+        fi
+    fi
+
+    if ! $DOCKER_COMPOSE_CMD version &> /dev/null; then
+        log "error" "未检测到 'docker compose' 插件，请安装 docker-compose-plugin 后重试"
         exit 1
     fi
-
-    curl -fsSL https://get.docker.com | bash
-    if [ $? -ne 0 ]; then
-        log "error" "安装 Docker 失败，请检查网络连接。"
-        exit 1
-    fi
-
-    systemctl enable docker
-    systemctl start docker
-
-    log "info" "Docker 已经安装完成。"
 }
 
-# 从 compose 文件解析 container_name
+# 从 compose 文件解析 container_name（兼容引号、行尾注释、CRLF，兼容 mawk 且不触发 pipefail）
 parse_compose_container_name() {
     local compose_file="$1"
-    grep -E '^[[:space:]]*container_name:' "$compose_file" 2>/dev/null | head -n1 | awk '{print $2}' | tr -d '"'"'"
-}
-
-# 旧布局迁移：/root/soga/docker-compose.yml -> /root/soga/<name>/docker-compose.yml
-migrate_legacy_layout() {
-    local legacy_compose="${SOGA_ROOT}/docker-compose.yml"
-    if [[ ! -f "$legacy_compose" ]]; then
-        return 0
-    fi
-
-    log "info" "检测到旧布局 ${legacy_compose}，开始迁移..."
-
-    local old_name
-    old_name=$(parse_compose_container_name "$legacy_compose")
-    if [[ -z "$old_name" ]]; then
-        log "error" "无法从旧 compose 解析 container_name，请手工处理后重试"
-        exit 1
-    fi
-    if [[ ! "$old_name" =~ ^[A-Za-z0-9_-]+$ ]]; then
-        log "error" "旧 container_name 包含非法字符: $old_name"
-        exit 1
-    fi
-
-    local new_base="${SOGA_ROOT}/${old_name}"
-    local new_config="${CONFIG_ROOT}/${old_name}"
-
-    if [[ -e "$new_base" ]] && [[ -n "$(ls -A "$new_base" 2>/dev/null || true)" ]]; then
-        log "error" "迁移目标已存在且非空: ${new_base}，请手工处理"
-        exit 1
-    fi
-    if [[ -e "$new_config" ]] && [[ -n "$(ls -A "$new_config" 2>/dev/null || true)" ]]; then
-        log "error" "迁移目标已存在且非空: ${new_config}，请手工处理"
-        exit 1
-    fi
-
-    log "info" "停止旧实例 ${old_name}..."
-    (cd "$SOGA_ROOT" && $DOCKER_COMPOSE_CMD down) || log "warn" "旧实例 down 失败，继续迁移"
-
-    mkdir -p "$new_base" "$new_config"
-
-    log "info" "移动 compose 文件 -> ${new_base}/"
-    mv "$legacy_compose" "${new_base}/docker-compose.yml"
-
-    log "info" "移动 ${CONFIG_ROOT} 下的文件到 ${new_config}/"
-    if [[ -d "$CONFIG_ROOT" ]]; then
-        find "$CONFIG_ROOT" -maxdepth 1 -mindepth 1 ! -type d -exec mv {} "$new_config/" \;
-    fi
-
-    log "info" "修正 compose 中的 volume 路径"
-    sed -i "s|- ${CONFIG_ROOT}:/etc/soga|- ${new_config}:/etc/soga|g" "${new_base}/docker-compose.yml"
-
-    log "info" "启动迁移后的旧实例 ${old_name}..."
-    (cd "$new_base" && $DOCKER_COMPOSE_CMD up -d)
-
-    log "info" "旧布局迁移完成: ${old_name} -> ${new_base}"
+    awk '
+        /^[ \t]*container_name:[ \t]*/ {
+            sub(/^[ \t]*container_name:[ \t]*/, "")
+            sub(/#.*$/, "")
+            gsub(/["\047\r \t]/, "")
+            print
+            exit
+        }
+    ' "$compose_file" 2>/dev/null || true
 }
 
 # 参数枚举与证书校验
 validate_install_params() {
-    # 基础必填
     if [[ -z "$CONTAINER_NAME" || -z "$PANEL_URL" || -z "$PANEL_KEY" || -z "$NODE_ID" ]]; then
         log "error" "安装操作需要: --container-name, --panel-url, --panel-key, --node-id"
         exit 1
     fi
 
-    # container-name 字符集
-    if [[ ! "$CONTAINER_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
-        log "error" "--container-name 只允许字母数字、下划线与连字符: $CONTAINER_NAME"
+    if [[ ! "$CONTAINER_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+        log "error" "--container-name 必须以字母或数字开头，且只允许字母数字、下划线与连字符: ${CONTAINER_NAME}"
         exit 1
     fi
 
-    # PANEL_URL 格式
-    if [[ ! "$PANEL_URL" =~ ^https?:// ]]; then
-        log "error" "--panel-url 必须以 http:// 或 https:// 开头"
+    if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        log "error" "--image-tag 包含非法字符: ${IMAGE_TAG}"
         exit 1
     fi
 
-    # NODE_ID 数字
-    if ! [[ "$NODE_ID" =~ ^[0-9]+$ ]]; then
-        log "error" "--node-id 必须为数字"
+    if [[ ! "$PANEL_URL" =~ ^https?://[^[:space:]]+$ ]]; then
+        log "error" "--panel-url 必须以 http:// 或 https:// 开头且不含空白字符"
         exit 1
     fi
 
-    # 枚举
+    if ! [[ "$NODE_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        log "error" "--node-id 必须为数字，多个以逗号分隔 (如 1 或 1,2,3)"
+        exit 1
+    fi
+
     if ! in_set "$SERVER_TYPE" "$ALLOWED_SERVER_TYPES"; then
-        log "error" "--server-type 非法: ${SERVER_TYPE}，允许: $ALLOWED_SERVER_TYPES"
+        log "error" "--server-type 非法: ${SERVER_TYPE}，允许: ${ALLOWED_SERVER_TYPES}"
         exit 1
     fi
     if ! in_set "$PANEL_TYPE" "$ALLOWED_PANEL_TYPES"; then
-        log "error" "--panel-type 非法: ${PANEL_TYPE}，允许: $ALLOWED_PANEL_TYPES"
+        log "error" "--panel-type 非法: ${PANEL_TYPE}，允许: ${ALLOWED_PANEL_TYPES}"
         exit 1
     fi
     if [[ -n "$CERT_MODE" ]] && ! in_set "$CERT_MODE" "$ALLOWED_CERT_MODES"; then
-        log "error" "--cert-mode 非法: ${CERT_MODE}，允许: $ALLOWED_CERT_MODES"
+        log "error" "--cert-mode 非法: ${CERT_MODE}，允许: ${ALLOWED_CERT_MODES}"
+        exit 1
+    fi
+    if [[ -n "$CERT_KEY_LENGTH" ]] && ! in_set "$CERT_KEY_LENGTH" "$ALLOWED_CERT_KEY_LENGTHS"; then
+        log "error" "--cert-key-length 非法: ${CERT_KEY_LENGTH}，允许: ${ALLOWED_CERT_KEY_LENGTHS} (或留空使用默认 RSA)"
         exit 1
     fi
 
@@ -235,94 +259,249 @@ validate_install_params() {
         dns_env_count=${#DNS_ENVS[@]}
     fi
 
-    local has_cert_param="no"
-    if [[ -n "$CERT_MODE" || -n "$CERT_FILE" || -n "$KEY_FILE" || -n "$CERT_DOMAIN" \
-          || -n "$CERT_KEY_LENGTH" || -n "$DNS_PROVIDER" || $dns_env_count -gt 0 ]]; then
-        has_cert_param="yes"
+    local extra_env_count=0
+    if [[ ${EXTRA_ENVS+x} ]]; then
+        extra_env_count=${#EXTRA_ENVS[@]}
     fi
 
+    # 校验 --dns-env 与 --env 的格式、内置键冲突及重复 key
+    local seen_keys=()
+    local item key existing
+    if [[ $dns_env_count -gt 0 ]]; then
+        for item in "${DNS_ENVS[@]}"; do
+            if [[ ! "$item" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+ ]]; then
+                log "error" "--dns-env 格式错误: ${item} (需 KEY=VALUE)"
+                exit 1
+            fi
+            key="${item%%=*}"
+            if is_managed_env_key "$key" || [[ "$key" == "forbidden_bit_torrent" || "$key" == "geo_update_enable" ]]; then
+                log "error" "--dns-env 不允许覆盖内置配置键: ${key}"
+                exit 1
+            fi
+            if [[ ${seen_keys+x} && ${#seen_keys[@]} -gt 0 ]]; then
+                for existing in "${seen_keys[@]}"; do
+                    if [[ "$existing" == "$key" ]]; then
+                        log "error" "--dns-env 存在重复键: ${key}"
+                        exit 1
+                    fi
+                done
+            fi
+            seen_keys+=("$key")
+        done
+    fi
+
+    if [[ $extra_env_count -gt 0 ]]; then
+        for item in "${EXTRA_ENVS[@]}"; do
+            if [[ ! "$item" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+ ]]; then
+                log "error" "--env 格式错误: ${item} (需 KEY=VALUE)"
+                exit 1
+            fi
+            key="${item%%=*}"
+            if is_managed_env_key "$key"; then
+                log "error" "--env ${key}=... 会覆盖脚本内置参数，请使用对应显式选项"
+                exit 1
+            fi
+            if [[ ${seen_keys+x} && ${#seen_keys[@]} -gt 0 ]]; then
+                for existing in "${seen_keys[@]}"; do
+                    if [[ "$existing" == "$key" ]]; then
+                        log "error" "--env 存在重复键或与 --dns-env 冲突: ${key}"
+                        exit 1
+                    fi
+                done
+            fi
+            seen_keys+=("$key")
+        done
+    fi
+
+    local has_cert_subparam="no"
+    if [[ -n "$CERT_FILE" || -n "$KEY_FILE" || -n "$CERT_DOMAIN" \
+          || -n "$CERT_KEY_LENGTH" || -n "$DNS_PROVIDER" || $dns_env_count -gt 0 ]]; then
+        has_cert_subparam="yes"
+    fi
+
+    # 协议与证书关系校验
     case "$SERVER_TYPE" in
-        ss)
-            if [[ "$has_cert_param" == "yes" ]]; then
-                log "error" "ss 协议不接受任何证书相关参数"
+        ss|ssr|mieru)
+            if [[ -n "$CERT_MODE" || "$has_cert_subparam" == "yes" ]]; then
+                log "error" "${SERVER_TYPE} 协议不接受任何证书相关参数"
                 exit 1
             fi
             ;;
-        trojan|hysteria|anytls)
+        hysteria)
             if [[ -z "$CERT_MODE" ]]; then
-                log "error" "$SERVER_TYPE 必须提供 --cert-mode (file|http|dns)"
+                log "error" "hysteria 必须提供 --cert-mode (file|http|dns)"
+                exit 1
+            fi
+            ;;
+        trojan)
+            if [[ -z "$CERT_MODE" ]] && ! is_extra_env_true "force_close_ssl"; then
+                log "error" "trojan 必须提供 --cert-mode (file|http|dns)；若由前置反代卸载 TLS 请传 --env force_close_ssl=true"
+                exit 1
+            fi
+            ;;
+        anytls)
+            if [[ -z "$CERT_MODE" && "$PANEL_TYPE" != "soga-v1" ]] && ! is_extra_env_true "force_close_ssl"; then
+                log "error" "anytls 必须提供 --cert-mode (file|http|dns)"
+                exit 1
+            fi
+            ;;
+        v2ray|vless)
+            # TLS / Reality 由面板节点配置决定，证书可选
+            ;;
+    esac
+
+    # 证书模式与子参数互斥校验
+    if [[ -z "$CERT_MODE" ]]; then
+        if [[ "$has_cert_subparam" == "yes" ]]; then
+            log "error" "提供了证书子参数但未指定 --cert-mode (file|http|dns)"
+            exit 1
+        fi
+        return 0
+    fi
+
+    case "$CERT_MODE" in
+        file)
+            if [[ -z "$CERT_FILE" || -z "$KEY_FILE" ]]; then
+                log "error" "--cert-mode file 要求同时提供 --cert-file 与 --key-file"
+                exit 1
+            fi
+            if [[ "$CERT_FILE" != /* || "$KEY_FILE" != /* ]]; then
+                log "error" "--cert-file 与 --key-file 必须为绝对路径"
+                exit 1
+            fi
+            if [[ "$CERT_FILE" == *:* || "$KEY_FILE" == *:* ]]; then
+                log "error" "--cert-file 与 --key-file 路径不能包含冒号"
+                exit 1
+            fi
+            if [[ -n "$CERT_DOMAIN" || -n "$CERT_KEY_LENGTH" || -n "$DNS_PROVIDER" || $dns_env_count -gt 0 ]]; then
+                log "error" "--cert-mode file 不接受 --cert-domain / --cert-key-length / --dns-provider / --dns-env"
+                exit 1
+            fi
+            ;;
+        http)
+            if [[ -z "$CERT_DOMAIN" ]]; then
+                log "error" "--cert-mode http 要求 --cert-domain"
+                exit 1
+            fi
+            if [[ "$CERT_DOMAIN" =~ [[:space:]/] || "$CERT_DOMAIN" == *:* ]]; then
+                log "error" "--cert-domain 只需填写纯域名 (如 node.example.com)，不要包含协议头、端口或路径"
+                exit 1
+            fi
+            if [[ "$CERT_DOMAIN" == \*.* ]]; then
+                log "error" "通配符证书不能使用 http 验证，请改用 --cert-mode dns"
+                exit 1
+            fi
+            if [[ -n "$CERT_FILE" || -n "$KEY_FILE" || -n "$DNS_PROVIDER" || $dns_env_count -gt 0 ]]; then
+                log "error" "--cert-mode http 不接受 --cert-file / --key-file / --dns-provider / --dns-env"
+                exit 1
+            fi
+            ;;
+        dns)
+            if [[ -z "$CERT_DOMAIN" ]]; then
+                log "error" "--cert-mode dns 要求 --cert-domain"
+                exit 1
+            fi
+            if [[ "$CERT_DOMAIN" =~ [[:space:]/] || "$CERT_DOMAIN" == *:* ]]; then
+                log "error" "--cert-domain 只需填写纯域名 (如 node.example.com 或 *.example.com)，不要包含协议头、端口或路径"
+                exit 1
+            fi
+            if [[ -z "$DNS_PROVIDER" ]]; then
+                log "error" "--cert-mode dns 要求 --dns-provider"
+                exit 1
+            fi
+            if [[ ! "$DNS_PROVIDER" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                log "error" "--dns-provider 格式非法: ${DNS_PROVIDER}"
+                exit 1
+            fi
+            if [[ $dns_env_count -eq 0 ]]; then
+                log "error" "--cert-mode dns 至少需要一个 --dns-env KEY=VALUE"
+                exit 1
+            fi
+            if [[ -n "$CERT_FILE" || -n "$KEY_FILE" ]]; then
+                log "error" "--cert-mode dns 不接受 --cert-file / --key-file"
                 exit 1
             fi
             ;;
     esac
+}
 
-    if [[ -n "$CERT_MODE" ]]; then
-        case "$CERT_MODE" in
-            file)
-                if [[ -z "$CERT_FILE" || -z "$KEY_FILE" ]]; then
-                    log "error" "--cert-mode file 要求 --cert-file 与 --key-file"
-                    exit 1
-                fi
-                ;;
-            http)
-                if [[ -z "$CERT_DOMAIN" ]]; then
-                    log "error" "--cert-mode http 要求 --cert-domain"
-                    exit 1
-                fi
-                ;;
-            dns)
-                if [[ -z "$CERT_DOMAIN" ]]; then
-                    log "error" "--cert-mode dns 要求 --cert-domain"
-                    exit 1
-                fi
-                if [[ -z "$DNS_PROVIDER" ]]; then
-                    log "error" "--cert-mode dns 要求 --dns-provider"
-                    exit 1
-                fi
-                if [[ $dns_env_count -eq 0 ]]; then
-                    log "error" "--cert-mode dns 至少需要一个 --dns-env KEY=VALUE"
-                    exit 1
-                fi
-                ;;
-        esac
+# 归一化并校验宿主机证书文件存在性（在 CONFIG_DIR 确定且 check_privileges 之后调用）
+validate_cert_files_on_host() {
+    [[ "$CERT_MODE" == "file" ]] || return 0
+
+    # 若用户传入宿主机实例配置目录路径 (/etc/soga/<name>/xxx)，自动转换为容器内路径 (/etc/soga/xxx)
+    if [[ "$CERT_FILE" == "${CONFIG_DIR}/"* ]]; then
+        CERT_FILE="/etc/soga/${CERT_FILE#"${CONFIG_DIR}/"}"
+        log "info" "已将 --cert-file 映射为容器内路径: ${CERT_FILE}"
+    fi
+    if [[ "$KEY_FILE" == "${CONFIG_DIR}/"* ]]; then
+        KEY_FILE="/etc/soga/${KEY_FILE#"${CONFIG_DIR}/"}"
+        log "info" "已将 --key-file 映射为容器内路径: ${KEY_FILE}"
     fi
 
-    # --dns-env 格式
-    if [[ $dns_env_count -gt 0 ]]; then
-        local env_item
-        for env_item in "${DNS_ENVS[@]}"; do
-            if [[ ! "$env_item" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+ ]]; then
-                log "error" "--dns-env 格式错误: $env_item (需 KEY=VALUE)"
+    local path host_rel
+    for path in "$CERT_FILE" "$KEY_FILE"; do
+        if [[ "$path" == /etc/soga/* ]]; then
+            host_rel="${path#/etc/soga/}"
+            if [[ -z "$host_rel" ]]; then
+                log "error" "证书路径不能为目录: ${path}"
                 exit 1
             fi
-        done
-    fi
+            if [[ ! -f "${CONFIG_DIR}/${host_rel}" ]]; then
+                if [[ -f "${CONFIG_ROOT}/${host_rel}" ]]; then
+                    log "error" "检测到证书位于 ${CONFIG_ROOT}/${host_rel}，但实例挂载目录为 ${CONFIG_DIR}:/etc/soga；请将证书移入 ${CONFIG_DIR}/，或放到 /etc/ssl/ 等独立目录后传入宿主机路径"
+                    exit 1
+                fi
+                log "warn" "宿主机尚未检测到 ${CONFIG_DIR}/${host_rel}（对应容器内 ${path}），请确保证书文件已就位"
+            fi
+        else
+            if [[ ! -f "$path" ]]; then
+                log "error" "宿主机证书文件不存在: ${path}（推荐放入 ${CONFIG_DIR}/ 并使用 /etc/soga/文件名）"
+                exit 1
+            fi
+        fi
+    done
 }
 
 # 检查并清理同名容器（仅当前实例）
 check_remove_container() {
     log "info" "检查是否存在名为 ${CONTAINER_NAME} 的旧容器..."
 
-    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        if ! docker inspect "${CONTAINER_NAME}" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null | grep -q .; then
-            log "info" "发现 docker run 启动的 ${CONTAINER_NAME}，停止并删除..."
-            docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || log "warn" "停止容器 ${CONTAINER_NAME} 失败"
-            docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || log "warn" "删除容器 ${CONTAINER_NAME} 失败"
-        else
-            if [[ -f "${BASE_DIR}/docker-compose.yml" ]]; then
-                log "info" "发现 compose 启动的 ${CONTAINER_NAME}，在 ${BASE_DIR} 执行 down"
-                (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down)
-            else
-                log "error" "容器 ${CONTAINER_NAME} 由 compose 启动，但本地无对应 compose 文件: ${BASE_DIR}/docker-compose.yml"
-                exit 1
-            fi
-        fi
-    else
+    local matched
+    matched=$(docker ps -a --filter "name=^/${CONTAINER_NAME}$" --format '{{.Names}}')
+    if [[ -z "$matched" ]]; then
         log "info" "未发现名为 ${CONTAINER_NAME} 的容器"
+        return 0
+    fi
+
+    local compose_project compose_workdir
+    compose_project=$(docker inspect "${CONTAINER_NAME}" \
+        --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    compose_workdir=$(docker inspect "${CONTAINER_NAME}" \
+        --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+
+    if [[ -z "$compose_project" ]]; then
+        log "info" "发现 docker run 启动的 ${CONTAINER_NAME}，停止并删除..."
+        docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || log "warn" "停止容器 ${CONTAINER_NAME} 失败"
+        docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || log "warn" "删除容器 ${CONTAINER_NAME} 失败"
+        return 0
+    fi
+
+    if [[ -n "$compose_workdir" && "$compose_workdir" != "$BASE_DIR" ]]; then
+        log "error" "容器 ${CONTAINER_NAME} 由其他目录 (${compose_workdir}) 的 compose 管理，请先前往该目录停止或更换 --container-name"
+        exit 1
+    fi
+
+    if [[ -f "${BASE_DIR}/docker-compose.yml" ]]; then
+        log "info" "发现 compose 启动的 ${CONTAINER_NAME}，在 ${BASE_DIR} 执行 down"
+        (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down)
+    else
+        log "error" "容器 ${CONTAINER_NAME} 由 compose 启动，但本地无对应 compose 文件: ${BASE_DIR}/docker-compose.yml"
+        exit 1
     fi
 }
 
-# 生成 docker-compose.yml
+# 生成 docker-compose.yml（权限 600）
 write_compose_file() {
     mkdir -p "$BASE_DIR"
     mkdir -p "$CONFIG_DIR"
@@ -334,110 +513,158 @@ write_compose_file() {
     esc_panel_type=$(yaml_escape "$PANEL_TYPE")
     esc_server_type=$(yaml_escape "$SERVER_TYPE")
 
-    {
-        cat <<EOF
+    (
+        umask 077
+        {
+            cat <<EOF
 services:
-  ${CONTAINER_NAME}:
-    image: ${DOCKER_IMAGE}:${IMAGE_TAG}
-    container_name: ${CONTAINER_NAME}
+  '${CONTAINER_NAME}':
+    image: '${DOCKER_IMAGE}:${IMAGE_TAG}'
+    container_name: '${CONTAINER_NAME}'
     restart: unless-stopped
     network_mode: host
     environment:
       TZ: Asia/Hong_Kong
       type: '${esc_panel_type}'
       server_type: '${esc_server_type}'
-      node_id: ${NODE_ID}
+      node_id: '${NODE_ID}'
       api: webapi
       webapi_url: '${esc_panel_url}'
       webapi_key: '${esc_panel_key}'
-      forbidden_bit_torrent: 'true'
-      geo_update_enable: 'true'
+EOF
+
+            if [[ -n "$SOGA_KEY" ]]; then
+                printf "      soga_key: '%s'\n" "$(yaml_escape "$SOGA_KEY")"
+            fi
+
+            if ! has_extra_env_key "forbidden_bit_torrent"; then
+                echo "      forbidden_bit_torrent: 'true'"
+            fi
+            if ! has_extra_env_key "geo_update_enable"; then
+                echo "      geo_update_enable: 'true'"
+            fi
+
+            cat <<EOF
       log_level: '${esc_log_level}'
       log_file_dir: /etc/soga/
 EOF
 
-        if [[ -n "$CERT_MODE" ]]; then
-            case "$CERT_MODE" in
-                file)
-                    printf "      cert_file: '%s'\n" "$(yaml_escape "$CERT_FILE")"
-                    printf "      key_file: '%s'\n" "$(yaml_escape "$KEY_FILE")"
-                    ;;
-                http)
-                    echo "      cert_mode: http"
-                    printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
-                    if [[ -n "$CERT_KEY_LENGTH" ]]; then
-                        printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
-                    fi
-                    ;;
-                dns)
-                    echo "      cert_mode: dns"
-                    printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
-                    printf "      dns_provider: '%s'\n" "$(yaml_escape "$DNS_PROVIDER")"
-                    if [[ -n "$CERT_KEY_LENGTH" ]]; then
-                        printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
-                    fi
-                    if [[ ${DNS_ENVS+x} && ${#DNS_ENVS[@]} -gt 0 ]]; then
-                        local item k v
-                        for item in "${DNS_ENVS[@]}"; do
-                            k="${item%%=*}"
-                            v="${item#*=}"
-                            printf "      %s: '%s'\n" "$k" "$(yaml_escape "$v")"
-                        done
-                    fi
-                    ;;
-            esac
-        fi
+            if [[ -n "$CERT_MODE" ]]; then
+                case "$CERT_MODE" in
+                    file)
+                        printf "      cert_file: '%s'\n" "$(yaml_escape "$CERT_FILE")"
+                        printf "      key_file: '%s'\n" "$(yaml_escape "$KEY_FILE")"
+                        ;;
+                    http)
+                        echo "      cert_mode: http"
+                        printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
+                        if [[ -n "$CERT_KEY_LENGTH" ]]; then
+                            printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
+                        fi
+                        ;;
+                    dns)
+                        echo "      cert_mode: dns"
+                        printf "      cert_domain: '%s'\n" "$(yaml_escape "$CERT_DOMAIN")"
+                        printf "      dns_provider: '%s'\n" "$(yaml_escape "$DNS_PROVIDER")"
+                        if [[ -n "$CERT_KEY_LENGTH" ]]; then
+                            printf "      cert_key_length: '%s'\n" "$(yaml_escape "$CERT_KEY_LENGTH")"
+                        fi
+                        if [[ ${DNS_ENVS+x} && ${#DNS_ENVS[@]} -gt 0 ]]; then
+                            local item k v
+                            for item in "${DNS_ENVS[@]}"; do
+                                k="${item%%=*}"
+                                v="${item#*=}"
+                                printf "      %s: '%s'\n" "$k" "$(yaml_escape "$v")"
+                            done
+                        fi
+                        ;;
+                esac
+            fi
 
-        cat <<EOF
+            if [[ ${EXTRA_ENVS+x} && ${#EXTRA_ENVS[@]} -gt 0 ]]; then
+                local extra_item extra_key extra_value
+                for extra_item in "${EXTRA_ENVS[@]}"; do
+                    extra_key="${extra_item%%=*}"
+                    extra_value="${extra_item#*=}"
+                    printf "      %s: '%s'\n" "$extra_key" "$(yaml_escape "$extra_value")"
+                done
+            fi
+
+            cat <<EOF
     volumes:
-      - ${CONFIG_DIR}:/etc/soga
+      - '${CONFIG_DIR}:/etc/soga'
 EOF
-    } > "${BASE_DIR}/docker-compose.yml"
+            if [[ "$CERT_MODE" == "file" ]]; then
+                if [[ "$CERT_FILE" != /etc/soga/* ]]; then
+                    printf "      - '%s:%s:ro'\n" "$(yaml_escape "$CERT_FILE")" "$(yaml_escape "$CERT_FILE")"
+                fi
+                if [[ "$KEY_FILE" != /etc/soga/* && "$KEY_FILE" != "$CERT_FILE" ]]; then
+                    printf "      - '%s:%s:ro'\n" "$(yaml_escape "$KEY_FILE")" "$(yaml_escape "$KEY_FILE")"
+                fi
+            fi
+        } > "${BASE_DIR}/docker-compose.yml"
+    )
+    chmod 600 "${BASE_DIR}/docker-compose.yml"
 }
 
 # 安装摘要输出
 print_install_summary() {
     local mode_display="${CERT_MODE:-none}"
+    local key_display="未配置(免费额度)"
+    [[ -n "$SOGA_KEY" ]] && key_display="已配置授权码"
+
     log "info" "配置摘要:"
     log "info" "  container-name : ${CONTAINER_NAME}"
     log "info" "  panel-type     : ${PANEL_TYPE}"
     log "info" "  server-type    : ${SERVER_TYPE}"
     log "info" "  node-id        : ${NODE_ID}"
     log "info" "  cert-mode      : ${mode_display}"
+    log "info" "  soga-key       : ${key_display}"
+    if [[ ${EXTRA_ENVS+x} && ${#EXTRA_ENVS[@]} -gt 0 ]]; then
+        log "info" "  extra-env      : ${#EXTRA_ENVS[@]} 项"
+    fi
     log "info" "  base-dir       : ${BASE_DIR}"
     log "info" "  config-dir     : ${CONFIG_DIR}"
 }
 
-# 配置并启动
+# 配置、拉取镜像并启动
 config_run_soga_compose() {
     log "info" "开始配置 soga..."
-    log "info" "使用镜像标签: $IMAGE_TAG"
+    log "info" "使用镜像: ${DOCKER_IMAGE}:${IMAGE_TAG}"
 
     write_compose_file
 
-    log "info" "正在启动 soga ..."
+    log "info" "正在拉取镜像 ${DOCKER_IMAGE}:${IMAGE_TAG}..."
+    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD pull); then
+        if docker image inspect "${DOCKER_IMAGE}:${IMAGE_TAG}" >/dev/null 2>&1; then
+            log "warn" "拉取最新镜像失败，回退使用本地缓存镜像 ${DOCKER_IMAGE}:${IMAGE_TAG}"
+        else
+            log "error" "拉取镜像 ${DOCKER_IMAGE}:${IMAGE_TAG} 失败且本地无缓存"
+            exit 1
+        fi
+    fi
+
+    log "info" "正在启动 soga..."
     (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD up -d)
 
-    log "info" "soga 已经成功安装并启动"
-    log "info" "容器名称: $CONTAINER_NAME"
-    log "info" "镜像版本: $DOCKER_IMAGE:$IMAGE_TAG"
-    log "info" "节点ID: $NODE_ID"
-    log "info" "协议: $SERVER_TYPE ($PANEL_TYPE)"
+    log "info" "soga 已成功安装并启动"
+    log "info" "容器名称: ${CONTAINER_NAME}"
+    log "info" "镜像版本: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+    log "info" "节点ID: ${NODE_ID}"
+    log "info" "协议: ${SERVER_TYPE} (${PANEL_TYPE})"
 }
 
 # 安装 soga
 install_soga() {
-    check_privileges
-    install_docker
     validate_install_params
+    check_privileges
 
     BASE_DIR="${SOGA_ROOT}/${CONTAINER_NAME}"
     CONFIG_DIR="${CONFIG_ROOT}/${CONTAINER_NAME}"
 
-    # 旧布局迁移（若触发）
-    migrate_legacy_layout
+    ensure_docker
+    validate_cert_files_on_host
 
-    # 同名重装校验
     if [[ -f "${BASE_DIR}/docker-compose.yml" ]]; then
         local existing_name
         existing_name=$(parse_compose_container_name "${BASE_DIR}/docker-compose.yml")
@@ -460,14 +687,14 @@ install_soga() {
     config_run_soga_compose
 }
 
-# 设置实例路径（用于 restart/stop）
+# 设置实例路径（用于 start/stop/restart/uninstall）
 set_instance_paths() {
     if [[ -z "$CONTAINER_NAME" ]]; then
         log "error" "该操作必须指定 --container-name"
         exit 1
     fi
-    if [[ ! "$CONTAINER_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
-        log "error" "--container-name 只允许字母数字、下划线与连字符"
+    if [[ ! "$CONTAINER_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+        log "error" "--container-name 必须以字母或数字开头，且只允许字母数字、下划线与连字符"
         exit 1
     fi
     BASE_DIR="${SOGA_ROOT}/${CONTAINER_NAME}"
@@ -478,103 +705,163 @@ set_instance_paths() {
     fi
 }
 
-# 重启 soga
-restart_soga() {
+start_soga() {
     set_instance_paths
-    log "info" "正在重启 soga (${CONTAINER_NAME})..."
-    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD restart); then
-        log "error" "重启 soga 失败"
+    check_privileges
+    ensure_docker
+    log "info" "正在启动 soga (${CONTAINER_NAME})..."
+    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD up -d); then
+        log "error" "启动 soga 失败"
         exit 1
     fi
-    log "info" "soga 已经重启成功"
+    log "info" "soga 已启动"
 }
 
-# 停止 soga
+restart_soga() {
+    set_instance_paths
+    check_privileges
+    ensure_docker
+    log "info" "正在重启 soga (${CONTAINER_NAME})..."
+    local matched
+    matched=$(docker ps -a --filter "name=^/${CONTAINER_NAME}$" --format '{{.Names}}')
+    if [[ -n "$matched" ]]; then
+        if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD restart); then
+            log "error" "重启 soga 失败"
+            exit 1
+        fi
+    else
+        if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD up -d); then
+            log "error" "拉起 soga 失败"
+            exit 1
+        fi
+    fi
+    log "info" "soga 已重启成功"
+}
+
 stop_soga() {
     set_instance_paths
+    check_privileges
+    ensure_docker
     log "info" "正在停止 soga (${CONTAINER_NAME})..."
-    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down); then
+    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD stop); then
         log "error" "停止 soga 失败"
         exit 1
     fi
-    log "info" "soga 已经停止成功"
+    log "info" "soga 已停止（可使用 --start 或 --restart 恢复）"
 }
 
-# 显示使用帮助
+uninstall_soga() {
+    set_instance_paths
+    check_privileges
+    ensure_docker
+    log "info" "正在卸载 soga 实例 (${CONTAINER_NAME})..."
+    if ! (cd "$BASE_DIR" && $DOCKER_COMPOSE_CMD down); then
+        log "error" "移除 soga 容器失败"
+        exit 1
+    fi
+    rm -f "${BASE_DIR}/docker-compose.yml"
+    rmdir "$BASE_DIR" 2>/dev/null || true
+    log "info" "soga 实例 ${CONTAINER_NAME} 已卸载（证书与配置目录 ${CONFIG_DIR} 已保留）"
+}
+
 show_help() {
     cat <<EOF
 用法: $0 [操作] [选项]
 
 操作:
-  --update              更新系统
-  --install             安装/覆盖更新 soga 实例
-  --restart             重启指定实例 (必须 --container-name)
+  --update              更新系统软件包
+  --install             安装/覆盖更新 soga 实例 (自动拉取最新镜像)
+  --start               启动已存在的指定实例 (必须 --container-name)
   --stop                停止指定实例 (必须 --container-name)
+  --restart             重启指定实例 (必须 --container-name)
+  --uninstall           卸载指定实例并移除容器 (必须 --container-name，保留 /etc/soga/<name>)
   --help                显示此帮助信息
 
 通用选项:
-  --container-name NAME 容器名称 (所有操作必需)
+  --container-name NAME 容器名称 (--install/--start/--stop/--restart/--uninstall 必需)
 
 安装选项:
   --panel-url URL            面板 URL (必需)
-  --panel-key KEY            面板 API 密钥 (必需)
-  --node-id ID               节点 ID (必需，数字)
+  --panel-key KEY            面板 WebAPI 密钥 (必需)
+  --node-id ID               节点 ID (必需，数字，同协议多节点用逗号分隔 如 1,2,3)
+  --soga-key KEY             授权码 (可选，留空为免费额度)
   --image-tag TAG            镜像标签 (默认: latest)
-  --log-level LEVEL          debug/info/warn/error (默认: info)
-  --server-type TYPE         ss|trojan|hysteria|anytls (默认: ss)
+  --log-level LEVEL          debug|info|warn|error (默认: info)
+  --server-type TYPE         v2ray|vless|ss|ssr|trojan|hysteria|anytls|mieru (默认: ss)
   --panel-type TYPE          sspanel-uim|xboard|v2board|xiaov2board|whmcs|
                              proxypanel|ppanel|v2raysocks|soga-v1 (默认: xboard)
-  --cert-mode MODE           file|http|dns
+  --cert-mode MODE           file|http|dns (仅支持真实证书)
   --cert-file PATH           证书文件路径 (cert-mode=file)
   --key-file PATH            密钥文件路径 (cert-mode=file)
   --cert-domain DOMAIN       域名 (cert-mode=http/dns)
-  --cert-key-length VALUE    证书长度: 留空=RSA, ec-256/ec-384 (可选)
+  --cert-key-length VALUE    证书算法: 留空=RSA, ec-256|ec-384 (可选, cert-mode=http/dns)
   --dns-provider NAME        DNS 服务商, 如 dns_cf (cert-mode=dns)
   --dns-env KEY=VALUE        DNS 验证凭据, 可重复多次 (cert-mode=dns)
+  --env KEY=VALUE            透传额外 Soga 配置项, 可重复 (如 sub_type=v2node)
 
-协议证书要求:
-  ss                  无证书参数
-  trojan/hysteria/anytls  必须 --cert-mode
+协议与证书说明:
+  ss/ssr/mieru        不接受证书参数
+  v2ray/vless         证书可选 (Reality 或无 TLS 节点无需 --cert-mode)
+  hysteria            必须提供 --cert-mode (file|http|dns)
+  trojan/anytls       默认必须提供 --cert-mode (前置反代卸载 TLS 时可传 --env force_close_ssl=true)
+  通配符证书 (*.example.com) 只能使用 --cert-mode dns。
+  file 模式推荐将证书放入宿主机 /etc/soga/<name>/ 下并传 /etc/soga/xxx.pem；
+  若传入其他宿主机绝对路径 (如 /etc/ssl/cert.pem)，脚本校验文件存在后会自动只读挂载进容器。
 
 示例:
+  # Shadowsocks / VLESS Reality (无证书)
   $0 --install --container-name sogass --panel-url https://panel.example.com \\
      --panel-key KEY --node-id 1
 
+  $0 --install --container-name sogavless --panel-url https://panel.example.com \\
+     --panel-key KEY --node-id 2,3 --server-type vless --soga-key SOGA_KEY
+
+  # 手动证书 (放入宿主机 /etc/soga/sogatrojan/ 后引用容器内 /etc/soga/ 路径)
   $0 --install --container-name sogatrojan --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 2 --server-type trojan \\
-     --cert-mode file --cert-file /etc/ssl/cert.pem --key-file /etc/ssl/key.pem
+     --panel-key KEY --node-id 4 --server-type trojan \\
+     --cert-mode file --cert-file /etc/soga/fullchain.pem --key-file /etc/soga/privkey.pem
 
+  # 通配证书 DNS 自动签发
   $0 --install --container-name sogahy --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 4 --server-type hysteria \\
-     --cert-mode dns --cert-domain node.example.com --dns-provider dns_cf \\
-     --dns-env DNS_CF_Email=me@example.com --dns-env DNS_CF_Key=xxxxx
+     --panel-key KEY --node-id 5 --server-type hysteria \\
+     --cert-mode dns --cert-domain '*.example.com' --dns-provider dns_cf \\
+     --dns-env DNS_CF_Token=xxxxx --dns-env DNS_CF_Account_ID=xxxxx
 
-  $0 --install --container-name sogaanytls --panel-url https://panel.example.com \\
-     --panel-key KEY --node-id 3 --server-type anytls --panel-type xboard \\
-     --cert-mode http --cert-domain node.example.com
+  # 透传额外参数 (如 xiaov2board 对接 v2node 或开启 proxy_protocol)
+  $0 --install --container-name sogav2 --panel-url https://panel.example.com \\
+     --panel-key KEY --node-id 6 --panel-type xiaov2board --server-type vless \\
+     --env sub_type=v2node --env proxy_protocol=true
 
-  $0 --restart --container-name sogass
-  $0 --stop    --container-name sogass
-
-注意:
-  --restart 与 --stop 现在必须显式指定 --container-name。
-  首次运行 --install 时若检测到旧布局 /root/soga/docker-compose.yml, 会自动
-  迁移到按容器名隔离的新目录 /root/soga/<name>/ 与 /etc/soga/<name>/。
+  $0 --restart   --container-name sogass
+  $0 --stop      --container-name sogass
+  $0 --start     --container-name sogass
+  $0 --uninstall --container-name sogass
 EOF
 }
 
-# 读取下一个参数值并防止误吃标志位
+# 读取下一个参数值并防止误吃标志位或换行注入
 require_value() {
     local flag="$1"
-    local value="${2:-}"
-    if [[ -z "$value" || "$value" =~ ^-- ]]; then
-        log "error" "$flag 需要提供值"
+    if [[ $# -lt 2 || -z "$2" || "$2" =~ ^-- ]]; then
+        log "error" "${flag} 需要提供值"
         exit 1
     fi
-    printf "%s" "$value"
+    if has_control_char "$2"; then
+        log "error" "${flag} 的值不能包含换行符"
+        exit 1
+    fi
+    printf "%s" "$2"
 }
 
-# 解析命令行参数
+set_action() {
+    local next_action="$1"
+    if [[ -n "$ACTION" && "$ACTION" != "$next_action" ]]; then
+        log "error" "不能同时指定多个操作 (--${ACTION} 与 --${next_action})"
+        exit 1
+    fi
+    ACTION="$next_action"
+}
+
 parse_arguments() {
     if [ $# -eq 0 ]; then
         show_help
@@ -583,46 +870,53 @@ parse_arguments() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --update)  ACTION="update"; shift ;;
-            --install) ACTION="install"; shift ;;
-            --restart) ACTION="restart"; shift ;;
-            --stop)    ACTION="stop"; shift ;;
-            --help|-h) show_help; exit 0 ;;
+            --update)    set_action "update"; shift ;;
+            --install)   set_action "install"; shift ;;
+            --start)     set_action "start"; shift ;;
+            --restart)   set_action "restart"; shift ;;
+            --stop)      set_action "stop"; shift ;;
+            --uninstall) set_action "uninstall"; shift ;;
+            --help|-h)   show_help; exit 0 ;;
             --container-name)
                 CONTAINER_NAME=$(require_value "$1" "${2:-}"); shift 2 ;;
             --panel-url)
-                PANEL_URL=$(require_value "$1" "${2:-}"); shift 2 ;;
+                PANEL_URL=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --panel-key)
-                PANEL_KEY=$(require_value "$1" "${2:-}"); shift 2 ;;
+                PANEL_KEY=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
+            --soga-key)
+                SOGA_KEY=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --node-id)
-                NODE_ID=$(require_value "$1" "${2:-}"); shift 2 ;;
+                NODE_ID=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --image-tag)
-                IMAGE_TAG=$(require_value "$1" "${2:-}"); shift 2 ;;
+                IMAGE_TAG=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --log-level)
                 LOG_LEVEL=$(require_value "$1" "${2:-}")
                 if [[ ! "$LOG_LEVEL" =~ ^(debug|info|warn|error)$ ]]; then
-                    log "error" "--log-level 非法: $LOG_LEVEL"
+                    log "error" "--log-level 非法: ${LOG_LEVEL}，允许: debug|info|warn|error"
                     exit 1
                 fi
+                HAS_INSTALL_OPT="true"
                 shift 2 ;;
             --server-type)
-                SERVER_TYPE=$(require_value "$1" "${2:-}"); shift 2 ;;
+                SERVER_TYPE=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --panel-type)
-                PANEL_TYPE=$(require_value "$1" "${2:-}"); shift 2 ;;
+                PANEL_TYPE=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --cert-mode)
-                CERT_MODE=$(require_value "$1" "${2:-}"); shift 2 ;;
+                CERT_MODE=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --cert-file)
-                CERT_FILE=$(require_value "$1" "${2:-}"); shift 2 ;;
+                CERT_FILE=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --key-file)
-                KEY_FILE=$(require_value "$1" "${2:-}"); shift 2 ;;
+                KEY_FILE=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --cert-domain)
-                CERT_DOMAIN=$(require_value "$1" "${2:-}"); shift 2 ;;
+                CERT_DOMAIN=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --cert-key-length)
-                CERT_KEY_LENGTH=$(require_value "$1" "${2:-}"); shift 2 ;;
+                CERT_KEY_LENGTH=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --dns-provider)
-                DNS_PROVIDER=$(require_value "$1" "${2:-}"); shift 2 ;;
+                DNS_PROVIDER=$(require_value "$1" "${2:-}"); HAS_INSTALL_OPT="true"; shift 2 ;;
             --dns-env)
-                DNS_ENVS+=("$(require_value "$1" "${2:-}")"); shift 2 ;;
+                DNS_ENVS+=("$(require_value "$1" "${2:-}")"); HAS_INSTALL_OPT="true"; shift 2 ;;
+            --env)
+                EXTRA_ENVS+=("$(require_value "$1" "${2:-}")"); HAS_INSTALL_OPT="true"; shift 2 ;;
             *)
                 log "error" "未知参数: $1"
                 show_help
@@ -631,13 +925,22 @@ parse_arguments() {
     done
 
     if [[ -z "$ACTION" ]]; then
-        log "error" "必须指定一个操作 (--update, --install, --restart, --stop)"
+        log "error" "必须指定一个操作 (--update, --install, --start, --stop, --restart, --uninstall)"
         show_help
+        exit 1
+    fi
+
+    if [[ "$ACTION" != "install" && "$HAS_INSTALL_OPT" == "true" ]]; then
+        log "error" "--${ACTION} 不接受安装配置参数；如需修改配置或更新镜像，请使用 --install"
+        exit 1
+    fi
+
+    if [[ "$ACTION" == "update" && -n "$CONTAINER_NAME" ]]; then
+        log "error" "--update 为系统级更新操作，不接受 --container-name"
         exit 1
     fi
 }
 
-# 主程序入口
 main() {
     parse_arguments "$@"
 
@@ -649,13 +952,17 @@ main() {
         install)
             install_soga
             ;;
+        start)
+            start_soga
+            ;;
         restart)
-            check_privileges
             restart_soga
             ;;
         stop)
-            check_privileges
             stop_soga
+            ;;
+        uninstall)
+            uninstall_soga
             ;;
     esac
 }
