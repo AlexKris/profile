@@ -91,7 +91,7 @@ normalize_fqdn() {
 make_instance_id() {
     local fqdn="$1"
     local record_type="$2"
-    local safe_fqdn="${fqdn//\*/wildcard}"
+    local safe_fqdn="${fqdn//\*/_wildcard_}"
     safe_fqdn=$(printf '%s' "$safe_fqdn" | sed 's/[^a-zA-Z0-9._-]/_/g')
     printf '%s_%s' "$safe_fqdn" "$record_type"
 }
@@ -143,15 +143,16 @@ is_valid_ipv6() {
     local IFS=':'
     local groups=()
     read -r -a groups <<< "$ip"
-    if [[ "$after_dc" == "$ip" ]]; then
-        [[ ${#groups[@]} -eq 8 ]] || return 1
-    else
-        [[ ${#groups[@]} -le 9 ]] || return 1
-    fi
-    local g
+    local non_empty=0 g
     for g in ${groups[@]+"${groups[@]}"}; do
         [[ ${#g} -le 4 ]] || return 1
+        [ -n "$g" ] && non_empty=$((non_empty + 1))
     done
+    if [[ "$after_dc" == "$ip" ]]; then
+        [[ "$non_empty" -eq 8 ]] || return 1
+    else
+        [[ "$non_empty" -ge 1 && "$non_empty" -le 7 ]] || return 1
+    fi
     return 0
 }
 
@@ -364,7 +365,7 @@ setup_cron_with_checks() {
 
     local schedule
     schedule=$(build_cron_schedule "$interval")
-    local marker="# ${SCRIPT_NAME}:${instance_id}"
+    local marker="# [${SCRIPT_NAME}:${instance_id}]"
     local cron_cmd="${schedule} \"${exec_script}\" >> \"${log_file}\" 2>&1 ${marker}"
 
     local current_cron=""
@@ -583,17 +584,27 @@ rotate_logs_if_needed() {
     local current_lines
     current_lines=$(wc -l < "$log_file" 2>/dev/null | tr -d '[:space:]' || echo 0)
     [[ "$current_lines" =~ ^[0-9]+$ ]] || return 0
+    [ "$current_lines" -gt "$max_lines" ] || return 0
 
-    if [ "$current_lines" -gt "$max_lines" ]; then
-        local tmp_file="${log_file}.tmp.$$"
-        if tail -n "$keep_lines" "$log_file" > "$tmp_file" 2>/dev/null; then
-            if cat "$tmp_file" > "$log_file" 2>/dev/null; then
-                printf '%s: 日志已轮转，从 %s 行压缩至 %s 行\n' \
-                    "$(date '+%Y-%m-%d %H:%M:%S')" "$current_lines" "$keep_lines" >> "$log_file"
-            fi
+    local lock_dir="$DDNS_DIR/.log_rotate.lock"
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        if [ -n "$(find "$lock_dir" -maxdepth 0 -mmin +2 2>/dev/null || true)" ]; then
+            rmdir "$lock_dir" 2>/dev/null || true
+            mkdir "$lock_dir" 2>/dev/null || return 0
+        else
+            return 0
         fi
-        rm -f "$tmp_file" 2>/dev/null || true
     fi
+
+    local tmp_file="$DDNS_DIR/.log_rotate.tmp.$$"
+    if tail -n "$keep_lines" "$log_file" > "$tmp_file" 2>/dev/null; then
+        if cat "$tmp_file" > "$log_file" 2>/dev/null; then
+            printf '%s: 日志已轮转，从 %s 行压缩至 %s 行\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S')" "$current_lines" "$keep_lines" >> "$log_file"
+        fi
+    fi
+    rm -f "$tmp_file" 2>/dev/null || true
+    rmdir "$lock_dir" 2>/dev/null || true
 }
 
 send_telegram_message() {
@@ -615,11 +626,14 @@ send_telegram_message() {
 
 📝 消息: ${message}"
 
-    curl -fsSL --connect-timeout 5 --max-time 10 \
+    if ! curl -fsSL --connect-timeout 5 --max-time 10 \
         -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
         --data-urlencode "chat_id=${TG_CHAT_ID}" \
         --data-urlencode "text=${full_message}" \
-        >/dev/null 2>&1 || true
+        >/dev/null 2>&1; then
+        printf '%s: 警告: Telegram 通知发送失败，请检查 Bot Token、Chat ID 及网络连通性\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" >&2
+    fi
 }
 
 cf_json_query() {
@@ -679,7 +693,7 @@ cf_json_query() {
                 continue
             }
 
-            if (c ~ /[[:space:]]/) {
+            if (c == " " || c == "\t" || c == "\r" || c == "\n") {
                 flush_prim()
                 continue
             }
@@ -920,6 +934,9 @@ fi
     printf '%s\n' "$WAN_IP" > "${WAN_IP_FILE}.tmp.$$"
     mv -f "${WAN_IP_FILE}.tmp.$$" "$WAN_IP_FILE"
 )
+if [ "$CFRECORD_TYPE" = "A" ] && [ -f "$LEGACY_WAN_IP_FILE" ]; then
+    rm -f "$LEGACY_WAN_IP_FILE"
+fi
 
 printf '%s: DNS 更新成功: %s (%s) -> %s\n' \
     "$(date '+%Y-%m-%d %H:%M:%S')" "$CFRECORD_NAME" "$CFRECORD_TYPE" "$WAN_IP"
@@ -1033,12 +1050,22 @@ install_ddns() {
         exit 1
     fi
 
-    if ! [[ "$ttl" =~ ^[0-9]+$ ]] || { [ "$ttl" -ne 1 ] && { [ "$ttl" -lt 60 ] || [ "$ttl" -gt 86400 ]; }; }; then
+    if ! [[ "$ttl" =~ ^[0-9]+$ ]]; then
+        echo "错误: TTL (-l) 必须为 1 (自动) 或 60-86400 之间的整数，当前值: $ttl" >&2
+        exit 1
+    fi
+    ttl=$((10#$ttl))
+    if [ "$ttl" -ne 1 ] && { [ "$ttl" -lt 60 ] || [ "$ttl" -gt 86400 ]; }; then
         echo "错误: TTL (-l) 必须为 1 (自动) 或 60-86400 之间的整数，当前值: $ttl" >&2
         exit 1
     fi
 
-    if ! [[ "$interval" =~ ^[0-9]+$ ]] || [ "$interval" -lt 1 ] || [ "$interval" -gt 1440 ] ||
+    if ! [[ "$interval" =~ ^[0-9]+$ ]]; then
+        echo "错误: 间隔时间 (-i) 需为 1-59 分钟，或 60 的整数倍（最大 1440），当前值: $interval" >&2
+        exit 1
+    fi
+    interval=$((10#$interval))
+    if [ "$interval" -lt 1 ] || [ "$interval" -gt 1440 ] ||
         { [ "$interval" -gt 59 ] && [ $((interval % 60)) -ne 0 ]; }; then
         echo "错误: 间隔时间 (-i) 需为 1-59 分钟，或 60 的整数倍（最大 1440），当前值: $interval" >&2
         exit 1
@@ -1114,11 +1141,13 @@ install_ddns() {
     fi
 
     echo ""
-    echo "正在执行首次更新测试..."
-    if "$exec_script"; then
+    echo "正在执行配置验证与更新测试..."
+    rm -f "$DDNS_STATE_DIR/.cf-id_${instance_id}.txt"
+    if "$exec_script" -f true; then
         echo "测试成功！"
     else
         echo "测试失败，请检查 API Token 权限及域名解析记录是否已预先创建" >&2
+        echo "提示: 可修正参数后重新 install，或执行 \"$0 remove -h $fqdn -t $record_type\" 清理" >&2
         exit 1
     fi
 }
@@ -1164,7 +1193,7 @@ run_ddns() {
     OPTIND=1
     while getopts ":f:h:t:d:" opts; do
         case "${opts}" in
-            f) force="${OPTARG}" ;;
+            f) force=$(printf '%s' "${OPTARG}" | tr '[:upper:]' '[:lower:]') ;;
             h) filter_host="${OPTARG}" ;;
             t) filter_type=$(printf '%s' "${OPTARG}" | tr '[:lower:]' '[:upper:]') ;;
             d)
@@ -1184,6 +1213,11 @@ run_ddns() {
                 ;;
         esac
     done
+
+    if [ "$force" != "true" ] && [ "$force" != "false" ]; then
+        echo "错误: 强制更新选项 (-f) 仅支持 true 或 false，当前值: $force" >&2
+        exit 1
+    fi
 
     local meta_files=()
     while IFS= read -r line; do
@@ -1286,7 +1320,7 @@ remove_ddns() {
         fi
 
         remove_systemd_timer "${SCRIPT_NAME}-${META_INSTANCE_ID}"
-        if remove_cron_matching "# ${SCRIPT_NAME}:${META_INSTANCE_ID}" || remove_cron_matching "$META_EXEC_SCRIPT"; then
+        if remove_cron_matching "# [${SCRIPT_NAME}:${META_INSTANCE_ID}]" || remove_cron_matching "$META_EXEC_SCRIPT"; then
             echo "已移除 cron 定时任务: $META_FQDN ($META_RECORD_TYPE)"
         fi
         if [ -f "$META_EXEC_SCRIPT" ]; then
@@ -1296,6 +1330,9 @@ remove_ddns() {
         rm -f "$DDNS_STATE_DIR/.cf-id_${META_INSTANCE_ID}.txt" \
               "$DDNS_STATE_DIR/.cf-wan_ip_${META_INSTANCE_ID}.txt" \
               "$meta_file"
+        if [ "$META_RECORD_TYPE" = "A" ]; then
+            rm -f "$DDNS_STATE_DIR/.cf-wan_ip_${META_FQDN}.txt"
+        fi
         removed_any=true
     done
 
@@ -1352,7 +1389,7 @@ show_instance_status() {
     fi
 
     local has_scheduler=false
-    local marker="# ${SCRIPT_NAME}:${instance_id}"
+    local marker="# [${SCRIPT_NAME}:${instance_id}]"
     local current_cron=""
     if command -v crontab >/dev/null 2>&1; then
         current_cron=$(crontab -l 2>/dev/null || true)
@@ -1360,7 +1397,9 @@ show_instance_status() {
 
     local cron_line=""
     if [ -n "$current_cron" ]; then
-        cron_line=$(printf '%s\n' "$current_cron" | grep -F "$marker" | head -1 || true)
+        if [ "$instance_id" != "legacy" ]; then
+            cron_line=$(printf '%s\n' "$current_cron" | grep -F "$marker" | head -1 || true)
+        fi
         if [ -z "$cron_line" ]; then
             cron_line=$(printf '%s\n' "$current_cron" | grep -F "$exec_script" | head -1 || true)
         fi
@@ -1373,6 +1412,7 @@ show_instance_status() {
     fi
 
     local service_name="${SCRIPT_NAME}-${instance_id}"
+    [ "$instance_id" = "legacy" ] && service_name="$SCRIPT_NAME"
     if command -v systemctl >/dev/null 2>&1 && systemctl --user is-enabled "${service_name}.timer" >/dev/null 2>&1; then
         local timer_status
         timer_status=$(systemctl --user is-active "${service_name}.timer" 2>/dev/null || echo "inactive")
@@ -1468,19 +1508,20 @@ show_status() {
         fi
     done
 
-    if [ "${#matched_metas[@]}" -eq 0 ] && [ "${#meta_files[@]}" -eq 0 ] && [ -f "$LEGACY_EXEC_SCRIPT" ]; then
+    local legacy_exec="${filter_dir:-$HOME/.local/bin}/${SCRIPT_NAME}-exec.sh"
+    if [ "${#matched_metas[@]}" -eq 0 ] && [ "${#meta_files[@]}" -eq 0 ] && [ -f "$legacy_exec" ]; then
         local legacy_zone legacy_name legacy_type legacy_ttl legacy_fqdn legacy_tg="false"
-        legacy_zone=$(grep '^CFZONE_NAME=' "$LEGACY_EXEC_SCRIPT" 2>/dev/null | head -1 | cut -d'"' -f2 || true)
-        legacy_name=$(grep '^CFRECORD_NAME=' "$LEGACY_EXEC_SCRIPT" 2>/dev/null | head -1 | cut -d'"' -f2 || true)
-        legacy_type=$(grep '^CFRECORD_TYPE=' "$LEGACY_EXEC_SCRIPT" 2>/dev/null | head -1 | cut -d'"' -f2 || echo "A")
-        legacy_ttl=$(grep '^CFTTL=' "$LEGACY_EXEC_SCRIPT" 2>/dev/null | head -1 | cut -d'=' -f2 || echo "120")
-        if grep -q '^TG_BOT_TOKEN=' "$LEGACY_EXEC_SCRIPT" 2>/dev/null && ! grep -q '^TG_BOT_TOKEN=""' "$LEGACY_EXEC_SCRIPT" 2>/dev/null; then
+        legacy_zone=$(grep '^CFZONE_NAME=' "$legacy_exec" 2>/dev/null | head -1 | cut -d'"' -f2 || true)
+        legacy_name=$(grep '^CFRECORD_NAME=' "$legacy_exec" 2>/dev/null | head -1 | cut -d'"' -f2 || true)
+        legacy_type=$(grep '^CFRECORD_TYPE=' "$legacy_exec" 2>/dev/null | head -1 | cut -d'"' -f2 || echo "A")
+        legacy_ttl=$(grep '^CFTTL=' "$legacy_exec" 2>/dev/null | head -1 | cut -d'=' -f2 || echo "120")
+        if grep -q '^TG_BOT_TOKEN=' "$legacy_exec" 2>/dev/null && ! grep -q '^TG_BOT_TOKEN=""' "$legacy_exec" 2>/dev/null; then
             legacy_tg="true"
         fi
         legacy_fqdn=$(normalize_fqdn "${legacy_name:-unknown}" "${legacy_zone:-unknown}")
         local live_ip=""
         live_ip=$(fetch_public_ip "$legacy_type" "true" || true)
-        show_instance_status "legacy" "$LEGACY_EXEC_SCRIPT" "$legacy_fqdn" "$legacy_type" "$legacy_ttl" "" "$legacy_tg" "$live_ip"
+        show_instance_status "legacy" "$legacy_exec" "$legacy_fqdn" "$legacy_type" "$legacy_ttl" "" "$legacy_tg" "$live_ip"
         return 0
     fi
 
